@@ -8,11 +8,14 @@ from fastapi import Depends, HTTPException, Header
 
 logger = logging.getLogger("autotax")
 
-SECRET = os.getenv("JWT_SECRET", "")
+SECRET = os.getenv("JWT_SECRET", "").strip()
 if not SECRET:
-    import secrets as _s
-    SECRET = _s.token_urlsafe(32)
-    logger.critical("JWT_SECRET is not set! Using random secret. Tokens will NOT survive restart. Set JWT_SECRET in environment variables!")
+    raise RuntimeError(
+        "JWT_SECRET ortam degiskeni zorunludur. "
+        "Uretmek icin: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+if len(SECRET) < 32:
+    raise RuntimeError("JWT_SECRET en az 32 karakter olmali.")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60       # 1 hour
@@ -52,7 +55,7 @@ def decode_token(token: str, expected_type: str = "access") -> dict:
         return data
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
+    except (jwt.InvalidTokenError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
