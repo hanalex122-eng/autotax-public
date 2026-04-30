@@ -660,6 +660,12 @@ async def serve_lang_js():
         return HTMLResponse(content=f.read(), media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 # --- ADDED END ---
 
+@app.get("/auth-guard.js")
+async def serve_auth_guard_js():
+    fp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "auth-guard.js")
+    with open(fp, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read(), media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
 # --- ADDED START: Split-view editor page ---
 @app.get("/editor", response_class=HTMLResponse)
 async def serve_editor_page():
