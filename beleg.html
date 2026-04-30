@@ -1,0 +1,772 @@
+<!-- --- ADDED START --- -->
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beleg hinzufugen - AutoTax-HUB</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'DM Sans', sans-serif; background: #050a12; color: #f1f5f9; min-height: 100vh; }
+
+.page { max-width: 1000px; margin: 0 auto; padding: 32px 20px; }
+
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
+.header h1 { font-size: 26px; font-weight: 700; color: #f1f5f9; }
+.header h1 span { color: #10b981; }
+.back-btn { background: transparent; border: 1.5px solid #2a3548; color: #94a3b8; padding: 10px 20px; border-radius: 10px; cursor: pointer; font-size: 14px; font-family: inherit; transition: all 0.2s; }
+.back-btn:hover { border-color: #10b981; color: #10b981; }
+
+.card { background: #1e293b; border: 1px solid #2a3548; border-radius: 16px; padding: 28px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.card-title { font-size: 16px; font-weight: 700; color: #10b981; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+.card-title .icon { font-size: 20px; }
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-group.full { grid-column: 1 / -1; }
+
+label { font-size: 13px; font-weight: 600; color: #94a3b8; }
+.required::after { content: " *"; color: #ef4444; }
+
+input, select, textarea {
+  width: 100%; padding: 12px 16px; background: #111827; border: 1.5px solid #2a3548;
+  border-radius: 10px; color: #f1f5f9; font-size: 15px; font-family: inherit;
+  outline: none; transition: border 0.2s, box-shadow 0.2s;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.15);
+}
+input.error, select.error { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
+input::placeholder, textarea::placeholder { color: #475569; }
+textarea { resize: vertical; min-height: 80px; }
+select { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+
+.type-toggle { display: flex; gap: 10px; margin-bottom: 24px; }
+.type-btn { flex: 1; padding: 14px; border-radius: 12px; border: 2px solid transparent; background: #111827; color: #64748b; font-size: 15px; font-weight: 600; cursor: pointer; text-align: center; transition: all 0.2s; font-family: inherit; }
+.type-btn.active-expense { border-color: #ef4444; background: rgba(239,68,68,0.1); color: #ef4444; }
+.type-btn.active-income { border-color: #22c55e; background: rgba(34,197,94,0.1); color: #22c55e; }
+.type-btn:hover { border-color: #475569; }
+
+.amount-input { position: relative; }
+.amount-input input { padding-left: 36px; font-size: 22px; font-weight: 700; font-family: 'SF Mono', 'Fira Code', monospace; }
+.amount-input .symbol { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #64748b; font-size: 18px; font-weight: 600; }
+
+.vat-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.vat-pill { padding: 8px 18px; border-radius: 8px; border: 1.5px solid #2a3548; background: #111827; color: #94a3b8; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.15s; font-family: inherit; }
+.vat-pill.active { border-color: #10b981; background: rgba(16,185,129,0.12); color: #10b981; }
+.vat-pill:hover { border-color: #475569; }
+
+.file-drop { border: 2px dashed #2a3548; border-radius: 12px; padding: 32px; text-align: center; cursor: pointer; transition: all 0.2s; background: #111827; }
+.file-drop:hover { border-color: #10b981; background: rgba(16,185,129,0.04); }
+.file-drop .icon { font-size: 32px; margin-bottom: 8px; }
+.file-drop .text { font-size: 14px; color: #64748b; }
+.file-drop .selected { color: #10b981; font-weight: 600; font-size: 14px; }
+
+.iban-match { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.3); border-radius: 10px; padding: 12px 16px; margin-top: 8px; display: flex; align-items: center; gap: 10px; }
+.iban-match .badge { background: #10b981; color: #050a12; padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+.iban-match .name { color: #10b981; font-weight: 600; font-size: 14px; }
+
+.actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 8px; }
+.btn-save { background: linear-gradient(135deg, #10b981, #059669); color: #fff; border: none; border-radius: 12px; padding: 14px 36px; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; transition: all 0.2s; box-shadow: 0 4px 20px rgba(16,185,129,0.3); }
+.btn-save:hover { transform: scale(1.03); }
+.btn-save:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.btn-cancel { background: transparent; border: 1.5px solid #2a3548; color: #94a3b8; border-radius: 12px; padding: 14px 28px; font-size: 15px; font-weight: 500; cursor: pointer; font-family: inherit; transition: all 0.2s; }
+.btn-cancel:hover { border-color: #ef4444; color: #ef4444; }
+
+.success-msg { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 12px; padding: 24px; text-align: center; }
+.success-msg .icon { font-size: 40px; margin-bottom: 8px; }
+.success-msg .text { color: #10b981; font-size: 18px; font-weight: 700; }
+.success-msg .sub { color: #94a3b8; font-size: 13px; margin-top: 4px; }
+
+.error-msg { color: #ef4444; font-size: 12px; margin-top: 4px; }
+
+.divider { height: 1px; background: #2a3548; margin: 4px 0; }
+
+@media (max-width: 768px) {
+  .form-grid, .form-grid.three { grid-template-columns: 1fr; }
+  .actions { flex-direction: column; }
+  .btn-save, .btn-cancel { width: 100%; text-align: center; }
+  .header { flex-direction: column; gap: 12px; align-items: flex-start; }
+  .type-toggle { flex-direction: column; }
+}
+.autofilled { animation: autofillFlash 1.2s ease; }
+.autofilled.vat-pill { background: rgba(16,185,129,0.18) !important; color: #10b981 !important; }
+@keyframes autofillFlash { 0% { background: rgba(16,185,129,0.35); } 100% { background: transparent; } }
+.conf-high { border-color: #10b981 !important; box-shadow: inset 0 0 0 1px #10b981 !important; }
+.conf-med { border-color: #f59e0b !important; box-shadow: inset 0 0 0 1px #f59e0b !important; }
+.conf-low { border-color: #ef4444 !important; box-shadow: inset 0 0 0 1px #ef4444 !important; }
+</style>
+</head>
+<body>
+<div class="page" id="app">
+  <div class="header">
+    <h1><span>+</span> Beleg hinzufugen</h1>
+    <button class="back-btn" onclick="window.location.href='/'">Zuruck zum Dashboard</button>
+  </div>
+
+  <!-- Success Message (hidden by default) -->
+  <div id="successMsg" class="success-msg" style="display:none;">
+    <div class="icon">&#10003;</div>
+    <div class="text">Beleg erfolgreich gespeichert!</div>
+    <div class="sub">Automatisch ins Kassenbuch ubernommen</div>
+    <button class="btn-save" style="margin-top:16px" onclick="resetForm()">Neuen Beleg hinzufugen</button>
+  </div>
+
+  <div id="formArea">
+    <!-- Type Toggle -->
+    <div class="type-toggle">
+      <button id="btnExpense" class="type-btn active-expense" onclick="setType('expense')">Ausgabe</button>
+      <button id="btnIncome" class="type-btn" onclick="setType('income')">Einnahme</button>
+    </div>
+
+    <!-- Section: Company -->
+    <div class="card">
+      <div class="card-title"><span class="icon">&#127970;</span> Firma / Lieferant</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="required">Firmenname</label>
+          <input id="vendor" type="text" placeholder="z.B. Lidl, Amazon, Shell" autofocus>
+        </div>
+        <div class="form-group">
+          <label>IBAN</label>
+          <input id="iban" type="text" placeholder="DE89 3704 0044 0532 0130 00" oninput="checkIban(this.value)">
+          <div id="ibanMatch"></div>
+        </div>
+        <div class="form-group">
+          <label>E-Mail</label>
+          <input id="email" type="email" placeholder="rechnung@firma.de">
+        </div>
+        <div class="form-group">
+          <label>Telefon</label>
+          <input id="phone" type="tel" placeholder="+49 123 456789">
+        </div>
+        <div class="form-group">
+          <label>Fax</label>
+          <input id="fax" type="tel" placeholder="+49 123 456780">
+        </div>
+        <div class="form-group">
+          <label>Adresse</label>
+          <input id="address" type="text" placeholder="Musterstr. 1, 60311 Frankfurt">
+        </div>
+      </div>
+    </div>
+
+    <!-- Section: Invoice Data -->
+    <div class="card">
+      <div class="card-title"><span class="icon">&#128196;</span> Rechnungsdaten</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Rechnungsnummer</label>
+          <input id="invoiceNr" type="text" placeholder="RE-2026-001">
+        </div>
+        <div class="form-group">
+          <label class="required">Datum</label>
+          <input id="invoiceDate" type="date">
+        </div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="required">Betrag (Brutto)</label>
+            <div class="amount-input">
+              <span class="symbol">&euro;</span>
+              <input id="amount" type="number" step="0.01" placeholder="0,00">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>MwSt-Satz</label>
+            <div class="vat-pills" id="vatPills">
+              <button class="vat-pill" onclick="setVat('0%')">0%</button>
+              <button class="vat-pill active" onclick="setVat('7%')">7%</button>
+              <button class="vat-pill" onclick="setVat('19%')">19%</button>
+              <button class="vat-pill" onclick="setVat('10%')">10%</button>
+              <button class="vat-pill" onclick="setVat('20%')">20%</button>
+              <button class="vat-pill" onclick="setVat('custom')">Andere</button>
+            </div>
+            <input id="vatCustom" type="text" placeholder="z.B. 5.5%" style="display:none;margin-top:8px">
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Kategorie</label>
+            <select id="category">
+              <option value="other">Sonstige</option>
+              <option value="food">Lebensmittel</option>
+              <option value="restaurant">Restaurant</option>
+              <option value="fuel">Kraftstoff</option>
+              <option value="transport">Transport</option>
+              <option value="office">Buro</option>
+              <option value="electronics">Elektronik</option>
+              <option value="clothing">Kleidung</option>
+              <option value="health">Gesundheit</option>
+              <option value="home">Haushalt</option>
+              <option value="telecom">Telekommunikation</option>
+              <option value="insurance">Versicherung</option>
+              <option value="software">Software</option>
+              <option value="subscription">Abonnement</option>
+              <option value="shipping">Versand</option>
+              <option value="shopping">Einkauf</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Zahlungsart</label>
+            <select id="paymentMethod">
+              <option value="">-- Wahlen --</option>
+              <option value="cash">Bar</option>
+              <option value="card">Karte</option>
+              <option value="transfer">Uberweisung</option>
+              <option value="paypal">PayPal</option>
+              <option value="apple_pay">Apple Pay</option>
+              <option value="google_pay">Google Pay</option>
+              <option value="klarna">Klarna</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section: Notes & File -->
+    <div class="card">
+      <div class="card-title"><span class="icon">&#128221;</span> Zusatzlich</div>
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>Notizen</label>
+          <textarea id="notes" placeholder="Optionale Anmerkungen..."></textarea>
+        </div>
+        <div class="form-group full">
+          <label>Beleg-Datei (PDF / Bild)</label>
+          <div class="file-drop" onclick="document.getElementById('fileInput').click()" id="fileDrop">
+            <input type="file" id="fileInput" accept="image/*,.pdf" style="display:none" onchange="handleFile(this)">
+            <div class="icon">&#128206;</div>
+            <div class="text">Datei hierher klicken zum Auswahlen</div>
+          </div>
+          <div id="ocrToggleWrap" style="margin-top:8px;display:none">
+            <button type="button" id="ocrToggleBtn" onclick="toggleOcrText()" style="background:transparent;border:1px solid #2a3548;color:#94a3b8;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-family:inherit">OCR-Text anzeigen</button>
+            <pre id="ocrRawText" style="display:none;margin-top:8px;padding:12px;background:#0b1320;border:1px solid #2a3548;border-radius:10px;color:#cbd5e1;font-size:12px;max-height:240px;overflow:auto;white-space:pre-wrap;font-family:'JetBrains Mono',ui-monospace,monospace"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button class="btn-cancel" onclick="window.location.href='/'">Abbrechen</button>
+      <button class="btn-save" id="btnSave" onclick="saveBeleg()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<script>
+if (!localStorage.getItem("atx_token")) { window.location.href = "/"; }
+const API = window.location.origin;
+let entryType = "expense";
+let vatRate = "7%";
+let selectedFile = null;
+
+// fetch wrapper with auto-refresh on 401 (matches SPA api() helper)
+async function authFetch(path, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {});
+  let tk = localStorage.getItem("atx_token");
+  if (tk) headers["Authorization"] = "Bearer " + tk;
+  let res = await fetch(API + path, Object.assign({}, opts, { headers }));
+  if (res.status === 401) {
+    const refresh = localStorage.getItem("atx_refresh");
+    if (refresh) {
+      try {
+        const r = await fetch(API + "/auth/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refresh }),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          localStorage.setItem("atx_token", d.token);
+          if (d.refresh_token) localStorage.setItem("atx_refresh", d.refresh_token);
+          headers["Authorization"] = "Bearer " + d.token;
+          res = await fetch(API + path, Object.assign({}, opts, { headers }));
+        } else {
+          localStorage.removeItem("atx_token");
+          localStorage.removeItem("atx_refresh");
+          alert("Sitzung abgelaufen — bitte erneut einloggen.");
+          window.location.href = "/";
+          throw new Error("unauthorized");
+        }
+      } catch (e) {
+        localStorage.removeItem("atx_token");
+        localStorage.removeItem("atx_refresh");
+        window.location.href = "/";
+        throw e;
+      }
+    } else {
+      localStorage.removeItem("atx_token");
+      alert("Sitzung abgelaufen — bitte erneut einloggen.");
+      window.location.href = "/";
+      throw new Error("unauthorized");
+    }
+  }
+  return res;
+}
+
+function setType(t) {
+  entryType = t;
+  document.getElementById("btnExpense").className = "type-btn" + (t === "expense" ? " active-expense" : "");
+  document.getElementById("btnIncome").className = "type-btn" + (t === "income" ? " active-income" : "");
+}
+
+function setVat(v) {
+  if (v === "custom") {
+    document.getElementById("vatCustom").style.display = "block";
+    document.getElementById("vatCustom").focus();
+    vatRate = "";
+  } else {
+    document.getElementById("vatCustom").style.display = "none";
+    vatRate = v;
+  }
+  document.querySelectorAll(".vat-pill").forEach(p => p.classList.remove("active"));
+  event.target.classList.add("active");
+}
+
+// Client-side downscale to speed up OCR. Originals are preserved — only
+// the copy sent to /ocr/extract is resized. PDFs and small images pass
+// through unchanged.
+const OCR_MAX_SIDE = 2500;
+async function downscaleImageForOcr(file, maxSide = OCR_MAX_SIDE, quality = 0.85) {
+  if (!file || !file.type || !file.type.startsWith("image/")) return file;
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const maxDim = Math.max(w, h);
+      if (maxDim <= maxSide) { URL.revokeObjectURL(url); resolve(file); return; }
+      const scale = maxSide / maxDim;
+      const nw = Math.round(w * scale), nh = Math.round(h * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = nw; canvas.height = nh;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, nw, nh);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(blob => {
+        if (!blob) { resolve(file); return; }
+        const name = file.name.replace(/\.(png|tiff?|webp|heic)$/i, ".jpg");
+        resolve(new File([blob], name, { type: "image/jpeg" }));
+      }, "image/jpeg", quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
+async function handleFile(input) {
+  const f = input.files[0];
+  if (!f) return;
+  selectedFile = f;
+  const drop = document.getElementById("fileDrop");
+  const sizeKb = (f.size/1024).toFixed(0);
+  drop.innerHTML = '<div class="selected">' + f.name + ' (' + sizeKb + ' KB) — Erkennung läuft…</div>';
+
+  if (!localStorage.getItem("atx_token")) { drop.innerHTML = '<div class="selected">' + f.name + ' (' + sizeKb + ' KB)</div>'; return; }
+  try {
+    const forOcr = await downscaleImageForOcr(f);
+    const savedPct = forOcr === f ? 0 : Math.max(0, Math.round(100 - (forOcr.size / f.size) * 100));
+    const fd = new FormData();
+    fd.append("file", forOcr);
+    const res = await authFetch("/ocr/extract", { method: "POST", body: fd });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      const errMsg = typeof errBody.detail === "string" ? errBody.detail : ("HTTP " + res.status);
+      drop.innerHTML = '<div class="selected" style="color:#f87171">' + f.name + ' — ✗ ' + errMsg + '</div>';
+      document.getElementById("ocrToggleWrap").style.display = "none";
+      return;
+    }
+    const data = await res.json();
+    autofillForm(data);
+
+    const pre = document.getElementById("ocrRawText");
+    const rawLen = (data.raw_text || "").trim().length;
+    if (rawLen > 0) {
+      pre.textContent = data.raw_text;
+    } else {
+      pre.textContent = "(Keine Text-Erkennung möglich — PDF könnte ein gescanntes Bild enthalten, das OCR nicht lesen konnte.)";
+    }
+    document.getElementById("ocrToggleWrap").style.display = "block";
+
+    const gotSomething = !!(data.vendor || data.amount > 0 || data.date);
+    const suffix = savedPct > 10 ? " (−" + savedPct + "% für schnellere Erkennung)" : "";
+    if (gotSomething) {
+      drop.innerHTML = '<div class="selected">' + f.name + ' — ✓ automatisch erkannt' + suffix + '</div>';
+    } else if (rawLen > 0) {
+      drop.innerHTML = '<div class="selected" style="color:#f59e0b">' + f.name + ' — ⚠ Text gelesen, aber Felder nicht erkannt. OCR-Text unten ansehen.</div>';
+    } else {
+      drop.innerHTML = '<div class="selected" style="color:#f87171">' + f.name + ' — ⚠ OCR konnte nichts lesen. Daten bitte manuell eingeben.</div>';
+    }
+  } catch (e) {
+    drop.innerHTML = '<div class="selected" style="color:#f87171">' + f.name + ' — ✗ Erkennung fehlgeschlagen: ' + (e && e.message ? e.message : 'unbekannt') + '</div>';
+    document.getElementById("ocrToggleWrap").style.display = "none";
+  }
+}
+
+function toggleOcrText() {
+  const pre = document.getElementById("ocrRawText");
+  const btn = document.getElementById("ocrToggleBtn");
+  const shown = pre.style.display === "block";
+  pre.style.display = shown ? "none" : "block";
+  btn.textContent = shown ? "OCR-Text anzeigen" : "OCR-Text verbergen";
+}
+
+function applyConfidence(fieldId, c) {
+  const el = document.getElementById(fieldId);
+  if (!el || typeof c !== "number" || c <= 0) return;
+  el.classList.remove("conf-high", "conf-med", "conf-low");
+  el.removeAttribute("title");
+  if (c >= 0.85) {
+    el.classList.add("conf-high");
+  } else if (c >= 0.6) {
+    el.classList.add("conf-med");
+  } else {
+    el.classList.add("conf-low");
+    el.setAttribute("title", "Bitte prüfen");
+  }
+  el.addEventListener("input", function clearConf() {
+    el.classList.remove("conf-high", "conf-med", "conf-low");
+    el.removeAttribute("title");
+    el.removeEventListener("input", clearConf);
+  }, { once: true });
+}
+
+function autofillForm(d) {
+  const map = {
+    vendor: "vendor",
+    vendor_iban: "iban",
+    vendor_email: "email",
+    vendor_phone: "phone",
+    vendor_address: "address",
+    invoice_number: "invoiceNr",
+    date: "invoiceDate",
+    category: "category",
+    payment_method: "paymentMethod",
+  };
+  const confKey = {
+    vendor: "vendor_confidence",
+    invoice_number: "invoice_number_confidence",
+    date: "date_confidence",
+  };
+  // Fill everything the backend found — the red "Bitte prüfen" border
+  // warns the user for low-confidence fields instead of hiding them.
+  for (const k in map) {
+    const el = document.getElementById(map[k]);
+    if (!el) continue;
+    const v = d[k];
+    if (v === undefined || v === null || v === "") continue;
+    if ((el.value || "").trim() !== "") continue;
+    el.value = v;
+    el.classList.add("autofilled");
+    const cKey = confKey[k];
+    if (cKey && typeof d[cKey] === "number") {
+      applyConfidence(map[k], d[cKey]);
+    }
+  }
+  const amt = parseFloat(d.amount);
+  const amtEl = document.getElementById("amount");
+  if (amtEl && amt > 0 && !(parseFloat(amtEl.value) > 0)) {
+    amtEl.value = amt.toFixed(2);
+    amtEl.classList.add("autofilled");
+    if (typeof d.amount_confidence === "number") applyConfidence("amount", d.amount_confidence);
+  }
+  if (d.vat_rate) {
+    const target = String(d.vat_rate).trim();
+    document.querySelectorAll(".vat-pill").forEach(p => {
+      if ((p.textContent || "").trim() === target) {
+        p.click();
+        p.classList.add("autofilled");
+        if (typeof d.vat_confidence === "number" && d.vat_confidence < 0.6) {
+          p.setAttribute("title", "Bitte prüfen");
+        }
+      }
+    });
+  }
+  if (d.vendor_iban) { checkIban(d.vendor_iban); }
+}
+
+function checkIban(val) {
+  const box = document.getElementById("ibanMatch");
+  const clean = val.replace(/\s/g, "").toUpperCase();
+  if (clean.length >= 15) {
+    box.innerHTML = '<div class="iban-match"><span class="badge">IBAN</span><span class="name">' + clean + '</span></div>';
+  } else {
+    box.innerHTML = "";
+  }
+}
+
+async function saveBeleg() {
+  const vendor = document.getElementById("vendor").value.trim();
+  const amount = parseFloat(document.getElementById("amount").value) || 0;
+  const date = document.getElementById("invoiceDate").value;
+  const vat = vatRate || document.getElementById("vatCustom").value.trim();
+
+  // Validation
+  let hasError = false;
+  ["vendor", "amount", "invoiceDate"].forEach(id => {
+    document.getElementById(id).classList.remove("error");
+  });
+  if (!vendor) { document.getElementById("vendor").classList.add("error"); hasError = true; }
+  if (!amount || amount <= 0) { document.getElementById("amount").classList.add("error"); hasError = true; }
+  if (!date) { document.getElementById("invoiceDate").classList.add("error"); hasError = true; }
+  if (hasError) return;
+
+  const vatFloat = parseFloat(vat) || 0;
+  const vatAmount = Math.round(amount * vatFloat / (100 + vatFloat) * 100) / 100;
+
+  if (!localStorage.getItem("atx_token")) { alert("Bitte zuerst einloggen"); window.location.href = "/"; return; }
+
+  document.getElementById("btnSave").disabled = true;
+  document.getElementById("btnSave").textContent = "Wird gespeichert...";
+
+  try {
+    // Save to bookkeeping
+    const body = {
+      description: vendor + (document.getElementById("invoiceNr").value ? " #" + document.getElementById("invoiceNr").value : ""),
+      vendor: vendor,
+      gross_amount: amount,
+      vat_rate: vat,
+      entry_type: entryType,
+      category: document.getElementById("category").value,
+      payment_method: document.getElementById("paymentMethod").value,
+      reference: document.getElementById("invoiceNr").value,
+      notes: document.getElementById("notes").value,
+      date: date,
+    };
+    const res = await authFetch("/bookkeeping", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      const msg = typeof d.detail === "string" ? d.detail
+                : typeof d.detail === "object" ? JSON.stringify(d.detail)
+                : ("HTTP " + res.status);
+      throw new Error(msg);
+    }
+
+    // Upload file if selected (best-effort, don't fail the save)
+    if (selectedFile) {
+      try {
+        const fd = new FormData();
+        fd.append("file", selectedFile);
+        fd.append("invoice_type", entryType);
+        await authFetch("/invoices/upload", { method: "POST", body: fd });
+      } catch (_) { /* swallow — entry was saved */ }
+    }
+
+    document.getElementById("formArea").style.display = "none";
+    document.getElementById("successMsg").style.display = "block";
+  } catch (e) {
+    if (e && e.message !== "unauthorized") alert("Fehler: " + e.message);
+  }
+  document.getElementById("btnSave").disabled = false;
+  document.getElementById("btnSave").textContent = "Speichern";
+}
+
+function resetForm() {
+  document.getElementById("formArea").style.display = "block";
+  document.getElementById("successMsg").style.display = "none";
+  document.querySelectorAll("input, textarea").forEach(el => { el.value = ""; el.classList.remove("error"); });
+  document.getElementById("category").value = "other";
+  document.getElementById("paymentMethod").value = "";
+  document.getElementById("fileDrop").innerHTML = '<div class="icon">&#128206;</div><div class="text">Datei hierher klicken zum Auswahlen</div>';
+  selectedFile = null;
+  setType("expense");
+  setVat("7%");
+  document.getElementById("invoiceDate").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("vendor").focus();
+}
+
+// Init
+document.getElementById("invoiceDate").value = new Date().toISOString().slice(0, 10);
+
+
+// --- ADDED START: Autocomplete, VAT calc, date shortcuts ---
+
+// === 1. VENDOR AUTOCOMPLETE ===
+const KNOWN_VENDORS = [
+  "Lidl","Aldi","Rewe","Edeka","Penny","Netto","Kaufland","dm","Rossmann",
+  "Amazon","eBay","Otto","Zalando","MediaMarkt","Saturn","IKEA","H&M",
+  "Shell","Aral","Total","Esso","Jet","BP",
+  "Auchan","Carrefour","Leclerc","Intermarche",
+  "Starbucks","McDonald's","Burger King","Subway","Nordsee",
+  "Telekom","Vodafone","O2","1&1",
+  "DHL","DPD","Hermes","UPS","FedEx","GLS",
+  "Allianz","HUK","DEVK","ADAC",
+  "Apple","Google","Microsoft","Adobe","Spotify","Netflix",
+  "Deichmann","C&A","TK Maxx","Primark",
+  "Müller","Tchibo","Toom","OBI","Hornbach","Bauhaus",
+  "DocMorris","Apotheke","Fielmann","Apollo",
+];
+(function initAutocomplete() {
+  const input = document.getElementById("vendor");
+  const wrap = input.parentElement;
+  wrap.style.position = "relative";
+  const dropdown = document.createElement("div");
+  dropdown.id = "vendorDropdown";
+  dropdown.style.cssText = "position:absolute;top:100%;left:0;right:0;background:#111827;border:1.5px solid #2a3548;border-radius:10px;max-height:200px;overflow-y:auto;z-index:100;display:none;margin-top:4px;";
+  wrap.appendChild(dropdown);
+
+  input.addEventListener("input", function() {
+    const val = this.value.toLowerCase().trim();
+    if (val.length < 1) { dropdown.style.display = "none"; return; }
+    const matches = KNOWN_VENDORS.filter(v => v.toLowerCase().includes(val)).slice(0, 8);
+    if (!matches.length) { dropdown.style.display = "none"; return; }
+    dropdown.innerHTML = matches.map(v =>
+      '<div style="padding:10px 14px;cursor:pointer;color:#f1f5f9;font-size:14px;border-bottom:1px solid #1e293b;" ' +
+      'onmousedown="document.getElementById(\'vendor\').value=\'' + v.replace(/'/g, "\\'") + '\';document.getElementById(\'vendorDropdown\').style.display=\'none\';" ' +
+      'onmouseenter="this.style.background=\'rgba(16,185,129,0.1)\'" onmouseleave="this.style.background=\'transparent\'">' + v + '</div>'
+    ).join("");
+    dropdown.style.display = "block";
+  });
+  input.addEventListener("blur", function() { setTimeout(() => dropdown.style.display = "none", 150); });
+})();
+
+
+// === 2. VAT AUTO-CALCULATION ===
+(function initVatCalc() {
+  // Add netto/vat display after amount input
+  const amountGroup = document.getElementById("amount").closest(".form-group");
+  const calcDiv = document.createElement("div");
+  calcDiv.id = "vatCalcDisplay";
+  calcDiv.style.cssText = "display:flex;gap:16px;margin-top:8px;font-size:13px;color:#64748b;";
+  calcDiv.innerHTML = '<span>Netto: <strong id="nettoVal" style="color:#94a3b8">--</strong></span><span>MwSt: <strong id="mwstVal" style="color:#94a3b8">--</strong></span>';
+  amountGroup.appendChild(calcDiv);
+
+  function updateCalc() {
+    const brutto = parseFloat(document.getElementById("amount").value) || 0;
+    const vr = vatRate || document.getElementById("vatCustom").value.trim();
+    const vatPct = parseFloat(vr) || 0;
+    if (brutto > 0 && vatPct > 0) {
+      const mwst = Math.round(brutto * vatPct / (100 + vatPct) * 100) / 100;
+      const netto = Math.round((brutto - mwst) * 100) / 100;
+      document.getElementById("nettoVal").textContent = netto.toFixed(2) + " \u20AC";
+      document.getElementById("mwstVal").textContent = mwst.toFixed(2) + " \u20AC (" + vatPct + "%)";
+    } else if (brutto > 0) {
+      document.getElementById("nettoVal").textContent = brutto.toFixed(2) + " \u20AC";
+      document.getElementById("mwstVal").textContent = "0,00 \u20AC";
+    } else {
+      document.getElementById("nettoVal").textContent = "--";
+      document.getElementById("mwstVal").textContent = "--";
+    }
+  }
+  document.getElementById("amount").addEventListener("input", updateCalc);
+  document.getElementById("vatCustom").addEventListener("input", updateCalc);
+  // Hook into setVat
+  const origSetVat = window.setVat;
+  window.setVat = function(v) { origSetVat(v); setTimeout(updateCalc, 50); };
+})();
+
+
+// === 3. DATE SHORTCUTS ===
+(function initDateShortcuts() {
+  const dateGroup = document.getElementById("invoiceDate").closest(".form-group");
+  const shortcuts = document.createElement("div");
+  shortcuts.style.cssText = "display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;";
+
+  function addBtn(label, daysAgo) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    btn.style.cssText = "padding:5px 12px;border-radius:6px;border:1px solid #2a3548;background:#111827;color:#94a3b8;cursor:pointer;font-size:12px;font-family:inherit;transition:all 0.15s;";
+    btn.onmouseenter = function() { this.style.borderColor = "#10b981"; this.style.color = "#10b981"; };
+    btn.onmouseleave = function() { this.style.borderColor = "#2a3548"; this.style.color = "#94a3b8"; };
+    btn.onclick = function() {
+      const d = new Date();
+      d.setDate(d.getDate() - daysAgo);
+      document.getElementById("invoiceDate").value = d.toISOString().slice(0, 10);
+    };
+    shortcuts.appendChild(btn);
+  }
+  addBtn("Heute", 0);
+  addBtn("Gestern", 1);
+  addBtn("Vorgestern", 2);
+  addBtn("Letzte Woche", 7);
+  addBtn("Vor 2 Wochen", 14);
+  dateGroup.appendChild(shortcuts);
+})();
+
+
+// === 4. KEYBOARD SHORTCUTS ===
+document.addEventListener("keydown", function(e) {
+  // Ctrl+S = Save
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    saveBeleg();
+  }
+  // Escape = Cancel
+  if (e.key === "Escape") {
+    window.location.href = "/";
+  }
+});
+
+
+// === 5. DRAG & DROP FILE ===
+(function initDragDrop() {
+  const drop = document.getElementById("fileDrop");
+  drop.addEventListener("dragover", function(e) { e.preventDefault(); this.style.borderColor = "#10b981"; this.style.background = "rgba(16,185,129,0.06)"; });
+  drop.addEventListener("dragleave", function() { this.style.borderColor = "#2a3548"; this.style.background = "#111827"; });
+  drop.addEventListener("drop", function(e) {
+    e.preventDefault();
+    this.style.borderColor = "#2a3548";
+    this.style.background = "#111827";
+    const f = e.dataTransfer.files[0];
+    if (f) {
+      selectedFile = f;
+      this.innerHTML = '<div class="selected">' + f.name + ' (' + (f.size/1024).toFixed(0) + ' KB)</div>';
+    }
+  });
+})();
+
+
+// === 6. AUTO-CATEGORY BY VENDOR ===
+(function initAutoCategory() {
+  const VENDOR_CATS = {
+    food: ["lidl","aldi","rewe","edeka","penny","netto","kaufland","auchan","carrefour","leclerc","intermarche","müller"],
+    restaurant: ["starbucks","mcdonald","burger king","subway","nordsee"],
+    fuel: ["shell","aral","total","esso","jet","bp"],
+    electronics: ["mediamarkt","saturn","apple","samsung"],
+    clothing: ["h&m","c&a","deichmann","zalando","tk maxx","primark"],
+    telecom: ["telekom","vodafone","o2","1&1"],
+    shipping: ["dhl","dpd","hermes","ups","fedex","gls"],
+    insurance: ["allianz","huk","devk","adac"],
+    software: ["adobe","spotify","netflix","google","microsoft"],
+    health: ["docmorris","apotheke","fielmann","apollo"],
+    home: ["ikea","toom","obi","hornbach","bauhaus"],
+    shopping: ["amazon","ebay","otto","tchibo"],
+  };
+  document.getElementById("vendor").addEventListener("change", function() {
+    const v = this.value.toLowerCase().trim();
+    for (const [cat, vendors] of Object.entries(VENDOR_CATS)) {
+      if (vendors.some(vn => v.includes(vn))) {
+        document.getElementById("category").value = cat;
+        break;
+      }
+    }
+  });
+  // Also trigger on autocomplete selection
+  document.getElementById("vendor").addEventListener("input", function() {
+    const v = this.value.toLowerCase().trim();
+    for (const [cat, vendors] of Object.entries(VENDOR_CATS)) {
+      if (vendors.some(vn => v.includes(vn))) {
+        document.getElementById("category").value = cat;
+        break;
+      }
+    }
+  });
+})();
+
+// --- ADDED END ---
+</script>
+</body>
+</html>
+<!-- --- ADDED END --- -->

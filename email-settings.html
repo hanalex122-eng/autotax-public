@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Email-Import — AutoTax-HUB</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'DM Sans', sans-serif; background: #050a12; color: #f1f5f9; min-height: 100vh; }
+.page { max-width: 720px; margin: 0 auto; padding: 32px 20px; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; flex-wrap: wrap; gap: 12px; }
+.header h1 { font-size: 24px; font-weight: 700; }
+.header h1 span { color: #10b981; }
+.back-btn { background: transparent; border: 1.5px solid #2a3548; color: #94a3b8; padding: 10px 20px; border-radius: 10px; cursor: pointer; font-size: 14px; font-family: inherit; transition: all 0.2s; text-decoration: none; display: inline-block; }
+.back-btn:hover { border-color: #10b981; color: #10b981; }
+.card { background: #1e293b; border: 1px solid #2a3548; border-radius: 16px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.card h2 { font-size: 16px; font-weight: 700; color: #10b981; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.row.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+label { font-size: 13px; font-weight: 600; color: #94a3b8; }
+input, select { background: #111827; border: 1.5px solid #2a3548; color: #f1f5f9; padding: 10px 14px; border-radius: 10px; font-size: 14px; font-family: inherit; transition: border 0.15s; }
+input:focus, select:focus { outline: none; border-color: #10b981; }
+input::placeholder { color: #475569; }
+.hint { font-size: 12px; color: #64748b; margin-top: 4px; line-height: 1.5; }
+.hint a { color: #10b981; text-decoration: none; }
+.hint a:hover { text-decoration: underline; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.btn { padding: 12px 20px; border-radius: 10px; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; border: 1.5px solid transparent; transition: all 0.15s; }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-primary { background: #10b981; color: #050a12; }
+.btn-primary:hover:not(:disabled) { background: #0ea371; }
+.btn-secondary { background: transparent; border-color: #10b981; color: #10b981; }
+.btn-secondary:hover:not(:disabled) { background: rgba(16,185,129,0.08); }
+.btn-ghost { background: transparent; border-color: #2a3548; color: #94a3b8; }
+.btn-ghost:hover:not(:disabled) { border-color: #475569; color: #e2e8f0; }
+.btn-danger { background: transparent; border-color: #7f1d1d; color: #ef4444; }
+.btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.08); }
+.status { padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.5; margin-top: 16px; display: none; }
+.status.show { display: block; }
+.status.ok { background: rgba(16,185,129,0.10); border: 1px solid rgba(16,185,129,0.35); color: #34d399; }
+.status.err { background: rgba(239,68,68,0.10); border: 1px solid rgba(239,68,68,0.35); color: #f87171; }
+.status.info { background: rgba(59,130,246,0.10); border: 1px solid rgba(59,130,246,0.35); color: #60a5fa; }
+.meta { font-size: 12px; color: #64748b; margin-top: 8px; }
+.saved-badge { display: inline-block; background: rgba(16,185,129,0.15); color: #10b981; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; margin-left: 8px; vertical-align: middle; }
+.provider-hint { font-size: 11px; color: #64748b; margin-top: 4px; }
+@media (max-width: 640px) { .row.two { grid-template-columns: 1fr; } .actions { flex-direction: column; } .btn { width: 100%; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <h1><span>✉️</span> Email-Import <span id="savedBadge" class="saved-badge" style="display:none">Aktiv</span></h1>
+    <a href="/app" class="back-btn">← Zurück</a>
+  </div>
+
+  <div class="card">
+    <h2>IMAP-Zugangsdaten</h2>
+
+    <div class="row">
+      <label for="provider">Anbieter</label>
+      <select id="provider">
+        <option value="gmail">Gmail (imap.gmail.com)</option>
+        <option value="outlook">Outlook / Office 365</option>
+        <option value="imap">Custom IMAP</option>
+      </select>
+      <div class="provider-hint" id="providerHint">Gmail: App-Passwort erforderlich (2FA muss aktiv sein).</div>
+    </div>
+
+    <div class="row two" id="customImapRow" style="display:none">
+      <div class="row" style="margin:0">
+        <label for="host">IMAP Host</label>
+        <input id="host" type="text" placeholder="imap.example.com">
+      </div>
+      <div class="row" style="margin:0">
+        <label for="port">Port</label>
+        <input id="port" type="number" placeholder="993" value="993">
+      </div>
+    </div>
+
+    <div class="row">
+      <label for="email">Email-Adresse</label>
+      <input id="email" type="email" placeholder="rechnungen@meinefirma.de" autocomplete="email">
+    </div>
+
+    <div class="row">
+      <label for="appPassword">App-Passwort</label>
+      <input id="appPassword" type="password" placeholder="••••••••••••" autocomplete="new-password">
+      <div class="hint" id="pwHint">
+        Kein normales Passwort — <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">App-Passwort bei Google</a> oder
+        <a href="https://account.microsoft.com/security" target="_blank" rel="noopener">Microsoft</a> erstellen.
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="btnSave">Speichern</button>
+      <button class="btn btn-secondary" id="btnTest">Verbindung testen</button>
+      <button class="btn btn-ghost" id="btnSync">Jetzt synchronisieren</button>
+      <button class="btn btn-danger" id="btnDelete" style="display:none">Konfiguration löschen</button>
+    </div>
+
+    <div class="status" id="status"></div>
+    <div class="meta" id="metaLine"></div>
+  </div>
+
+  <div class="card">
+    <h2>So funktioniert&#39;s</h2>
+    <div style="font-size: 13px; color: #94a3b8; line-height: 1.7;">
+      1. App-Passwort bei deinem Anbieter erstellen.<br>
+      2. Hier eintragen und <strong>Speichern</strong>.<br>
+      3. Mit <strong>Verbindung testen</strong> prüfen, ob Login klappt.<br>
+      4. <strong>Jetzt synchronisieren</strong> zieht ungelesene Mails und importiert PDF/XML-Anhänge als Belege.<br>
+      <br>
+      <span style="color:#64748b">Nur XML (XRechnung) und PDF (inkl. ZUGFeRD) werden verarbeitet. Duplikate werden anhand des Datei-Hashes übersprungen.</span>
+    </div>
+  </div>
+</div>
+
+<script>
+if (!localStorage.getItem("atx_token")) { window.location.href = "/"; }
+const API = window.location.origin;
+const TOKEN = () => localStorage.getItem("atx_token");
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+const metaEl = $("metaLine");
+
+function show(msg, kind) {
+  statusEl.textContent = msg;
+  statusEl.className = "status show " + (kind || "info");
+}
+function hide() {
+  statusEl.className = "status";
+  statusEl.textContent = "";
+}
+function setMeta(t) { metaEl.textContent = t || ""; }
+
+function updateProviderRow() {
+  const v = $("provider").value;
+  $("customImapRow").style.display = v === "imap" ? "grid" : "none";
+  const hints = {
+    gmail:   "Gmail: App-Passwort erforderlich (2FA muss aktiv sein).",
+    outlook: "Outlook: App-Passwort bei Microsoft erstellen.",
+    imap:    "Custom IMAP: SSL/TLS-Verbindung, Port meist 993.",
+  };
+  $("providerHint").textContent = hints[v] || "";
+}
+$("provider").addEventListener("change", updateProviderRow);
+
+async function apiCall(path, opts) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + TOKEN(),
+      ...(opts && opts.headers ? opts.headers : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data.detail || data.message || ("HTTP " + res.status);
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+  }
+  return data;
+}
+
+async function loadConfig() {
+  try {
+    const d = await apiCall("/email/config", { method: "GET" });
+    if (d.configured) {
+      $("provider").value = d.provider || "gmail";
+      $("email").value = d.email || "";
+      $("host").value = d.host || "";
+      $("port").value = d.port || 993;
+      $("appPassword").value = "";            // security: never display
+      $("appPassword").placeholder = "••••••• (gespeichert — nur ausfüllen, um zu ändern)";
+      $("savedBadge").style.display = "inline-block";
+      $("btnDelete").style.display = "inline-block";
+      if (d.last_sync) {
+        setMeta("Letzte Sync: " + new Date(d.last_sync).toLocaleString("de-DE"));
+      }
+    }
+    updateProviderRow();
+  } catch (e) {
+    show("Konfiguration konnte nicht geladen werden: " + e.message, "err");
+  }
+}
+
+async function save() {
+  hide();
+  const provider = $("provider").value;
+  const email = $("email").value.trim();
+  const pw = $("appPassword").value;
+  const host = $("host").value.trim();
+  const port = parseInt($("port").value, 10) || 993;
+
+  if (!email || !email.includes("@")) { show("Bitte gültige Email-Adresse eingeben.", "err"); return; }
+  if (!pw) { show("Bitte App-Passwort eingeben.", "err"); return; }
+  if (pw.length < 8) { show("App-Passwort zu kurz (mind. 8 Zeichen).", "err"); return; }
+  if (provider === "imap" && !host) { show("Host fehlt für Custom IMAP.", "err"); return; }
+
+  const btn = $("btnSave"); btn.disabled = true; btn.textContent = "Speichern…";
+  try {
+    await apiCall("/email/config", {
+      method: "POST",
+      body: JSON.stringify({ provider, email, app_password: pw, host, port }),
+    });
+    $("appPassword").value = "";
+    $("appPassword").placeholder = "••••••• (gespeichert — nur ausfüllen, um zu ändern)";
+    $("savedBadge").style.display = "inline-block";
+    $("btnDelete").style.display = "inline-block";
+    show("Konfiguration gespeichert. ✓", "ok");
+  } catch (e) {
+    show("Speichern fehlgeschlagen: " + e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Speichern";
+  }
+}
+
+async function test() {
+  hide();
+  const btn = $("btnTest"); btn.disabled = true; btn.textContent = "Teste…";
+  try {
+    const d = await apiCall("/email/test", { method: "POST" });
+    if (d.success) {
+      show("Verbindung OK — " + d.inbox_total + " Mails im Posteingang, " + d.unseen + " ungelesen.", "ok");
+    } else {
+      show("Verbindung fehlgeschlagen: " + (d.message || "unbekannt"), "err");
+    }
+  } catch (e) {
+    show("Test fehlgeschlagen: " + e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Verbindung testen";
+  }
+}
+
+async function sync() {
+  hide();
+  const btn = $("btnSync"); btn.disabled = true; btn.textContent = "Synchronisiere…";
+  show("Synchronisierung läuft — kann bis zu einer Minute dauern…", "info");
+  try {
+    const d = await apiCall("/email/sync", { method: "POST" });
+    if (d.message && d.processed === 0) {
+      show(d.message, "info");
+    } else {
+      show("✓ " + (d.processed || 0) + " Rechnungen importiert · "
+           + (d.skipped || 0) + " übersprungen (Duplikate) · "
+           + (d.errors || 0) + " Fehler", "ok");
+    }
+    setMeta("Letzte Sync: " + new Date().toLocaleString("de-DE"));
+  } catch (e) {
+    show("Sync fehlgeschlagen: " + e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Jetzt synchronisieren";
+  }
+}
+
+async function del() {
+  if (!confirm("Email-Konfiguration wirklich löschen?")) return;
+  hide();
+  const btn = $("btnDelete"); btn.disabled = true;
+  try {
+    await apiCall("/email/config", { method: "DELETE" });
+    $("email").value = "";
+    $("host").value = "";
+    $("port").value = 993;
+    $("appPassword").value = "";
+    $("appPassword").placeholder = "••••••••••••";
+    $("savedBadge").style.display = "none";
+    $("btnDelete").style.display = "none";
+    setMeta("");
+    show("Konfiguration gelöscht.", "ok");
+  } catch (e) {
+    show("Löschen fehlgeschlagen: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("btnSave").addEventListener("click", save);
+$("btnTest").addEventListener("click", test);
+$("btnSync").addEventListener("click", sync);
+$("btnDelete").addEventListener("click", del);
+
+loadConfig();
+</script>
+</body>
+</html>
