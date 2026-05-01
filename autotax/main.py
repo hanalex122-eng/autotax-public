@@ -2419,12 +2419,18 @@ def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
         inv = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.user_id == user["sub"]).first()
         if not inv:
             err(404, "Invoice not found")
-        # Snapshot original values for learning comparison
+        # Snapshot original values for learning comparison + corrections log
+        # Genisletildi: log_corrections tum LOGGABLE_FIELDS'i bekliyor.
+        # save_learning_rule fazla alanlari nazikce gormezden gelir.
         _original = {
             "vendor": inv.vendor, "category": inv.category,
             "vat_rate": inv.vat_rate, "payment_method": inv.payment_method,
             "invoice_type": inv.invoice_type,
+            "total_amount": inv.total_amount, "vat_amount": inv.vat_amount,
+            "date": inv.date, "invoice_number": inv.invoice_number,
         }
+        _pre_raw_text = inv.raw_text or ""
+        _pre_vendor = inv.vendor or ""
         if body.vendor is not None:
             inv.vendor = body.vendor
         if body.category is not None:
@@ -2448,12 +2454,33 @@ def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
         db.commit()
         db.refresh(inv)
         # --- Learning: save user corrections as rules for future auto-fill ---
+        _edited = {k: v for k, v in (body.model_dump() if hasattr(body, "model_dump") else body.dict()).items() if v is not None}
         try:
             from autotax.learning import save_learning_rule
-            _edited = {k: v for k, v in (body.model_dump() if hasattr(body, "model_dump") else body.dict()).items() if v is not None}
             save_learning_rule(user["sub"], inv.raw_text or "", _original, _edited)
         except Exception as e:
             logger.warning("Learning save skipped: %s", e)
+        # --- Corrections: ham diff + OCR snapshot (few-shot RAG yakiti) ---
+        try:
+            from autotax.corrections import log_corrections
+            log_corrections(
+                invoice_id=invoice_id,
+                user_id=user["sub"],
+                original=_original,
+                edited=_edited,
+                ocr_text=_pre_raw_text,
+                vendor=_pre_vendor,
+            )
+        except Exception as e:
+            logger.warning("Corrections log skipped: %s", e)
+        # --- Status flow: kullanici PATCH yapti = bu fisi onayladi ---
+        # 'confirmed' degilse 'confirmed' yap. State machine ilerletme.
+        try:
+            if getattr(inv, "status", None) and inv.status != "confirmed":
+                inv.status = "confirmed"
+                db.commit()
+        except Exception as e:
+            logger.warning("Status update to 'confirmed' skipped: %s", e)
         # Sync changes to linked CashEntry (Kassenbuch)
         linked = db.query(CashEntry).filter(CashEntry.invoice_id == invoice_id, CashEntry.user_id == user["sub"]).first()
         if linked:
