@@ -2103,6 +2103,9 @@ def parse_invoice(raw_text: str) -> dict:
         "vendor_email": entities.get("emails", [""])[0] if entities.get("emails") else "",
         "vendor_phone": entities.get("phones", [""])[0] if entities.get("phones") else "",
         "vendor_address": entities.get("addresses", [""])[0] if entities.get("addresses") else "",
+        "vendor_ust_id": entities.get("ust_ids", [""])[0] if entities.get("ust_ids") else "",
+        "vendor_hrb": entities.get("hrbs", [""])[0] if entities.get("hrbs") else "",
+        "vendor_domain": entities.get("domains", [""])[0] if entities.get("domains") else "",
     }
 
 
@@ -2133,11 +2136,30 @@ def extract_entities(text: str) -> dict:
     plz_pat = r"\b(\d{5}\s+[A-ZÄÖÜ][a-zäöüß]{2,}(?:\s+[A-ZÄÖÜ][a-zäöüß]{2,})?)\b"
     addresses += [a.strip() for a in _re.findall(plz_pat, text)]
 
+    # USt-IdNr (Almanya KDV no) — vendor kimlik anahtari, OCR bozulmasina dayanikli
+    # DE + 9 rakam, arada bosluk olabilir. "USt-Id" / "USt-IdNr" etiketi ile
+    # veya etiketsiz yakalanir.
+    ust_id_pat = r"(?i)\b(DE)\s?(\d{3}\s?\d{3}\s?\d{3})\b"
+    raw_ust = _re.findall(ust_id_pat, text)
+    ust_ids = ["DE" + n.replace(" ", "") for _, n in raw_ust]
+
+    # HRB / HRA — ticari sicil numarasi. "HRB 12345" veya "HRB Frankfurt 12345" formatinda.
+    hrb_pat = r"(?i)\b(HR[BA])\s+(?:[A-ZÄÖÜ][a-zäöüß]+\s+)?(\d{1,7})\b"
+    raw_hrb = _re.findall(hrb_pat, text)
+    hrbs = [f"{prefix.upper()} {num}" for prefix, num in raw_hrb]
+
+    # Domain (web sitesi) — vendor kimlik fallback
+    domain_pat = r"(?i)\b(?:www\.)?([a-z0-9\-]{2,}\.(?:de|com|at|ch|eu|net|org|shop))\b"
+    domains = [d.lower() for d in _re.findall(domain_pat, text)]
+
     return {
         "ibans": list(set(ibans)),
         "emails": list(set(emails)),
         "phones": list(set(phones)),
         "addresses": list(set(addresses)),
+        "ust_ids": list(set(ust_ids)),
+        "hrbs": list(set(hrbs)),
+        "domains": list(set(domains)),
     }
 
 
