@@ -46,7 +46,14 @@ input:focus, select:focus, textarea:focus {
   border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.15);
 }
 input.error, select.error { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
-input::placeholder, textarea::placeholder { color: #475569; }
+/* Placeholder — agresif silik. Musteri 'bu yazili degil, ornek' anlasin.
+   Onceki #475569 cok belirgin gosteriyordu (Aral fisinde IBAN/telefon
+   placeholder'larini gercek veri saniliyordu). */
+input::placeholder, textarea::placeholder {
+  color: #2a3548;
+  font-style: italic;
+  opacity: 0.55;
+}
 textarea { resize: vertical; min-height: 80px; }
 select { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
 
@@ -181,32 +188,32 @@ select { cursor: pointer; appearance: none; background-image: url("data:image/sv
         </div>
         <div class="form-group">
           <label>IBAN</label>
-          <input id="iban" type="text" placeholder="DE89 3704 0044 0532 0130 00" oninput="checkIban(this.value)">
+          <input id="iban" type="text" placeholder="z.B. DE89 3704 0044 0532 0130 00" oninput="checkIban(this.value)">
           <div id="ibanMatch"></div>
         </div>
         <div class="form-group">
           <label>E-Mail</label>
-          <input id="email" type="email" placeholder="rechnung@firma.de">
+          <input id="email" type="email" placeholder="z.B. rechnung@firma.de">
         </div>
         <div class="form-group">
           <label>Telefon</label>
-          <input id="phone" type="tel" placeholder="+49 123 456789">
+          <input id="phone" type="tel" placeholder="z.B. +49 123 456789">
         </div>
         <div class="form-group">
           <label>Fax</label>
-          <input id="fax" type="tel" placeholder="+49 123 456780">
+          <input id="fax" type="tel" placeholder="z.B. +49 123 456780">
         </div>
         <div class="form-group">
           <label>Adresse</label>
-          <input id="address" type="text" placeholder="Musterstr. 1, 60311 Frankfurt">
+          <input id="address" type="text" placeholder="z.B. Musterstr. 1, 60311 Frankfurt">
         </div>
         <div class="form-group">
           <label>USt-IdNr.</label>
-          <input id="ustId" type="text" placeholder="DE143571783">
+          <input id="ustId" type="text" placeholder="z.B. DE143571783">
         </div>
         <div class="form-group">
           <label>Handelsregister</label>
-          <input id="hrb" type="text" placeholder="HRB 23012">
+          <input id="hrb" type="text" placeholder="z.B. HRB 23012">
         </div>
       </div>
     </div>
@@ -217,7 +224,7 @@ select { cursor: pointer; appearance: none; background-image: url("data:image/sv
       <div class="form-grid">
         <div class="form-group">
           <label>Rechnungsnummer</label>
-          <input id="invoiceNr" type="text" placeholder="RE-2026-001">
+          <input id="invoiceNr" type="text" placeholder="z.B. RE-2026-001">
         </div>
         <div class="form-group">
           <label class="required">Datum</label>
