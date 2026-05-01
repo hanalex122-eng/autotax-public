@@ -2081,19 +2081,35 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
         _vmatch = match_vendor(user["sub"], identity_fields=_identity_fields)
         if _vmatch:
             _old_vendor = result.get("vendor", "") or ""
-            # Parser default verdiyse (Unbekannt/bos/cok kisa) yada identity skoru cok yuksekse vendor'i ezelim
-            if _old_vendor in ("Unbekannt", "") or len(_old_vendor) < 3 or _vmatch.score >= 0.95:
+            # Yuksek guvenli eslesme = ust_id (1.0) / iban (0.95) / hrb (0.90).
+            # Phone/email/domain (<= 0.80) yanlis pozitif riskidir — Lidl fisinde
+            # yanlislikla SPAR'in telefonuna eslesirse SPAR vendor'i kilitlenmesin.
+            HIGH_CONF = 0.90
+            _high_conf = _vmatch.score >= HIGH_CONF
+
+            if _high_conf and (
+                _old_vendor in ("Unbekannt", "Manual Entry", "")
+                or len(_old_vendor) < 3
+                or _vmatch.score >= 0.95
+            ):
                 result["vendor"] = _vmatch.vendor_name
                 logger.info("[IDENTITY] vendor kilitlendi: '%s' -> '%s' by=%s score=%.2f",
                             _old_vendor, _vmatch.vendor_name, _vmatch.matched_by, _vmatch.score)
-            # Default'lari sadece parser zayifsa doldur — kullanici Beleg hinzufugen'de
-            # 'Lidl genelde 19% KDV' bilgisi verdiyse parser 0% verince override et.
-            if _vmatch.default_vat_rate and result.get("vat_rate") in ("0%", "", None):
-                result["vat_rate"] = _vmatch.default_vat_rate
-            if _vmatch.default_category and result.get("category") in ("other", "", None):
-                result["category"] = _vmatch.default_category
-            if _vmatch.default_payment_method and not result.get("payment_method"):
-                result["payment_method"] = _vmatch.default_payment_method
+            elif not _high_conf:
+                # Dusuk guvenli eslesme — vendor adi ezilmez, sadece logla
+                logger.info("[IDENTITY] dusuk guven, vendor degismedi: by=%s score=%.2f vendor='%s'",
+                            _vmatch.matched_by, _vmatch.score, _old_vendor)
+
+            # Default'lar (vat_rate/category/payment) — yalnizca yuksek guvenli
+            # eslesmede ezilir. Aksi takdirde yanlis vendor'in default'lari
+            # gercege gore atanabilir.
+            if _high_conf:
+                if _vmatch.default_vat_rate and result.get("vat_rate") in ("0%", "", None):
+                    result["vat_rate"] = _vmatch.default_vat_rate
+                if _vmatch.default_category and result.get("category") in ("other", "", None):
+                    result["category"] = _vmatch.default_category
+                if _vmatch.default_payment_method and not result.get("payment_method"):
+                    result["payment_method"] = _vmatch.default_payment_method
     except Exception as e:
         logger.warning("[IDENTITY] match skipped: %s", e)
 

@@ -86,18 +86,27 @@ def _apply_vendor_match(merged: dict, user_id: int) -> dict:
             return merged
 
         cur_vendor = (merged.get("vendor") or "").strip()
-        # Vendor adini ezme kosullari: bos / cok kisa / yuksek skorlu eslesme
-        if (not cur_vendor or cur_vendor in ("Unbekannt", "Manual Entry")
-                or len(cur_vendor) < 3 or v.score >= 0.95):
+        # Yuksek guven esigi: ust_id/iban/hrb (>= 0.90). Phone/email/domain
+        # gibi zayif anahtarlarda yanlis vendor adi kilitlenmesin.
+        HIGH_CONF = 0.90
+        high_conf = v.score >= HIGH_CONF
+
+        if high_conf and (
+            not cur_vendor
+            or cur_vendor in ("Unbekannt", "Manual Entry")
+            or len(cur_vendor) < 3
+            or v.score >= 0.95
+        ):
             merged["vendor"] = v.vendor_name
 
-        # Default'lari doldur
-        if v.default_vat_rate and _is_default(merged.get("vat_rate")):
-            merged["vat_rate"] = v.default_vat_rate
-        if v.default_category and _is_default(merged.get("category")):
-            merged["category"] = v.default_category
-        if v.default_payment_method and _is_default(merged.get("payment_method")):
-            merged["payment_method"] = v.default_payment_method
+        # Default'lar yalnizca yuksek guvenli eslesmede ezilir
+        if high_conf:
+            if v.default_vat_rate and _is_default(merged.get("vat_rate")):
+                merged["vat_rate"] = v.default_vat_rate
+            if v.default_category and _is_default(merged.get("category")):
+                merged["category"] = v.default_category
+            if v.default_payment_method and _is_default(merged.get("payment_method")):
+                merged["payment_method"] = v.default_payment_method
     except Exception as e:
         logger.warning("[PIPELINE] vendor match patladi: %s", e)
 
