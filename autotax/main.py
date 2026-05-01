@@ -2064,6 +2064,39 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
         logger.exception("Parsing failed for %s", file.filename)
         err(500, "Invoice parsing failed")
 
+    # --- STEP 2b: Vendor identity match — kimlik parmak izi (USt-IdNr/IBAN/HRB) ---
+    # parser_invoice ust_id/iban/hrb/email/domain/phone cikariyor; vendor_identities
+    # tablosunda kayit varsa vendor adi (OCR bozulmasindan bagimsiz) dogru gelir.
+    # Manuel girilmis vendor (Beleg hinzufugen formundan) en yuksek oncelige sahip.
+    try:
+        from autotax.vendor_identity import match_vendor
+        _identity_fields = {
+            "ust_id": result.get("vendor_ust_id"),
+            "iban": result.get("vendor_iban"),
+            "hrb": result.get("vendor_hrb"),
+            "email": result.get("vendor_email"),
+            "domain": result.get("vendor_domain"),
+            "phone": result.get("vendor_phone"),
+        }
+        _vmatch = match_vendor(user["sub"], identity_fields=_identity_fields)
+        if _vmatch:
+            _old_vendor = result.get("vendor", "") or ""
+            # Parser default verdiyse (Unbekannt/bos/cok kisa) yada identity skoru cok yuksekse vendor'i ezelim
+            if _old_vendor in ("Unbekannt", "") or len(_old_vendor) < 3 or _vmatch.score >= 0.95:
+                result["vendor"] = _vmatch.vendor_name
+                logger.info("[IDENTITY] vendor kilitlendi: '%s' -> '%s' by=%s score=%.2f",
+                            _old_vendor, _vmatch.vendor_name, _vmatch.matched_by, _vmatch.score)
+            # Default'lari sadece parser zayifsa doldur — kullanici Beleg hinzufugen'de
+            # 'Lidl genelde 19% KDV' bilgisi verdiyse parser 0% verince override et.
+            if _vmatch.default_vat_rate and result.get("vat_rate") in ("0%", "", None):
+                result["vat_rate"] = _vmatch.default_vat_rate
+            if _vmatch.default_category and result.get("category") in ("other", "", None):
+                result["category"] = _vmatch.default_category
+            if _vmatch.default_payment_method and not result.get("payment_method"):
+                result["payment_method"] = _vmatch.default_payment_method
+    except Exception as e:
+        logger.warning("[IDENTITY] match skipped: %s", e)
+
     # --- STEP 3: Merge learning over parser defaults ---
     # Learning wins ONLY for fields where parser returned defaults
     # (Unbekannt, other, 0%, empty). Never overwrites real parser values.
@@ -2481,6 +2514,15 @@ def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
                 db.commit()
         except Exception as e:
             logger.warning("Status update to 'confirmed' skipped: %s", e)
+        # --- Vendor identity: confirmed PATCH'ten otomatik ogrenme ---
+        # Manuel kayit (Beleg hinzufugen) yoksa OCR'dan cikan kimlik anahtarlariyla
+        # vendor_identities tablosuna 'auto_learned' olarak kaydet. Sonraki ayni
+        # vendor'in fisi geldiginde otomatik tanir.
+        try:
+            from autotax.vendor_identity import learn_from_invoice
+            learn_from_invoice(inv)
+        except Exception as e:
+            logger.warning("Vendor identity auto-learn skipped: %s", e)
         # Sync changes to linked CashEntry (Kassenbuch)
         linked = db.query(CashEntry).filter(CashEntry.invoice_id == invoice_id, CashEntry.user_id == user["sub"]).first()
         if linked:
@@ -2756,6 +2798,15 @@ class CashEntryCreate(BaseModel):
     reference: Optional[str] = None
     notes: Optional[str] = None
     date: Optional[str] = None
+    # Vendor identity fingerprint — Beleg hinzufugen formundan manuel kayit
+    # icin kullanici girer; vendor_identities tablosuna upsert edilir.
+    iban: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    fax: Optional[str] = None
+    address: Optional[str] = None
+    ust_id: Optional[str] = None
+    hrb: Optional[str] = None
 
 
 class CashEntryUpdate(BaseModel):
@@ -2872,6 +2923,14 @@ def _create_bookkeeping(body: CashEntryCreate, user: dict):
             payment_method=body.payment_method or "",
             category=body.category or "other",
             processed=True,
+            status="confirmed",  # manuel kayit = zaten onaylanmis
+            # Vendor identity bilgileri — Beleg hinzufugen formundan
+            vendor_iban=body.iban or None,
+            vendor_email=body.email or None,
+            vendor_phone=body.phone or None,
+            vendor_address=body.address or None,
+            vendor_ust_id=body.ust_id or None,
+            vendor_hrb=body.hrb or None,
         )
         db.add(inv)
         db.flush()
@@ -2880,6 +2939,29 @@ def _create_bookkeeping(body: CashEntryCreate, user: dict):
         db.commit()
         db.refresh(entry)
         logger.info("Created Kassenbuch entry %s linked to invoice %s", entry.id, inv.id)
+        # --- Vendor identity: manuel kayittan ogrenme ---
+        # Form'da vendor + en az bir kimlik anahtari (USt-IdNr/IBAN/HRB/email/...)
+        # varsa vendor_identities tablosuna upsert et. Bir sonraki ayni vendor'in
+        # OCR'i geldiginde otomatik tanima saglar.
+        try:
+            if body.vendor and body.vendor.strip() and body.vendor != "Unbekannt":
+                from autotax.vendor_identity import save_or_update
+                save_or_update(
+                    user_id=user["sub"],
+                    vendor_name=body.vendor,
+                    ust_id=body.ust_id,
+                    iban=body.iban,
+                    hrb=body.hrb,
+                    phone=body.phone,
+                    email=body.email,
+                    address=body.address,
+                    default_vat_rate=body.vat_rate,
+                    default_category=body.category,
+                    default_payment_method=body.payment_method,
+                    source="manual",
+                )
+        except Exception as _ie:
+            logger.warning("Vendor identity manual save skipped: %s", _ie)
         return {"success": True, **cash_entry_to_dict(entry)}
     except HTTPException:
         raise
