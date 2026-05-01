@@ -50,8 +50,91 @@ OCR text:
 """
 
 
+# Few-shot konfigurasyonu — token tasarrufu vs dogruluk arasindaki denge.
+# Cok ornek = pahali ama dogru; az ornek = ucuz ama daha az ogrenme.
+FEW_SHOT_LIMIT = 3                 # Her cagrida en fazla N ornek
+FEW_SHOT_OCR_TRUNC = 800           # Her ornegin OCR metni bu boyuta kirpilir
+FEW_SHOT_MIN_PATTERN_LEN = 3       # Cok kisa pattern'ler (1-2 char) atlanir
+
+
+def find_similar_examples(raw_text: str, limit: int = FEW_SHOT_LIMIT) -> list:
+    """PromptExample tablosundan, vendor_pattern'i raw_text'in icinde gecen
+    ornekleri ceker. quality_score azalan + son kullanim eski once siralanir.
+
+    Esleme: case-insensitive substring. Kisa pattern (< 3 char) atlanir.
+    Donus: list[PromptExample]. Hata olursa boş liste — asla raise etmez.
+    """
+    if not raw_text or len(raw_text) < 10:
+        return []
+    try:
+        from autotax.db import SessionLocal
+        from autotax.models import PromptExample
+    except Exception:
+        return []
+
+    text_lower = raw_text.lower()
+    db = SessionLocal()
+    try:
+        all_examples = db.query(PromptExample).all()
+        if not all_examples:
+            return []
+        matched = []
+        for ex in all_examples:
+            pat = (ex.vendor_pattern or "").strip().lower()
+            if len(pat) < FEW_SHOT_MIN_PATTERN_LEN:
+                continue
+            if pat in text_lower:
+                matched.append(ex)
+        # Yuksek skor + cok kullanilmis once
+        matched.sort(key=lambda e: (-(e.quality_score or 0), -(e.use_count or 0)))
+        selected = matched[:limit]
+
+        # Kullanim sayaci + zaman damgasi guncelle (best-effort)
+        if selected:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            for ex in selected:
+                ex.use_count = (ex.use_count or 0) + 1
+                ex.last_used_at = now
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+            logger.info(
+                "[LLM] few-shot %d ornek bulundu (patterns=%s)",
+                len(selected),
+                [e.vendor_pattern for e in selected],
+            )
+        return selected
+    except Exception as e:
+        logger.warning("[LLM] few-shot lookup basarisiz: %s", e)
+        return []
+    finally:
+        db.close()
+
+
+def _build_few_shot_block(examples: list) -> str:
+    """Few-shot ornek listesini prompt'a enjekte edilebilir text bloga cevir."""
+    if not examples:
+        return ""
+    parts = ["Once benzer fislerden bazi dogru cevap ornekleri:\n"]
+    for i, ex in enumerate(examples, 1):
+        ocr = (ex.ocr_text or "")[:FEW_SHOT_OCR_TRUNC]
+        expected = ex.expected_json or "{}"
+        parts.append(
+            f"\n--- ORNEK {i} (vendor pattern: {ex.vendor_pattern}) ---\n"
+            f"OCR:\n{ocr}\n"
+            f"Beklenen JSON:\n{expected}\n"
+        )
+    parts.append("\n--- Simdi asagidaki fisi ayni formatta cikar ---\n")
+    return "".join(parts)
+
+
 async def llm_extract_invoice(raw_text: str) -> dict:
     """Call Claude Haiku to extract structured invoice data from OCR text.
+
+    Few-shot RAG: PromptExample tablosunda eslesen ornek varsa prompt'a
+    enjekte edilir; yoksa ham (eski) prompt kullanilir.
 
     Returns dict with extracted fields, or empty dict on any error.
     Never raises — safe to call in any context.
@@ -61,6 +144,11 @@ async def llm_extract_invoice(raw_text: str) -> dict:
 
     # Truncate to save tokens (receipts rarely need >2000 chars)
     text = raw_text[:2000]
+
+    # Few-shot ornekleri al (varsa) ve prompt'i kur
+    examples = find_similar_examples(text)
+    few_shot_block = _build_few_shot_block(examples)
+    user_content = _EXTRACT_PROMPT + few_shot_block + text
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -75,7 +163,7 @@ async def llm_extract_invoice(raw_text: str) -> dict:
                     "model": MODEL,
                     "max_tokens": 500,
                     "messages": [
-                        {"role": "user", "content": _EXTRACT_PROMPT + text}
+                        {"role": "user", "content": user_content}
                     ],
                 },
             )
