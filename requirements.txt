@@ -17,3 +17,4 @@ slowapi==0.1.9
 reportlab==4.1.0
 pytesseract==0.3.13
 opencv-python-headless==4.10.0.84
+alembic==1.13.3
