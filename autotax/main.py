@@ -2113,25 +2113,70 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     except Exception as e:
         logger.warning("[IDENTITY] match skipped: %s", e)
 
-    # --- STEP 2c: Vendor uppercase fallback ---
-    # Parser ARAL/LIDL/SHELL gibi 3-12 harfli buyuk yazili logo isimlerini
-    # bazen kaciriyor. Eger vendor hala bos/Unbekannt ise OCR'in ilk 8 satirinda
-    # buyuk-harfli kisa bir kelime ara. Bu uydurma DEGIL — OCR'da literal var.
+    # --- STEP 2c: Vendor fallback — adres-aware ---
+    # Parser bazen ilk OCR satirini vendor sayar; logo gorsel ise OCR atlar
+    # ve 2. satir (adres) yanlislikla vendor olur. Bu fallback:
+    #  1) Once UPPERCASE kisa kelime ara (ARAL/LIDL/SPAR logo isimleri)
+    #  2) Bulunmazsa, ilk 8 satirdan ADRES OLMAYAN ilk anlamli satiri al
+    # Adres reddedicileri: cadde anahtar kelimeleri, 5-haneli PLZ, sirket
+    # son ekleri tek basina.
     try:
         _cur_vendor = (result.get("vendor") or "").strip()
-        if _cur_vendor in ("Unbekannt", "Manual Entry", "") or len(_cur_vendor) < 3:
+        _is_default = _cur_vendor in ("Unbekannt", "Manual Entry", "") or len(_cur_vendor) < 3
+
+        # Vendor PARSER'dan gelse bile adres-benzeri ise reset edelim
+        if _cur_vendor and not _is_default:
+            _v_lower = _cur_vendor.lower()
+            _addr_signals = ("str.", "strasse", "straße", "weg", "platz",
+                             "allee", "gasse", "ring", "damm", "ufer")
+            import re as _re_v_chk
+            _has_plz = bool(_re_v_chk.search(r"\b\d{5}\b", _cur_vendor))
+            _has_addr_kw = any(s in _v_lower for s in _addr_signals)
+            if _has_addr_kw or _has_plz:
+                logger.info("[VENDOR_FALLBACK] parser adres-benzeri vendor verdi, reset: %r", _cur_vendor)
+                _cur_vendor = ""
+                _is_default = True
+
+        if _is_default:
             import re as _re_v
+            _addr_keywords = ("str.", "strasse", "straße", "weg", "platz",
+                              "allee", "gasse", "ring", "damm", "ufer")
+            _candidate_upper = None  # UPPERCASE prioriteli
+            _candidate_normal = None  # adres olmayan ilk satir (fallback)
+
             for _line in (raw_text or "").splitlines()[:8]:
                 _line = _line.strip()
-                if not _line:
+                if not _line or len(_line) < 3:
                     continue
-                # 3-15 harfli, tamami buyuk harf, sadece harfler (rakam/sembol yok)
-                _m = _re_v.match(r"^([A-ZÄÖÜ]{3,15})\s*$", _line)
-                if _m:
-                    _name = _m.group(1).capitalize()
-                    result["vendor"] = _name
-                    logger.info("[VENDOR_FALLBACK] OCR'dan UPPERCASE vendor bulundu: %s", _name)
-                    break
+                _line_lower = _line.lower()
+
+                # Adres elimene
+                if any(kw in _line_lower for kw in _addr_keywords):
+                    continue
+                if _re_v.search(r"\b\d{5}\b", _line):  # PLZ
+                    continue
+                # Tarih/numara satirlari (tum digit veya cok digit)
+                if sum(c.isdigit() for c in _line) > len(_line) * 0.5:
+                    continue
+
+                # 1. tercih: UPPERCASE 3-15 harfli kelime
+                _m_upper = _re_v.match(r"^([A-ZÄÖÜ]{3,15})\s*$", _line)
+                if _m_upper and _candidate_upper is None:
+                    _candidate_upper = _m_upper.group(1).capitalize()
+                    break  # UPPERCASE bulduk, durabiliriz
+
+                # 2. tercih: en az 3 karakter, baska adayimiz yoksa
+                # Sadece harfler + bosluk + nokta + & icerebilir (firma adi tipiktir)
+                if _re_v.match(r"^[A-Za-zÄÖÜäöüß0-9.\s&,\-/]+$", _line) and _candidate_normal is None:
+                    # Sadece sembol/rakam degil, en az 3 harf icermeli
+                    if sum(c.isalpha() for c in _line) >= 3:
+                        _candidate_normal = _line[:60].strip(".,- ")
+
+            chosen = _candidate_upper or _candidate_normal
+            if chosen:
+                result["vendor"] = chosen
+                logger.info("[VENDOR_FALLBACK] OCR'dan vendor bulundu: %r (kaynak=%s)",
+                            chosen, "UPPERCASE" if _candidate_upper else "ilk-anlamli")
     except Exception as e:
         logger.warning("[VENDOR_FALLBACK] hata: %s", e)
 
