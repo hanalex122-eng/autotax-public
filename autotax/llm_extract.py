@@ -39,12 +39,36 @@ Return ONLY a JSON object with these fields (use null if not found):
   "vendor_address": "Musterstr. 1, 66111 Saarbrücken"
 }
 
-Rules:
+CRITICAL RULE — NO HALLUCINATION:
+This rule overrides every other rule below.
+- NEVER invent or guess any field value. If a value is not LITERALLY visible
+  in the OCR text below, return null for that field.
+- vendor_iban: ONLY return a value if the OCR text contains the literal word
+  "IBAN" followed by a country code (DE/AT/CH/...) and digits that you can
+  read character-by-character. If the IBAN is not literally typed in the
+  text, return null. NEVER fabricate digits to "complete" a partial IBAN.
+- vendor_phone: ONLY return a value if a phone-style label ("Tel", "Telefon",
+  "Phone", "Fax") appears in the text followed by digits. Dates and invoice
+  numbers are NOT phone numbers. If unsure, null.
+- vendor_email: ONLY return if a literal "@" character appears in the text
+  with letters before and after it. Otherwise null.
+- vendor_address: ONLY return if a street keyword (Str./Strasse/Weg/Platz/...)
+  or a 5-digit German postal code appears in the text. Otherwise null.
+- vendor_name: vendor_name is the company/store. If multiple candidates,
+  prefer ALL-UPPERCASE words at the top of the receipt (ARAL, LIDL, REWE,
+  SHELL etc.). If you cannot identify a clear name, return null.
+- total_amount: ONLY return a number that LITERALLY appears in the text near
+  a total label (Gesamt, Summe, Total, Endbetrag, Brutto, zu zahlen). If no
+  such number is visible, return 0.
+
+Other rules:
 - total_amount = the FINAL amount the customer pays (brutto, not netto)
 - vat_rate = the main VAT rate shown (e.g. "19%" or "7%")
 - date format MUST be YYYY-MM-DD
-- If a field is uncertain, use null — do NOT guess
 - Return ONLY the JSON, no explanation
+
+REMEMBER: Returning null is ALWAYS better than guessing. Wrong data
+corrupts the user's accounting. Empty data is fixable; fabricated data is not.
 
 OCR text:
 """
@@ -184,6 +208,10 @@ async def llm_extract_invoice(raw_text: str) -> dict:
             response_text = response_text.strip()
 
             result = json.loads(response_text)
+            # Defensive validation — LLM uydurma yapsa bile yakala.
+            # Aral fisi gibi durumlarda model "muhtemelen ARAL'in IBAN'i sudur"
+            # diye 22 haneli sayi uretmisti. Bu katman onu null'a duser.
+            result = _validate_against_ocr(result, raw_text)
             logger.info("[LLM] extracted: vendor=%s total=%s date=%s",
                         result.get("vendor_name"), result.get("total_amount"), result.get("date"))
             return result
@@ -197,6 +225,85 @@ async def llm_extract_invoice(raw_text: str) -> dict:
     except Exception as e:
         logger.warning("[LLM] extraction failed: %s", e)
         return {}
+
+
+def _digits_in(text: str) -> str:
+    """Return only the digits in `text`, used for substring search of numeric IDs."""
+    return "".join(c for c in (text or "") if c.isdigit())
+
+
+def _validate_against_ocr(result: dict, raw_text: str) -> dict:
+    """LLM ciktisini OCR text'ine karsi dogrular. OCR'da iz olmayan alanlari
+    null'a duser — uydurma karsi son savunma katmani.
+
+    Kontroller:
+    - vendor_iban: IBAN'in tum rakamlari OCR'da art arda gecmiyorsa null
+    - vendor_phone: telefonun rakam dizisi OCR'da gecmiyorsa null
+    - vendor_email: tam @ adresi OCR'da yoksa null
+    - vendor_address: temel parcalardan biri (PLZ, Strasse, vb.) OCR'da yoksa null
+
+    Asla raise etmez. Donus: ayni dict, riskli alanlar null yapilmis.
+    """
+    if not result or not isinstance(result, dict):
+        return result or {}
+    if not raw_text:
+        return result
+
+    text_lower = raw_text.lower()
+    text_digits = _digits_in(raw_text)
+
+    # IBAN — rakam dizisi OCR'da art arda yoksa null. Cok agresif: LLM sahte
+    # olusturduysa rakamlarin hicbiri OCR'da yan yana gozukmez.
+    iban = (result.get("vendor_iban") or "").strip()
+    if iban:
+        iban_digits = _digits_in(iban)
+        # En az son 8 rakaminin OCR digit-stream'inde art arda olmasi beklenir
+        if len(iban_digits) >= 8 and iban_digits[-8:] not in text_digits:
+            logger.warning("[LLM_VALIDATE] uydurma IBAN reddedildi: %s", iban[:6] + "...")
+            result["vendor_iban"] = None
+
+    # Phone — rakam dizisi OCR'da art arda yoksa null
+    phone = (result.get("vendor_phone") or "").strip()
+    if phone:
+        phone_digits = _digits_in(phone)
+        if len(phone_digits) >= 7 and phone_digits[-7:] not in text_digits:
+            logger.warning("[LLM_VALIDATE] uydurma telefon reddedildi: %s", phone)
+            result["vendor_phone"] = None
+
+    # Email — tam adres OCR'da olmali
+    email = (result.get("vendor_email") or "").strip().lower()
+    if email and email not in text_lower:
+        logger.warning("[LLM_VALIDATE] uydurma email reddedildi: %s", email)
+        result["vendor_email"] = None
+
+    # Address — sokak anahtar kelimesi veya 5-haneli PLZ OCR'da olmali
+    address = (result.get("vendor_address") or "").strip()
+    if address:
+        addr_lower = address.lower()
+        has_keyword = any(kw in addr_lower for kw in
+                          ("str.", "straße", "strasse", "weg", "platz", "allee",
+                           "gasse", "ring", "damm", "ufer"))
+        # PLZ kontrolu — adresteki 5 haneli kod OCR'da bulunmali
+        import re as _re_inner
+        plz_match = _re_inner.search(r"\b\d{5}\b", address)
+        plz_ok = plz_match and plz_match.group() in raw_text
+        # En az birinin OCR'da iz birakmasi gerekir
+        text_words = text_lower.split()
+        addr_words = [w for w in addr_lower.split() if len(w) >= 4]
+        any_word_in_text = any(w in text_lower for w in addr_words)
+        if not (has_keyword and any_word_in_text) and not plz_ok:
+            logger.warning("[LLM_VALIDATE] uydurma adres reddedildi: %s", address[:40])
+            result["vendor_address"] = None
+
+    # USt-IdNr — DE + 9 rakam OCR'da olmali
+    ust = (result.get("vendor_ust_id") or "").strip().upper().replace(" ", "")
+    if ust:
+        ust_digits = _digits_in(ust)
+        if len(ust_digits) >= 9 and ust_digits not in text_digits:
+            logger.warning("[LLM_VALIDATE] uydurma USt-IdNr reddedildi: %s", ust)
+            result["vendor_ust_id"] = None
+
+    return result
 
 
 def merge_with_parser(parser_result: dict, llm_result: dict) -> dict:

@@ -2114,19 +2114,27 @@ def extract_entities(text: str) -> dict:
     """Extract structured entities (IBAN, email, phone, address) from OCR text using regex."""
     import re as _re
 
-    # IBAN: 2 letter country code + 2 check digits + up to 30 alphanumeric (with optional spaces)
-    iban_pat = r"\b([A-Z]{2}\s?\d{2}\s?(?:\d{4}\s?){2,7}\d{1,4})\b"
-    raw_ibans = _re.findall(iban_pat, text.upper())
-    ibans = [i.replace(" ", "") for i in raw_ibans if len(i.replace(" ", "")) >= 15]
+    # IBAN — sadece "IBAN" label'inden sonra eslesir (uydurma riskini onler).
+    # Onceki regex label'siz uzun rakam dizilerini IBAN sayiyordu — fatura
+    # numaralari, telefonlar, tarih+kart no kombinasyonlari yanlis pozitif veriyordu.
+    iban_pat = r"(?i)IBAN[\s:.\-]*([A-Z]{2}\s?\d{2}\s?(?:\d{4}\s?){2,7}\d{1,4})"
+    raw_ibans = _re.findall(iban_pat, text)
+    ibans = [i.replace(" ", "").upper() for i in raw_ibans if len(i.replace(" ", "")) >= 15]
 
-    # Email
+    # Email — @ zorunlu, yanlis pozitif riski dusuk
     email_pat = r"\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b"
     emails = _re.findall(email_pat, text)
 
-    # Phone: international and German formats
-    phone_pat = r"(?:\+\d{1,3}[\s\-]?)?(?:\(?\d{2,5}\)?[\s\-]?)?\d{3,4}[\s\-]?\d{2,6}"
+    # Phone — sadece "Tel/Telefon/Phone/Fon/Fax" label'i sonrasi eslesir.
+    # Onceki regex tarihleri (16.05.2026), fatura numaralarini, kart numarasinin
+    # parcasini telefon olarak yakalryordu. Aral fisinde uydurma telefon ureten bug.
+    phone_pat = (
+        r"(?i)(?:tel|telefon|telephone|phone|fon|fax)[\s.:\-]*"
+        r"((?:\+\d{1,3}[\s\-/]?)?(?:\(?\d{2,5}\)?[\s\-/]?)?\d{2,4}[\s\-/]?\d{3,8})"
+    )
     raw_phones = _re.findall(phone_pat, text)
-    phones = [p.strip() for p in raw_phones if len(p.replace(" ", "").replace("-", "")) >= 6]
+    phones = [p.strip() for p in raw_phones
+              if sum(c.isdigit() for c in p) >= 7]
 
     # Address: lines containing street keywords + house number
     addr_keywords = r"(?:str\.|straße|strasse|weg|platz|allee|gasse|ring|damm|ufer|chaussee|avenue|rue|road|street)"
