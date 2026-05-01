@@ -2,7 +2,7 @@ import logging
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from autotax.models import Base, Invoice, User, CashEntry, UserCompany, LlmUsage, LearningRule
+from autotax.models import Base, Invoice, User, CashEntry, UserCompany, LlmUsage, LearningRule, Correction, PromptExample
 
 logger = logging.getLogger("autotax")
 
@@ -102,6 +102,32 @@ def init_db():
                 if col not in inv_cols:
                     conn.execute(text(f"ALTER TABLE invoices ADD COLUMN {col} VARCHAR"))
                     logger.info("Added '%s' column to invoices", col)
+        # --- Pipeline state machine: invoices.status ---
+        # Eski 'processed' boolean korunuyor; yeni kod status'u kullanmali.
+        # Ilk migration'da: var olan processed=true satirlar 'confirmed' isaretlenir,
+        # processed=false satirlar 'pending' kalir.
+        inv_cols = [c["name"] for c in insp.get_columns("invoices")]
+        with engine.begin() as conn:
+            if "status" not in inv_cols:
+                # Postgres ve SQLite'in ikisinde de calisan minimal sentaks
+                conn.execute(text(
+                    "ALTER TABLE invoices ADD COLUMN status VARCHAR(20) "
+                    "NOT NULL DEFAULT 'pending'"
+                ))
+                logger.info("Added 'status' column to invoices")
+                # Eski isenmis kayitlari geriye uyumlu sekilde isaretle
+                conn.execute(text(
+                    "UPDATE invoices SET status = 'confirmed' "
+                    "WHERE processed = TRUE AND status = 'pending'"
+                ))
+                logger.info("Backfilled status='confirmed' for processed=true rows")
+                # Index — status'a gore filtrelemek icin
+                try:
+                    conn.execute(text(
+                        "CREATE INDEX IF NOT EXISTS ix_invoices_status ON invoices(status)"
+                    ))
+                except Exception as ix_e:
+                    logger.warning("Status index skipped: %s", ix_e)
     except Exception as e:
         logger.warning("Column migration skipped: %s", e)
 
@@ -133,6 +159,10 @@ def save_invoice(data: dict, user_id: int, filename: str = None, file_data: byte
 
     db = SessionLocal()
     try:
+        # Status: total_amount varsa 'ready' (kullanici onaylayabilir),
+        # yoksa 'needs_review' (zayif parse). 'confirmed' yalnizca kullanici PATCH'i ile gelir.
+        _has_total = bool(data.get("total_amount"))
+        _initial_status = "ready" if _has_total else "needs_review"
         invoice = Invoice(
             user_id=user_id,
             filename=filename,
@@ -146,7 +176,8 @@ def save_invoice(data: dict, user_id: int, filename: str = None, file_data: byte
             invoice_number=data.get("invoice_number") or "",
             payment_method=data.get("payment_method") or "",
             category=data.get("category") or "other",
-            processed=True if data.get("total_amount") else False,
+            processed=_has_total,
+            status=_initial_status,
             file_path=file_path,
             file_size=file_size,
             file_content_type=file_content_type,

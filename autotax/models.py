@@ -36,6 +36,10 @@ class Invoice(Base):
     raw_text = Column(Text, nullable=False)
     category = Column(String, nullable=True)
     processed = Column(Boolean, default=False, nullable=False)
+    # Pipeline durumu — state machine. processed (eski boolean) geriye uyumluluk
+    # icin korunuyor; yeni kod status'u kullanmali.
+    # Degerler: pending | ocr_running | parsing | needs_review | ready | confirmed | failed
+    status = Column(String(20), default="pending", nullable=False, index=True)
     # New (preferred): files live on disk, only the relative path is stored.
     file_path = Column(String, nullable=True)
     file_size = Column(Integer, nullable=True)
@@ -136,4 +140,38 @@ class LearningRule(Base):
     field_name = Column(String(50), nullable=False)               # "vendor", "vat_rate", "category"
     value = Column(String(200), nullable=False)                   # "Lidl GmbH", "19%", "food"
     use_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class Correction(Base):
+    """Kullanici duzeltmelerinin ham logu. _do_update_invoice her PATCH/PUT'ta
+    degisen alanlar icin bir kayit olusturur. LearningRule ozet tutar (anahtar
+    kelime + son deger); bu tablo tam diff'i + duzeltme anindaki OCR snapshot'i
+    saklar — few-shot RAG ve modeli iyilestirme icin yakit."""
+    __tablename__ = "corrections"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    field_name = Column(String(50), nullable=False, index=True)
+    old_value = Column(Text, nullable=True)            # JSON-encoded (string olarak)
+    new_value = Column(Text, nullable=True)            # JSON-encoded (string olarak)
+    ocr_text_snapshot = Column(Text, nullable=True)    # ilk 4000 karakter
+    vendor_at_correction = Column(String(200), nullable=True, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class PromptExample(Base):
+    """Few-shot ornekler — LLM extraction prompt'una RAG ile enjekte edilir.
+    learn_from_corrections.py job'u confirmed (status='confirmed') fislerden
+    vendor basina en guvenilir ornegi seker. Kullanildikca quality_score guncellenir."""
+    __tablename__ = "prompt_examples"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    vendor_pattern = Column(String(200), nullable=False, index=True)  # "lidl", "rewe", "shell"
+    ocr_text = Column(Text, nullable=False)
+    expected_json = Column(Text, nullable=False)       # JSON-encoded ParsedReceipt
+    quality_score = Column(Float, default=1.0, nullable=False)
+    use_count = Column(Integer, default=0, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
