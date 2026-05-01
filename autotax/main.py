@@ -2113,6 +2113,28 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     except Exception as e:
         logger.warning("[IDENTITY] match skipped: %s", e)
 
+    # --- STEP 2c: Vendor uppercase fallback ---
+    # Parser ARAL/LIDL/SHELL gibi 3-12 harfli buyuk yazili logo isimlerini
+    # bazen kaciriyor. Eger vendor hala bos/Unbekannt ise OCR'in ilk 8 satirinda
+    # buyuk-harfli kisa bir kelime ara. Bu uydurma DEGIL — OCR'da literal var.
+    try:
+        _cur_vendor = (result.get("vendor") or "").strip()
+        if _cur_vendor in ("Unbekannt", "Manual Entry", "") or len(_cur_vendor) < 3:
+            import re as _re_v
+            for _line in (raw_text or "").splitlines()[:8]:
+                _line = _line.strip()
+                if not _line:
+                    continue
+                # 3-15 harfli, tamami buyuk harf, sadece harfler (rakam/sembol yok)
+                _m = _re_v.match(r"^([A-ZÄÖÜ]{3,15})\s*$", _line)
+                if _m:
+                    _name = _m.group(1).capitalize()
+                    result["vendor"] = _name
+                    logger.info("[VENDOR_FALLBACK] OCR'dan UPPERCASE vendor bulundu: %s", _name)
+                    break
+    except Exception as e:
+        logger.warning("[VENDOR_FALLBACK] hata: %s", e)
+
     # --- STEP 3: Merge learning over parser defaults ---
     # Learning wins ONLY for fields where parser returned defaults
     # (Unbekannt, other, 0%, empty). Never overwrites real parser values.

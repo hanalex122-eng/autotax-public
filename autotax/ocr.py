@@ -674,17 +674,31 @@ def local_ocr_tesseract(image):
     """Run local Tesseract OCR with OpenCV preprocessing. Accepts PIL Image or bytes."""
     try:
         import pytesseract
-        from PIL import Image
+        from PIL import Image, ImageOps
         import numpy as np
         import cv2
+        # CRITIC: Once cv2.imdecode kullaniliyordu — iPhone EXIF rotation
+        # flag'ini gormez. Yan cekilen fotograf yan kalir, Tesseract bozuk
+        # metin uretir. Cozum: once PIL ile ac, exif_transpose uygula
+        # (gorseli dogru yone cevirir), sonra OpenCV'ye gec.
         if isinstance(image, bytes):
-            arr = np.frombuffer(image, dtype=np.uint8)
-            img_cv = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if img_cv is None:
-                pil_img = Image.open(io.BytesIO(image)).convert("RGB")
+            try:
+                pil_img = Image.open(io.BytesIO(image))
+                pil_img = ImageOps.exif_transpose(pil_img)  # iPhone yan foto fix
+                pil_img = pil_img.convert("RGB")
                 img_cv = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            except Exception:
+                # PIL acamadiysa cv2 fallback
+                arr = np.frombuffer(image, dtype=np.uint8)
+                img_cv = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if img_cv is None:
+                    return ""
         else:
-            img_cv = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+            try:
+                pil_img = ImageOps.exif_transpose(image)
+            except Exception:
+                pil_img = image
+            img_cv = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
         gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
         h, w = gray.shape[:2]
         resized = cv2.resize(gray, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
@@ -695,7 +709,10 @@ def local_ocr_tesseract(image):
 
         # Safe retry: if first pass produced almost nothing, try 90/180/270.
         # Pick the longest result. Does not change behavior when rot=0 already works.
-        if len(text) < 20:
+        # Esik 20 -> 80: yan/egri cekilmis fotograflarda Tesseract 30-50 char
+        # uretebilir ama icerik bozuk olur — 4 rotasyon denemesiyle dogru aciya
+        # ulasilir. EXIF rotation calistiginda bu blok genelde tetiklenmez.
+        if len(text) < 80:
             best_text, best_rot = text, 0
             for rot_code, rot_deg in (
                 (cv2.ROTATE_90_CLOCKWISE, 90),
