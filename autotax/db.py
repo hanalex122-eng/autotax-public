@@ -2,7 +2,7 @@ import logging
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from autotax.models import Base, Invoice, User, CashEntry, UserCompany, LlmUsage, LearningRule, Correction, PromptExample
+from autotax.models import Base, Invoice, User, CashEntry, UserCompany, LlmUsage, LearningRule, Correction, PromptExample, VendorIdentity
 
 logger = logging.getLogger("autotax")
 
@@ -102,6 +102,19 @@ def init_db():
                 if col not in inv_cols:
                     conn.execute(text(f"ALTER TABLE invoices ADD COLUMN {col} VARCHAR"))
                     logger.info("Added '%s' column to invoices", col)
+        # --- Vendor identity fingerprint (USt-IdNr + HRB) ---
+        inv_cols = [c["name"] for c in insp.get_columns("invoices")]
+        with engine.begin() as conn:
+            if "vendor_ust_id" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN vendor_ust_id VARCHAR(20)"))
+                logger.info("Added 'vendor_ust_id' column to invoices")
+                try:
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_vendor_ust_id ON invoices(vendor_ust_id)"))
+                except Exception as ix_e:
+                    logger.warning("vendor_ust_id index skipped: %s", ix_e)
+            if "vendor_hrb" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN vendor_hrb VARCHAR(30)"))
+                logger.info("Added 'vendor_hrb' column to invoices")
         # --- Pipeline state machine: invoices.status ---
         # Eski 'processed' boolean korunuyor; yeni kod status'u kullanmali.
         # Ilk migration'da: var olan processed=true satirlar 'confirmed' isaretlenir,
@@ -186,6 +199,9 @@ def save_invoice(data: dict, user_id: int, filename: str = None, file_data: byte
             vendor_email=data.get("vendor_email") or "",
             vendor_phone=data.get("vendor_phone") or "",
             vendor_address=data.get("vendor_address") or "",
+            # Identity fingerprint
+            vendor_ust_id=data.get("vendor_ust_id") or None,
+            vendor_hrb=data.get("vendor_hrb") or None,
             file_hash=file_hash,
             possible_duplicate=possible_duplicate,
         )

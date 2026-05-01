@@ -53,6 +53,9 @@ class Invoice(Base):
     vendor_email = Column(String, nullable=True)
     vendor_phone = Column(String, nullable=True)
     vendor_address = Column(String, nullable=True)
+    # Vendor identity fingerprint — kimlik kartı (vendor adi OCR bozulmasindan bagimsiz)
+    vendor_ust_id = Column(String(20), nullable=True, index=True)  # DE143571783
+    vendor_hrb = Column(String(30), nullable=True)                 # HRB 23012
     # Soft delete
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
@@ -159,6 +162,45 @@ class Correction(Base):
     ocr_text_snapshot = Column(Text, nullable=True)    # ilk 4000 karakter
     vendor_at_correction = Column(String(200), nullable=True, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class VendorIdentity(Base):
+    """Vendor kimlik parmak izi — manuel kayittan veya confirmed fislerden ogrenilir.
+    OCR'da vendor adi bozulsa bile (LDL/L1DL), USt-IdNr/IBAN gibi sabit kimlik
+    verileri ile dogru vendor'i bulmayi saglar. Beleg hinzufugen sekmesinden
+    manuel kayit + PATCH'lerden otomatik ogrenme.
+
+    source:
+      - 'manual'        : kullanici Beleg hinzufugen formuyla girdi (en yuksek guven)
+      - 'auto_learned'  : confirmed PATCH'ten otomatik ogrenildi
+    confidence: 0.0-1.0; manuel=1.0, auto=0.7 baslangici.
+    """
+    __tablename__ = "vendor_identities"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    vendor_name = Column(String(200), nullable=False, index=True)
+
+    # Kimlik anahtarlari — eslestirme onceligi: ust_id > iban > hrb > phone > email > domain
+    ust_id = Column(String(20), nullable=True, index=True)   # DE143571783
+    iban = Column(String(40), nullable=True, index=True)     # DE89...
+    hrb = Column(String(30), nullable=True)                  # HRB 23012
+    phone = Column(String(40), nullable=True)
+    email = Column(String(120), nullable=True, index=True)
+    domain = Column(String(120), nullable=True, index=True)  # lidl.de
+    address = Column(String(300), nullable=True)
+
+    # Default'lar — yeni fisler icin auto-fill
+    default_vat_rate = Column(String(10), nullable=True)
+    default_category = Column(String(50), nullable=True)
+    default_payment_method = Column(String(30), nullable=True)
+
+    source = Column(String(20), default="manual", nullable=False)  # manual | auto_learned
+    confidence = Column(Float, default=1.0, nullable=False)
+    use_count = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_used_at = Column(DateTime, nullable=True)
 
 
 class PromptExample(Base):
