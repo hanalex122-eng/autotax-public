@@ -1537,13 +1537,51 @@ def extract_total(raw_text: str) -> float:
     _addr_re = re.compile(r"\b(?:str|stra(?:ß|ss)e|weg|platz|allee|gasse|ring|damm|ufer|chaussee)\.?\b", re.IGNORECASE)
     _date_re = re.compile(r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\b")
 
+    # Lines that look like totals but are NOT (discount, tax row, partial,
+    # savings shown as "you saved X"). Production hits:
+    #   Lidl: "Preisvorteil 0,80"      -> NOT total (savings)
+    #   Douglas: "Restbetrag 2,02"     -> NOT total (remaining after voucher)
+    #   any: "MwSt 19% 5,70"           -> NOT total (tax row)
+    #   any: "Netto 30,00"             -> NOT total (subtotal)
+    _NEGATIVE_LINE_KWS = (
+        "preisvorteil", "rabatt", "ersparnis", "nachlass", "skonto", "gutschein",
+        "discount", "remise", "réduction", "reduction", "descuento", "iskonto", "indirim",
+        "restbetrag", "teilbetrag", "anzahlung", "rückgeld", "wechselgeld", "rendu",
+        "tip", "trinkgeld", "service",
+    )
+    # Tax/subtotal rows — skip UNLESS the same line also says "Summe brutto" /
+    # "Total inkl MwSt" / "Gesamtbetrag inkl" (those are the actual total).
+    _TAX_ROW_KWS = ("netto", "mwst", "ust", "steuer", "tva", "vat ")
+    _TAX_OVERRIDE_RE = re.compile(
+        r"\b(?:summe|gesamt|total|gesamtbetrag|zu\s*zahlen|zahlbetrag|montant|importe|toplam)\b"
+        r".*(?:\bbrutto\b|\binkl\b|\bincl\b|\bdahil\b|\bcon\s*iva\b|\bttc\b)",
+        re.IGNORECASE,
+    )
+
+    def _is_negative_line(line: str) -> bool:
+        """True if line is a discount/tax/sub row — we should not pull the total from here."""
+        ll = line.lower()
+        # Hard skip — discount/savings/partial/refund lines
+        for kw in _NEGATIVE_LINE_KWS:
+            if re.search(rf"\b{re.escape(kw)}\b", ll):
+                return True
+        # Soft skip — tax rows, but not if the same line is a labelled total
+        for kw in _TAX_ROW_KWS:
+            if re.search(rf"\b{kw}\b", ll):
+                if _TAX_OVERRIDE_RE.search(ll):
+                    return False
+                return True
+        return False
+
     def _last_amount_on_line(line: str):
-        """Return last \d+.dd on line, or None if line is address/date or no amount.
+        """Return last \\d+.dd on line, or None if line is address/date/negative-row or has no amount.
         Avoids grabbing the trailing 2 digits of a 3+ decimal token (19.008 -> 19.00).
         """
         if _addr_re.search(line):
             return None
         if _date_re.search(line):
+            return None
+        if _is_negative_line(line):
             return None
         amounts = re.findall(r"(?<![\d.])\d+\.\d{2}(?![\d.])", line)
         if not amounts:
