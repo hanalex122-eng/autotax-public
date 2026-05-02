@@ -1521,9 +1521,50 @@ def extract_total(raw_text: str) -> float:
     text = normalize(raw_text)
     text = normalize_amount_text(text)
 
-    # Try high-priority keywords — collect ALL matches, prefer last on line
-    _lines_high = text.split("\n")
+    # Per-line normalized text — preserve newlines so per-line scan really
+    # works. `normalize` joins newlines into spaces, so we apply only the
+    # comma-decimal step to the raw line.
+    _per_line = []
+    for _ln in raw_text.split("\n"):
+        _ln = _ln.lower()
+        _ln = re.sub(r"(\d{1,3})\.(\d{3}),(\d{2})\b", lambda m: f"{m.group(1)}{m.group(2)}.{m.group(3)}", _ln)
+        _ln = re.sub(r"(\d+),(\d{2})\b", r"\1.\2", _ln)
+        _per_line.append(_ln)
+
+    # Lines that are addresses or dates — skip when scanning for amounts
+    # (street numbers and dates look like prices). Keep the data field
+    # available, just don't treat numbers in these lines as totals.
+    _addr_re = re.compile(r"\b(?:str|stra(?:ß|ss)e|weg|platz|allee|gasse|ring|damm|ufer|chaussee)\.?\b", re.IGNORECASE)
+    _date_re = re.compile(r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\b")
+
+    def _last_amount_on_line(line: str):
+        """Return last \d+.dd on line, or None if line is address/date or no amount.
+        Avoids grabbing the trailing 2 digits of a 3+ decimal token (19.008 -> 19.00).
+        """
+        if _addr_re.search(line):
+            return None
+        if _date_re.search(line):
+            return None
+        amounts = re.findall(r"(?<![\d.])\d+\.\d{2}(?![\d.])", line)
+        if not amounts:
+            return None
+        try:
+            return float(amounts[-1])
+        except ValueError:
+            return None
+
+    # Try high-priority keywords — line-scan FIRST (last amount on line is
+    # the correct total in VAT-breakdown layouts like "Summe 1.43 8.67 10.10"),
+    # then loose regex as fallback.
+    _lines_high = _per_line
     for kw in _TOTAL_KEYWORDS_HIGH:
+        # PRIMARY: keyword on a line → take LAST amount on that line
+        for line in _lines_high:
+            if re.search(rf"(?<!\w){kw}", line, re.IGNORECASE):
+                v = _last_amount_on_line(line)
+                if v is not None and 0.01 <= v < 100000:
+                    return v
+        # FALLBACK: loose regex over the joined text (covers cross-line layouts)
         pat = rf"(?<!\w){kw}\s*(?:inkl\.?\s*(?:mwst|ust|vat)\s*)?:?\s*(?:eur|€|\$|chf)?\s*(\d+\.\d{{2}})"
         matches = list(re.finditer(pat, text, re.IGNORECASE))
         if matches:
@@ -1532,14 +1573,6 @@ def extract_total(raw_text: str) -> float:
                 val = float(m.group(1))
                 if 0.01 <= val < 100000:
                     return val
-        # keyword on line, amount at END of same line
-        for line in _lines_high:
-            if re.search(rf"(?<!\w){kw}", line, re.IGNORECASE):
-                line_amounts = list(re.finditer(r"(\d+\.\d{2})", line))
-                if line_amounts:
-                    val = float(line_amounts[-1].group(1))  # last amount on line
-                    if 0.01 <= val < 100000:
-                        return val
         # NEW: keyword on line N, amount on line N+1..N+3 (big-label layouts:
         # "GESAMTBETRAG" alone on one line, amount on the next)
         for i, line in enumerate(_lines_high):
@@ -1551,9 +1584,13 @@ def extract_total(raw_text: str) -> float:
                     nxt = _lines_high[j].strip()
                     if not nxt:
                         continue
+                    # Skip if next line is an address/date (street numbers
+                    # and dates regularly look like prices to the regex).
+                    if _addr_re.search(nxt) or _date_re.search(nxt):
+                        continue
                     # Must be a short line with just an amount (and optionally
                     # a currency); skip if line looks like a new keyword row.
-                    amts = re.findall(r"(\d+\.\d{2})", nxt)
+                    amts = re.findall(r"(?<![\d.])\d+\.\d{2}(?![\d.])", nxt)
                     if not amts:
                         # Non-amount text between — stop looking
                         if len(nxt) > 4 and not re.match(r"^[\s€$\-=_]*$", nxt):
@@ -1563,8 +1600,15 @@ def extract_total(raw_text: str) -> float:
                     if 0.01 <= val < 100000:
                         return val
 
-    # Try medium-priority keywords — same full-line scan
+    # Try medium-priority keywords — line-scan first, loose regex as fallback
     for kw in _TOTAL_KEYWORDS_MED:
+        # PRIMARY: keyword on a line → take LAST amount on that line
+        for line in _per_line:
+            if re.search(rf"(?<!\w){kw}", line, re.IGNORECASE):
+                v = _last_amount_on_line(line)
+                if v is not None and 0.01 <= v < 100000:
+                    return v
+        # FALLBACK: loose regex over joined text
         pat = rf"(?<!\w){kw}\s*(?:inkl\.?\s*(?:mwst|ust|vat)\s*)?:?\s*(\d+\.\d{{2}})"
         matches = list(re.finditer(pat, text, re.IGNORECASE))
         if matches:
@@ -1572,13 +1616,6 @@ def extract_total(raw_text: str) -> float:
                 val = float(m.group(1))
                 if 0.01 <= val < 100000:
                     return val
-        for line in text.split("\n"):
-            if re.search(rf"(?<!\w){kw}", line, re.IGNORECASE):
-                line_amounts = list(re.finditer(r"(\d+\.\d{2})", line))
-                if line_amounts:
-                    val = float(line_amounts[-1].group(1))
-                    if 0.01 <= val < 100000:
-                        return val
 
     # Try EUR-prefixed or suffixed amounts
     eur_match = re.search(r"EUR\s*(\d+\.\d{2})", text, re.IGNORECASE)
@@ -1606,23 +1643,26 @@ def extract_total(raw_text: str) -> float:
                 return val
 
     # Fallback: largest reasonable amount on the receipt
-    # --- ADDED: skip values on TVA/VAT lines (they are rates, not amounts) ---
+    # Skip TVA/VAT-rate rows, discount rows, AND address/date rows. Operate
+    # on per-line normalized text so we keep line context (the joined `text`
+    # version glues addresses next to totals).
     amounts = []
-    lines = text.split("\n")
-    for line in lines:
-        # Skip lines that look like TVA/VAT rate table rows
+    for line in _per_line:
+        # Address (Johannerstr. 105 -> 1.05 was the bug) and date rows
+        if _addr_re.search(line) or _date_re.search(line):
+            continue
+        # TVA/VAT rate table rows
         if re.match(r"^\s*\d{1,2}[.,]\d{2}\s+\d", line):
-            continue  # "5.50  0.19  3.38  3.57" — TVA table row
+            continue
         if re.match(r"^\s*(?:tva|vat|mwst|ust|brut\b|net\b)", line, re.IGNORECASE):
             if not re.search(r"\b(?:summe|gesamt|total|brutto)\b", line, re.IGNORECASE):
-                continue  # pure VAT/netto line — skip; keep if combined with total kw
+                continue
         if re.search(r"\b(?:rabatt|discount|ersparnis|nachlass|skonto|gutschein)\b", line, re.IGNORECASE):
-            continue  # Discount/rebate line — not the total
-        for m in re.findall(r"(\d+\.\d{2})", line):
+            continue
+        for m in re.findall(r"(?<![\d.])\d+\.\d{2}(?![\d.])", line):
             val = float(m)
             if 0.01 <= val < 100000:
                 amounts.append(val)
-    # --- END ---
 
     if amounts:
         return max(amounts)
