@@ -2124,23 +2124,39 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
         _cur_vendor = (result.get("vendor") or "").strip()
         _is_default = _cur_vendor in ("Unbekannt", "Manual Entry", "") or len(_cur_vendor) < 3
 
+        # Adres tespit yardimcisi — Im Rotfeld 1 / Hauptweg 12 / Am Staden 4 / 66115 Saarbruecken / Stiftsbergstr. 1
+        import re as _re_v_chk
+        _addr_signals = ("str.", "strasse", "straße", "weg", "platz",
+                         "allee", "gasse", "ring", "damm", "ufer", "chaussee")
+        # "Im X 1" / "Am X 1" / "Auf der X 1" — sokak adi prefix'i (ev numarasiz da olabilir).
+        # Bunlar kesin adres prefix'leri, vendor adlarinda yok denecek kadar nadir
+        # ("Im Westen Nichts Neues" gibi yayinevi olurdu, fis olmaz).
+        _addr_prefix_re = _re_v_chk.compile(
+            r"^(?:im|am|an\s+der|auf\s+der|bei\s+der|in\s+der|zur|zum)\s+\w+",
+            _re_v_chk.IGNORECASE,
+        )
+
+        def _looks_like_address(line: str) -> bool:
+            if not line:
+                return False
+            ll = line.lower()
+            if any(s in ll for s in _addr_signals):
+                return True
+            if _re_v_chk.search(r"\b\d{5}\b", line):
+                return True
+            if _addr_prefix_re.match(line.strip()):
+                return True
+            return False
+
         # Vendor PARSER'dan gelse bile adres-benzeri ise reset edelim
         if _cur_vendor and not _is_default:
-            _v_lower = _cur_vendor.lower()
-            _addr_signals = ("str.", "strasse", "straße", "weg", "platz",
-                             "allee", "gasse", "ring", "damm", "ufer")
-            import re as _re_v_chk
-            _has_plz = bool(_re_v_chk.search(r"\b\d{5}\b", _cur_vendor))
-            _has_addr_kw = any(s in _v_lower for s in _addr_signals)
-            if _has_addr_kw or _has_plz:
+            if _looks_like_address(_cur_vendor):
                 logger.info("[VENDOR_FALLBACK] parser adres-benzeri vendor verdi, reset: %r", _cur_vendor)
                 _cur_vendor = ""
                 _is_default = True
 
         if _is_default:
             import re as _re_v
-            _addr_keywords = ("str.", "strasse", "straße", "weg", "platz",
-                              "allee", "gasse", "ring", "damm", "ufer")
             _candidate_upper = None  # UPPERCASE prioriteli
             _candidate_normal = None  # adres olmayan ilk satir (fallback)
 
@@ -2148,12 +2164,9 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                 _line = _line.strip()
                 if not _line or len(_line) < 3:
                     continue
-                _line_lower = _line.lower()
 
-                # Adres elimene
-                if any(kw in _line_lower for kw in _addr_keywords):
-                    continue
-                if _re_v.search(r"\b\d{5}\b", _line):  # PLZ
+                # Adres elimene (genisletilmis: Im/Am/Auf der + ev numarasi pattern'i dahil)
+                if _looks_like_address(_line):
                     continue
                 # Tarih/numara satirlari (tum digit veya cok digit)
                 if sum(c.isdigit() for c in _line) > len(_line) * 0.5:
