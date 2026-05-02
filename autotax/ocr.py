@@ -1,6 +1,7 @@
 import os
 import io
 import logging
+import re
 import httpx
 from fastapi import UploadFile
 
@@ -8,6 +9,35 @@ logger = logging.getLogger("autotax")
 
 OCR_API_KEY = os.getenv("OCR_API_KEY", "")
 OCR_API_URL = "https://api.ocr.space/parse/image"
+
+
+def _header_garbage_score(text: str, sample_chars: int = 250) -> tuple[float, int]:
+    """Score the OCR header (first ~250 chars — where logo lives).
+
+    Returns (real_word_ratio, real_word_count).
+    A real word = token with >= 3 chars and >= 60% letters.
+
+    Why a header-only scan: receipt logos confuse Tesseract; the corruption
+    is concentrated in the first few lines (vendor area). The body (items,
+    totals) often comes out fine on the same scan, so a whole-text quality
+    score under-reports the vendor problem.
+    """
+    if not text:
+        return 0.0, 0
+    sample = text[:sample_chars]
+    tokens = [t for t in re.split(r"\s+", sample) if t]
+    if not tokens:
+        return 0.0, 0
+    real = 0
+    for t in tokens:
+        t_clean = re.sub(r"^[^\w]+|[^\w]+$", "", t)
+        n = len(t_clean)
+        if n < 3 or n > 30:
+            continue
+        letters = sum(c.isalpha() for c in t_clean)
+        if letters >= n * 0.6 and letters >= 3:
+            real += 1
+    return real / len(tokens), real
 
 
 def _deskew_image(img):
@@ -176,10 +206,34 @@ async def extract_image_text(content: bytes, filename: str) -> str:
         logger.warning("[OCR] local error: %s", e)
         local_text = ""
     logger.info("[OCR] mode=%s local_length=%d", "PDF" if is_pdf else "IMAGE", len(local_text))
+
+    # Header-quality fallback (images only). Tesseract often returns 500+
+    # readable chars but with the logo area mangled into "5 et Be" /
+    # "i AE 4 Een 4" — the body is fine, the vendor line is garbage. We
+    # only swap to OCR.space when the *header* looks broken AND we have
+    # an API key configured. PDFs keep the existing length gate.
     if not is_pdf:
         if local_text and len(local_text) > 10:
-            logger.info("[OCR] using local OCR (image)")
-            return local_text
+            ratio, real_words = _header_garbage_score(local_text)
+            # Thresholds: <0.35 ratio OR <4 real words = header is garbage.
+            # Receipts usually have at least vendor + city + street name in
+            # the first ~250 chars when OCR works = 5+ real words easily.
+            header_bad = (ratio < 0.35 or real_words < 4)
+            if header_bad and OCR_API_KEY:
+                logger.info(
+                    "[OCR] tesseract header garbage (ratio=%.2f, words=%d) — trying OCR.space",
+                    ratio, real_words,
+                )
+                # fall through to API path below
+            else:
+                if header_bad:
+                    logger.info(
+                        "[OCR] tesseract header weak (ratio=%.2f, words=%d) but no OCR_API_KEY — keeping local",
+                        ratio, real_words,
+                    )
+                else:
+                    logger.info("[OCR] using local OCR (image, ratio=%.2f, words=%d)", ratio, real_words)
+                return local_text
     else:
         if local_text and len(local_text) > 50:
             logger.info("[OCR] using local OCR (pdf)")
@@ -219,15 +273,23 @@ async def extract_image_text(content: bytes, filename: str) -> str:
                     retry_data = retry_resp.json()
                     parsed = (retry_data.get("ParsedResults") or [])
                     if parsed:
-                        return ((parsed[0] or {}).get("ParsedText") or "").strip()
+                        text = ((parsed[0] or {}).get("ParsedText") or "").strip()
                 except Exception as e:
                     logger.warning("[OCR] retry failed: %s", e)
             # --- ADDED END ---
 
+            # Prefer API output when substantial; else fall back to whatever
+            # Tesseract gave (we only entered the API path when Tesseract
+            # header looked bad, but its body might still be useful).
+            if text and len(text) >= 20:
+                return text
+            if local_text:
+                logger.info("[OCR] API short/empty (%d chars) — keeping Tesseract output", len(text or ""))
+                return local_text
             return text
     except Exception as e:
         logger.warning("OCR API failed for %s: %s", filename, e)
-        return ""
+        return local_text or ""
 
 
 async def extract_handwriting_text(content: bytes, filename: str) -> str:
