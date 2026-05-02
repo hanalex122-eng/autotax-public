@@ -70,7 +70,7 @@ else:
     logger.info("✅ JWT_SECRET configured (secure mode)")
 
 # 2. Log sanitization — mask API keys in logs
-_sensitive_env_keys = ["OCR_API_KEY", "ANTHROPIC_API_KEY", "JWT_SECRET", "DATABASE_URL"]
+_sensitive_env_keys = ["OCR_API_KEY", "JWT_SECRET", "DATABASE_URL"]
 class _SanitizeLogFilter(logging.Filter):
     def filter(self, record):
         msg = str(record.getMessage())
