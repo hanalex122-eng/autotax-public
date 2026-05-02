@@ -2209,19 +2209,6 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
         if qr_data.get("qr_raw"):
             result["raw_text"] = result.get("raw_text", "") + "\n\n[QR] " + qr_data["qr_raw"]
 
-    # --- LLM fallback: if parser result is weak, ask Claude to fill gaps ---
-    # Only triggers when 2+ core fields are missing (saves API cost).
-    # Safe-failing: any error → parser result unchanged.
-    try:
-        from autotax.llm_extract import needs_llm_fallback, llm_extract_invoice, merge_with_parser
-        if needs_llm_fallback(result):
-            logger.info("[LLM] parser result weak — calling Claude Haiku fallback")
-            llm_data = await llm_extract_invoice(raw_text)
-            if llm_data:
-                result = merge_with_parser(result, llm_data)
-    except Exception as e:
-        logger.warning("[LLM] fallback skipped: %s", e)
-
     # Soft duplicate flag (same vendor + amount + date, case-insensitive vendor)
     db_soft = SessionLocal()
     try:
