@@ -2077,6 +2077,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
             "email": result.get("vendor_email"),
             "domain": result.get("vendor_domain"),
             "phone": result.get("vendor_phone"),
+            "address": result.get("vendor_address"),
         }
         _vmatch = match_vendor(user["sub"], identity_fields=_identity_fields)
         if _vmatch:
@@ -2603,7 +2604,9 @@ def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
         # vendor'in fisi geldiginde otomatik tanir.
         try:
             from autotax.vendor_identity import learn_from_invoice
-            learn_from_invoice(inv)
+            # source='manual' — PATCH = kullanici dogruladi. Adres/telefon/email
+            # yeterli (market fislerinde IBAN yok). Confidence=1.0 atanir.
+            learn_from_invoice(inv, source="manual")
         except Exception as e:
             logger.warning("Vendor identity auto-learn skipped: %s", e)
         # Sync changes to linked CashEntry (Kassenbuch)

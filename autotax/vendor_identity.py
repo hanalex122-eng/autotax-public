@@ -32,18 +32,24 @@ logger = logging.getLogger("autotax")
 
 # Hangi alanlarda eslesme aranir, oncelik sirasiyla. 'name' en sonda — sadece
 # diger kimlik anahtari hicbirinde eslesme yoksa fallback olarak kullanilir.
-MATCH_KEYS_PRIORITY = ("ust_id", "iban", "hrb", "email", "domain", "phone", "name")
+MATCH_KEYS_PRIORITY = ("ust_id", "iban", "hrb", "address", "email", "domain", "phone", "name")
 
 # Eslestirme guven skorlari — match() bu degeri match.score olarak doner
 MATCH_SCORE = {
     "ust_id": 1.00,    # USt-IdNr cok benzersiz, OCR'da bozulma riski az
     "iban": 0.95,
     "hrb": 0.90,
+    "address": 0.85,   # Sokak + ev no + PLZ — sube'yi kesin tanimlar
     "email": 0.80,
     "domain": 0.80,
     "phone": 0.65,     # En zayif — degistirilmedi
     "name": 0.60,      # Sadece dier hicbiri eslemeyince fallback
 }
+
+# Manuel olarak girilmis (source='manual', confidence=1.0) kayitlar bir
+# zayif anahtar uzerinden eslesirse skoru bu kadar artar — kullanicinin
+# kendisi dogruladigi icin guvenlidir, vendor lock'a yetecek seviyeye cikar.
+MANUAL_SOURCE_BOOST = 0.20
 
 # Overwrite protection esigi — mevcut kayit bu skorun ustundeyse uzerine
 # yazilmaz. Manuel kayitlar (confidence=1.0) korunur, auto_learned (0.7) update'lenebilir.
@@ -173,7 +179,14 @@ def match_vendor(user_id: int, ocr_text: str = "",
 
     db = SessionLocal()
     try:
-        # Mevcut anahtar bazli eslesme — degismedi (ust_id, iban, hrb, email, domain, phone)
+        def _final_score(base: float, source: Optional[str]) -> float:
+            """Manuel girilmis (source='manual') kayit ise skoru artir — kullanici
+            dogruladigi icin zayif anahtar bile lock'a yetsin. Cap 1.0."""
+            if source == "manual":
+                return min(base + MANUAL_SOURCE_BOOST, 1.0)
+            return base
+
+        # Mevcut anahtar bazli eslesme (ust_id, iban, hrb, email, domain, phone)
         for key in ("ust_id", "iban", "hrb", "email", "domain", "phone"):
             value = identity_fields.get(key)
             if not value:
@@ -201,19 +214,65 @@ def match_vendor(user_id: int, ocr_text: str = "",
                     db.commit()
                 except Exception:
                     db.rollback()
+                final = _final_score(MATCH_SCORE[key], row.source)
                 logger.info(
-                    "[VENDOR_MATCH] '%s' bulundu by=%s value=%s score=%.2f",
-                    row.vendor_name, key, normalized, MATCH_SCORE[key],
+                    "[VENDOR_MATCH] '%s' bulundu by=%s value=%s score=%.2f (source=%s)",
+                    row.vendor_name, key, normalized, final, row.source,
                 )
                 return VendorMatch(
                     vendor_name=row.vendor_name,
                     matched_by=key,
-                    score=MATCH_SCORE[key],
+                    score=final,
                     identity_id=row.id,
                     default_vat_rate=row.default_vat_rate,
                     default_category=row.default_category,
                     default_payment_method=row.default_payment_method,
                 )
+
+        # Adres bazli eslesme — IBAN'i olmayan market fislerinde tek anchor.
+        # Kayitli adresi (normalize) OCR'da gecen adres icinde substring olarak
+        # arariz. Esik: en az 8 karakter (random kelime cakismasini onler).
+        addr_value = identity_fields.get("address")
+        if addr_value and isinstance(addr_value, str) and len(addr_value.strip()) >= 8:
+            ocr_addr_norm = re.sub(r"[^\w\s]", " ", addr_value.lower())
+            ocr_addr_norm = re.sub(r"\s+", " ", ocr_addr_norm).strip()
+            if len(ocr_addr_norm) >= 8:
+                rows = (
+                    db.query(VendorIdentity)
+                    .filter(VendorIdentity.user_id == user_id)
+                    .filter(VendorIdentity.address.isnot(None))
+                    .order_by(VendorIdentity.confidence.desc(),
+                              VendorIdentity.use_count.desc())
+                    .all()
+                )
+                for row in rows:
+                    if not row.address:
+                        continue
+                    stored_norm = re.sub(r"[^\w\s]", " ", row.address.lower())
+                    stored_norm = re.sub(r"\s+", " ", stored_norm).strip()
+                    if len(stored_norm) < 8:
+                        continue
+                    if stored_norm in ocr_addr_norm or ocr_addr_norm in stored_norm:
+                        try:
+                            row.use_count = (row.use_count or 0) + 1
+                            row.last_used_at = datetime.now(timezone.utc)
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                        final = _final_score(MATCH_SCORE["address"], row.source)
+                        logger.info(
+                            "[VENDOR_MATCH] '%s' bulundu by=address score=%.2f (source=%s)",
+                            row.vendor_name, final, row.source,
+                        )
+                        return VendorMatch(
+                            vendor_name=row.vendor_name,
+                            matched_by="address",
+                            score=final,
+                            identity_id=row.id,
+                            default_vat_rate=row.default_vat_rate,
+                            default_category=row.default_category,
+                            default_payment_method=row.default_payment_method,
+                        )
 
         # Name fallback — sadece kimlik anahtari hicbirinde eslesme yoksa.
         # vendor_name OCR'da bozuk gelmis olabilecegi icin en dusuk skor (0.60).
@@ -383,23 +442,27 @@ def save_or_update(
         db.close()
 
 
-def learn_from_invoice(data) -> Optional[int]:
+def learn_from_invoice(data, source: str = "auto_learned") -> Optional[int]:
     """Confirmed fisten otomatik VendorIdentity ogrenir.
 
     `data` parametresi iki tipte olabilir (geriye uyumlu):
       - autotax.models.Invoice ORM objesi   — mevcut imza
       - dict — yeni: vendor_name + (ust_id OR iban) anahtarlari beklenir
 
-    Kurallar:
-      - vendor_name olmali (bos/'Unbekannt'/'Manual Entry' degil)
-      - ust_id VEYA iban olmali (digerleri olmadan kayit anlamsiz)
-      - source = 'auto_learned', confidence = 0.7 (save_or_update icinde atanir)
-      - Mevcut yuksek guvenli kayit (>0.9) varsa overwrite atlanir
+    `source`:
+      - "auto_learned" (default): KATI kural, ust_id veya iban gerekli
+        (kucuk veriden saglam fingerprint).
+      - "manual": kullanici PATCH'i — adres/telefon/email yeterli, cunku
+        kullanici dogruladigi vendor adini her ne olursa olsun kaydetmek
+        istiyor. Market fislerinde IBAN yok, eskiden ogrenmeyi atliyorduk.
 
     Asla raise etmez. Donus: yeni veya guncellenen VendorIdentity.id veya None.
     """
     if data is None:
         return None
+
+    def _have_any_identity_key(*vals) -> bool:
+        return any(v and str(v).strip() for v in vals)
 
     # --- dict yolu (yeni) ---
     if isinstance(data, dict):
@@ -408,9 +471,17 @@ def learn_from_invoice(data) -> Optional[int]:
             return None
         ust_id = data.get("ust_id") or data.get("vendor_ust_id")
         iban = data.get("iban") or data.get("vendor_iban")
-        # Kural: vendor_name + (ust_id OR iban) zorunlu
-        if not (ust_id or iban):
-            return None
+        phone = data.get("phone") or data.get("vendor_phone")
+        email = data.get("email") or data.get("vendor_email")
+        address = data.get("address") or data.get("vendor_address")
+        domain = data.get("domain") or data.get("vendor_domain")
+        # auto_learned: ust_id/iban zorunlu. manual: phone/email/address da kabul.
+        if source == "manual":
+            if not _have_any_identity_key(ust_id, iban, phone, email, address, domain):
+                return None
+        else:
+            if not (ust_id or iban):
+                return None
         user_id = data.get("user_id")
         if not user_id:
             return None
@@ -420,16 +491,16 @@ def learn_from_invoice(data) -> Optional[int]:
             ust_id=ust_id,
             iban=iban,
             hrb=data.get("hrb") or data.get("vendor_hrb"),
-            phone=data.get("phone") or data.get("vendor_phone"),
-            email=data.get("email") or data.get("vendor_email"),
-            domain=data.get("domain") or data.get("vendor_domain"),
-            address=data.get("address") or data.get("vendor_address"),
+            phone=phone,
+            email=email,
+            domain=domain,
+            address=address,
             default_vat_rate=data.get("default_vat_rate") or data.get("vat_rate"),
             default_category=data.get("default_category") or data.get("category"),
             default_payment_method=(
                 data.get("default_payment_method") or data.get("payment_method")
             ),
-            source="auto_learned",
+            source=source,
         )
 
     # --- Invoice ORM yolu (mevcut imza, geriye uyumlu) ---
@@ -439,20 +510,26 @@ def learn_from_invoice(data) -> Optional[int]:
         return None
     ust_id = getattr(invoice, "vendor_ust_id", None)
     iban = getattr(invoice, "vendor_iban", None)
-    # Kural: ust_id VEYA iban yoksa ogrenme atlanir
-    if not (ust_id or iban):
-        return None
+    phone = getattr(invoice, "vendor_phone", None)
+    email = getattr(invoice, "vendor_email", None)
+    address = getattr(invoice, "vendor_address", None)
+    if source == "manual":
+        if not _have_any_identity_key(ust_id, iban, phone, email, address):
+            return None
+    else:
+        if not (ust_id or iban):
+            return None
     return save_or_update(
         user_id=invoice.user_id,
         vendor_name=vendor_name,
         ust_id=ust_id,
         iban=iban,
         hrb=getattr(invoice, "vendor_hrb", None),
-        phone=getattr(invoice, "vendor_phone", None),
-        email=getattr(invoice, "vendor_email", None),
-        address=getattr(invoice, "vendor_address", None),
+        phone=phone,
+        email=email,
+        address=address,
         default_vat_rate=getattr(invoice, "vat_rate", None),
         default_category=getattr(invoice, "category", None),
         default_payment_method=getattr(invoice, "payment_method", None),
-        source="auto_learned",
+        source=source,
     )
