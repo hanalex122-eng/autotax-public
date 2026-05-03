@@ -342,7 +342,7 @@ def parse_date_str_to_datetime(date_str):
     return None
 
 
-def apply_filename_overrides(parsed: dict, filename: str) -> dict:
+def apply_filename_overrides(parsed: dict, filename: str, raw_text: str = "") -> dict:
     """Filename-based vendor + amount override.
 
     Kullanici fis dosyalarini 'lidl 97.55.pdf' / 'bereket metzger -63.47.pdf'
@@ -352,9 +352,15 @@ def apply_filename_overrides(parsed: dict, filename: str) -> dict:
     - Vendor: parser default ('Unbekannt') VEYA adres-benzeri VEYA item-line
       gibi suspect ise -> dosya adindan turetilen vendor'i kullan
       (KNOWN_VENDORS listesinden veya generic strip).
-    - Total: parser tutari ile dosya adindaki tutar 0.50 EUR/+%2'den fazla
-      farkli VEYA parser 0 ise -> dosya adindaki tutari kullan
-      (OCR'in '63'u '68' okumasi gibi durumlari kompanse eder).
+    - Total: parser HIGH-anchor (Gesamtbetrag/Summe/Total/Zu zahlen yaninda
+      tutari bulduysa) GUVENDE — override etme (Adobe regression: parser
+      29.74'u GESAMTBETRAG'dan dogru aldi, filename'de typo 19.74 vardi).
+      Aksi halde parser tutar 0 ise VEYA fark 0.50 EUR/+%2 + parser fuzzy
+      fallback'tan geldiyse -> filename'i kullan.
+
+    raw_text: parser'in HIGH-anchor confidence'ini hesaplamak icin
+    OCR ham metnine bakar. Bos string verilirse anchor check skip edilir
+    (geriye uyumlu — eski cagrilar yine calisir, sadece daha agresif olur).
 
     Hem sync hem async upload path'lerinden cagrilir.
     Asla raise etmez. parsed dict'i in-place degistirir ve geri doner.
@@ -480,18 +486,46 @@ def apply_filename_overrides(parsed: dict, filename: str) -> dict:
             logger.info("[FILENAME_OVERRIDE] vendor: %r -> %r", _cur, _file_vendor)
             parsed["vendor"] = _file_vendor
 
-    # 4) Amount override
+    # 4) Amount override — parser HIGH-anchor sahibi ise override yapma
     if _file_amount and _file_amount > 0:
         _parser_amount = parsed.get("total_amount") or 0
         try:
             _parser_amount = float(_parser_amount)
         except (TypeError, ValueError):
             _parser_amount = 0
+
+        # Parser amount, raw_text'te bir HIGH-anchor (Gesamtbetrag/Summe/
+        # Total/Zu zahlen/Brutto) yaninda gecirildiyse parser'a guven.
+        # Adobe regression onlemi: 'GESAMTBETRAG (EUR) 29.74' net duruyorsa
+        # filename'deki typo 19.74 ezmemeli.
+        _parser_confident = False
+        if _parser_amount > 0 and raw_text:
+            _amt_pat = (f"{_parser_amount:.2f}").replace(".", r"[,.]")
+            _anchor_pat = (
+                r"\b(?:gesamtbetrag|gesamt\s*betrag|gesamt\s*brutto|summe\s*brutto|"
+                r"summe\s+(?:eur|inkl)|zu\s*zahlen|zahlbetrag|"
+                r"rechnungsbetrag|rechnungssumme|endbetrag|"
+                r"grand\s*total|total\s*amount|amount\s*due|total\s*ttc)"
+                r"\b[\s\S]{0,40}?" + _amt_pat
+            )
+            try:
+                _parser_confident = bool(_re_fn.search(_anchor_pat, raw_text, _re_fn.IGNORECASE))
+            except Exception:
+                _parser_confident = False
+
         _diff = abs(_parser_amount - _file_amount)
-        _max_val = max(_parser_amount, _file_amount)
-        _significant = _parser_amount <= 0 or (_diff >= 0.50 and _diff / _max_val >= 0.02)
-        if _significant:
-            logger.info("[FILENAME_OVERRIDE] amount: %.2f -> %.2f (diff %.2f)",
+        _max_val = max(_parser_amount, _file_amount, 1)
+
+        if _parser_amount <= 0:
+            # Parser hicbir tutar bulamadi -> filename
+            logger.info("[FILENAME_OVERRIDE] amount: 0 -> %.2f (parser failed)", _file_amount)
+            parsed["total_amount"] = _file_amount
+        elif _parser_confident:
+            logger.info("[FILENAME_OVERRIDE] amount: parser=%.2f anchored, filename=%.2f ignored",
+                        _parser_amount, _file_amount)
+        elif _diff >= 0.50 and _diff / _max_val >= 0.02:
+            # Parser fuzzy bir yerden almis, fark anlamli -> filename
+            logger.info("[FILENAME_OVERRIDE] amount: %.2f -> %.2f (diff %.2f, no anchor)",
                         _parser_amount, _file_amount, _diff)
             parsed["total_amount"] = _file_amount
 
@@ -3011,7 +3045,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             if is_ocr_valid(_tess_text):
                 logger.info("Using local OCR (Tesseract) sync: %s (%d chars)", file.filename, len(_tess_text))
                 parsed = parse_invoice(_tess_text)
-                parsed = apply_filename_overrides(parsed, file.filename or "")
+                parsed = apply_filename_overrides(parsed, file.filename or "", raw_text=_tess_text)
                 if invoice_type in ("income", "expense"):
                     parsed["invoice_type"] = invoice_type
                 inv_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "")
@@ -3036,7 +3070,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             if len(stripped) >= 200 and _inv_kw:
                 logger.info("Using native PDF text (pdfplumber) sync: %s (%d chars)", file.filename, len(stripped))
                 parsed = parse_invoice(pdf_text)
-                parsed = apply_filename_overrides(parsed, file.filename or "")
+                parsed = apply_filename_overrides(parsed, file.filename or "", raw_text=pdf_text)
                 # Sanity guard: if parser returned no total, don't commit —
                 # fall through to OCR.space which may read the layout better.
                 if safe_float(parsed.get("total_amount")) > 0:
@@ -3065,7 +3099,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             fake = _UF(filename=filename, file=_io.BytesIO(content), headers=_Headers({"content-type": ct or "application/octet-stream"}))
             raw_text, qr_data = await _asyncio.wait_for(extract_text_and_qr(fake, handwriting=handwriting, file_bytes=content), timeout=60)
             parsed = parse_invoice(raw_text)
-            parsed = apply_filename_overrides(parsed, filename or "")
+            parsed = apply_filename_overrides(parsed, filename or "", raw_text=raw_text)
             if invoice_type in ("income", "expense"):
                 parsed["invoice_type"] = invoice_type
             # Update the placeholder invoice
