@@ -431,14 +431,17 @@ def apply_filename_overrides(parsed: dict, filename: str, raw_text: str = "") ->
         ("dm", "dm"),
     ]
     _file_vendor = None
+    _file_vendor_known = False  # True ise KNOWN listesinden, False ise generic strip
     for needle, vname in _KNOWN_VENDORS:
         if len(needle) <= 2:
             if _re_fn.search(rf"\b{_re_fn.escape(needle)}\b", _fname):
                 _file_vendor = vname
+                _file_vendor_known = True
                 break
         else:
             if needle in _fname:
                 _file_vendor = vname
+                _file_vendor_known = True
                 break
 
     if not _file_vendor:
@@ -480,10 +483,21 @@ def apply_filename_overrides(parsed: dict, filename: str, raw_text: str = "") ->
             (len(_file_vendor_lower) >= 3 and _file_vendor_lower in _cur_lower) or
             (len(_cur_lower) >= 3 and _cur_lower in _file_vendor_lower)
         )
-        if not _matches_filename and (
-            _is_default or _looks_like_address(_cur) or _is_suspect(_cur)
-        ):
-            logger.info("[FILENAME_OVERRIDE] vendor: %r -> %r", _cur, _file_vendor)
+        # Bilinen vendor (Lidl/Aral/Tedi/...) filename'de gecerse parser
+        # vendor'i o vendor'a 'matches_filename' degilse YANLIS demektir —
+        # parser muhtemelen logo/adres/garbage yakaladi. Ornekler:
+        #   filename 'lidl-9.18.pdf', parser 'LOB' / 'Lion' / '1m Rotfeld'
+        #   filename 'aral-30.pdf',   parser 'sven Meyer BS'
+        # Generic strip vendor'da (filename'den uretilmis) bu agresif olmaz —
+        # 'kebabhaus' gibi kullanici kendi yazmis olabilir, parser dogru
+        # bulduysa ezmeyelim.
+        _override = (
+            (_is_default or _looks_like_address(_cur) or _is_suspect(_cur))
+            or _file_vendor_known
+        )
+        if not _matches_filename and _override:
+            logger.info("[FILENAME_OVERRIDE] vendor: %r -> %r (known=%s)",
+                        _cur, _file_vendor, _file_vendor_known)
             parsed["vendor"] = _file_vendor
 
     # 4) Amount override — parser HIGH-anchor sahibi ise override yapma
