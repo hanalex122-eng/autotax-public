@@ -2246,9 +2246,36 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
             if _file_vendor:
                 _cur = (result.get("vendor") or "").strip()
                 _is_default = _cur in ("Unbekannt", "Manual Entry", "") or len(_cur) < 3
-                # Override edecek miyiz: parser default verdiyse VEYA adres-benzeri
-                # (Im/In/Am ile baslayan, ev numaralı satir) yakaladiysa.
-                if _is_default or _looks_like_address(_cur):
+
+                # Suspect vendor: parser bazen item satirini vendor sayar
+                # ('Jessa Slipeinlagen Lang 308t 1,45 1') veya promotion-line
+                # ('ACTION ab 1.99'). Bu durumlarda dosya adi user'in
+                # niyetine daha yakin.
+                def _is_suspect(name: str) -> bool:
+                    if not name:
+                        return True
+                    # Fiyat formatli sayi var (1,45 / 12.99)
+                    if _re_v_chk.search(r"\d+[,.]\d{2}", name):
+                        return True
+                    # 4+ kelime: vendor genelde 1-3 kelime
+                    if len(name.split()) > 4:
+                        return True
+                    # 4+ rakam: item kodlari
+                    if sum(c.isdigit() for c in name) > 4:
+                        return True
+                    return False
+
+                # Filename'i bulduysak ama parser vendor parser_filename'e yakin
+                # ise override etme — parser dogruyu bulmus olabilir
+                # (ornek: filename 'lidl 97.pdf', parser 'LIDL' -> ayni)
+                _file_vendor_lower = _file_vendor.lower().replace(" ", "")
+                _cur_lower = _re_v_chk.sub(r"[^a-z0-9]", "", _cur.lower())
+                _matches_filename = (_file_vendor_lower in _cur_lower or
+                                     _cur_lower in _file_vendor_lower)
+
+                if not _matches_filename and (
+                    _is_default or _looks_like_address(_cur) or _is_suspect(_cur)
+                ):
                     logger.info("[VENDOR_FILENAME] dosya adindan vendor: %r (parser: %r)",
                                 _file_vendor, _cur)
                     result["vendor"] = _file_vendor

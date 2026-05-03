@@ -1665,30 +1665,43 @@ def extract_total(raw_text: str) -> float:
                 if 0.01 <= val < 100000:
                     return val
 
-    # Try EUR-prefixed or suffixed amounts
-    eur_match = re.search(r"EUR\s*(\d+\.\d{2})", text, re.IGNORECASE)
-    if eur_match:
-        val = float(eur_match.group(1))
-        if 0.01 <= val < 100000:
-            return val
+    # EUR/€ pattern fallback — per-line, bottom-up, skips item-price lines.
+    # Production trap (fis 126 Bereket Metzger): line "0,498 kg x 12,99€/Kg"
+    # is a unit price (per-kilo), not a total. Without this skip the parser
+    # picked 12,99 EUR instead of the real total 57,51 (no anchor on that line).
+    _item_price_re = re.compile(
+        r"\b(?:kg|gramm|stk|stueck|stück|st\.|x\s*\d|/\s*kg|/\s*l\b|/\s*100\s*g)\b",
+        re.IGNORECASE,
+    )
 
-    # Try € symbol patterns (€12.34 or 12.34€ or 12,34 € or 30 EUR)
-    euro_patterns = [
-        r"€\s*(\d+\.\d{2})",
-        r"(\d+\.\d{2})\s*€",
-        r"(\d+\.\d{2})\s*eur\b",
-        r"(\d+\.\d{2})\s*tl\b",     # Türk Lirası
-        r"€\s*(\d+)\b",             # €30 (integer)
-        r"(\d+)\s*€",               # 30€
-        r"(\d+)\s+eur\b",           # 30 EUR
-        r"(\d+)\s+tl\b",            # 30 TL
-    ]
-    for pat in euro_patterns:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            val = float(m.group(1))
-            if 0.01 <= val < 100000:
-                return val
+    def _scan_currency_lines():
+        for line in reversed(_per_line):  # bottom-up
+            if _addr_re.search(line) or _date_re.search(line):
+                continue
+            if _is_negative_line(line):
+                continue
+            if _item_price_re.search(line):
+                # Unit-price line (e.g. '12,99 EUR/kg') — skip
+                continue
+            # Try strict 'X,YY' or 'X,YY EUR' / '€ X,YY' patterns
+            for pat in (
+                r"(?<![\d.])\d+\.\d{2}(?![\d.])\s*(?:eur|€)",
+                r"(?:eur|€)\s*(?<![\d.])\d+\.\d{2}(?![\d.])",
+                r"(?<![\d.])\d+\.\d{2}(?![\d.])\s*tl",
+            ):
+                matches = list(re.finditer(pat, line, re.IGNORECASE))
+                if matches:
+                    raw = matches[-1].group(0)
+                    num = re.search(r"\d+\.\d{2}", raw)
+                    if num:
+                        val = float(num.group(0))
+                        if 0.01 <= val < 100000:
+                            return val
+        return None
+
+    cur_val = _scan_currency_lines()
+    if cur_val is not None:
+        return cur_val
 
     # Fallback: largest reasonable amount on the receipt
     # Skip TVA/VAT-rate rows, discount rows, AND address/date rows. Operate
