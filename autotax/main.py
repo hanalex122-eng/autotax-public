@@ -1042,6 +1042,54 @@ def ccpa_do_not_sell(user: dict = Depends(get_current_user)):
             "status": "confirmed", "applies_to": "CCPA (California), all regions"}
 
 
+@app.get("/impressum", response_class=HTMLResponse)
+def impressum_page():
+    """Impressum nach § 5 DDG (Almanya yasal zorunluluk)."""
+    return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Impressum — AutoTax-HUB</title>
+<style>body{font-family:'DM Sans',sans-serif;max-width:820px;margin:40px auto;padding:20px;background:#050a12;color:#e8edf5;line-height:1.75}
+h1{color:#10b981;font-size:28px}h2{color:#00a8cc;margin-top:28px;font-size:17px}
+a{color:#10b981}p{margin:10px 0}strong{color:#f59e0b}
+.note{background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);padding:12px 16px;border-radius:10px;font-size:13px;margin:16px 0}</style></head><body>
+<p><a href="/">← Startseite</a> · <a href="/datenschutz">Datenschutz</a> · <a href="/agb">AGB</a></p>
+<h1>Impressum</h1>
+<p><em>Angaben gemäß § 5 DDG (Digitale-Dienste-Gesetz) und § 55 RStV.</em></p>
+
+<h2>Diensteanbieter</h2>
+<p><strong>Hüseyin Hancer</strong><br>
+Wiesenstr. 10<br>
+66115 Saarbrücken<br>
+Deutschland</p>
+
+<h2>Kontakt</h2>
+<p>E-Mail: <a href="mailto:info@autotaxhub.de">info@autotaxhub.de</a><br>
+Datenschutz: <a href="mailto:datenschutz@autotaxhub.de">datenschutz@autotaxhub.de</a></p>
+
+<h2>Umsatzsteuer-ID</h2>
+<p>Umsatzsteuer-Identifikationsnummer gemäß § 27 a Umsatzsteuergesetz: <em>wird nachgereicht / Kleinunternehmer gemäß § 19 UStG</em></p>
+
+<h2>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</h2>
+<p>Hüseyin Hancer (Anschrift wie oben)</p>
+
+<h2>Streitschlichtung</h2>
+<p>Die Europäische Kommission stellt eine Plattform zur Online-Streitbeilegung (OS) bereit:
+<a href="https://ec.europa.eu/consumers/odr" target="_blank" rel="noopener">https://ec.europa.eu/consumers/odr</a>.<br>
+Wir sind nicht bereit oder verpflichtet, an Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teilzunehmen.</p>
+
+<h2>Haftung für Inhalte</h2>
+<p>Als Diensteanbieter sind wir gemäß § 7 Abs.1 DDG für eigene Inhalte auf diesen Seiten nach den allgemeinen Gesetzen verantwortlich. Nach §§ 8 bis 10 DDG sind wir als Diensteanbieter jedoch nicht verpflichtet, übermittelte oder gespeicherte fremde Informationen zu überwachen oder nach Umständen zu forschen, die auf eine rechtswidrige Tätigkeit hinweisen.</p>
+
+<h2>Haftung für Links</h2>
+<p>Unser Angebot enthält Links zu externen Webseiten Dritter, auf deren Inhalte wir keinen Einfluss haben. Deshalb können wir für diese fremden Inhalte auch keine Gewähr übernehmen. Für die Inhalte der verlinkten Seiten ist stets der jeweilige Anbieter oder Betreiber der Seiten verantwortlich.</p>
+
+<h2>Urheberrecht</h2>
+<p>Die durch die Seitenbetreiber erstellten Inhalte und Werke auf diesen Seiten unterliegen dem deutschen Urheberrecht. Die Vervielfältigung, Bearbeitung, Verbreitung und jede Art der Verwertung außerhalb der Grenzen des Urheberrechtes bedürfen der schriftlichen Zustimmung des jeweiligen Autors bzw. Erstellers.</p>
+
+<div class="note"><strong>Hinweis zur Steuerberatung:</strong> AutoTax-HUB ist <em>keine</em> Steuerberatungssoftware im Sinne des Steuerberatungsgesetzes (StBerG). Der Dienst stellt lediglich technische Werkzeuge zur Belegerfassung und -archivierung bereit. Für steuerliche Beratung wenden Sie sich bitte an einen zugelassenen Steuerberater.</div>
+
+<p style="margin-top:40px;color:#64748b;font-size:13px">© 2026 AutoTax-HUB · Stand: Mai 2026</p>
+</body></html>""")
+
+
 @app.get("/agb", response_class=HTMLResponse)
 def agb_page():
     return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>AGB — AutoTax-HUB</title>
