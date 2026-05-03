@@ -342,6 +342,162 @@ def parse_date_str_to_datetime(date_str):
     return None
 
 
+def apply_filename_overrides(parsed: dict, filename: str) -> dict:
+    """Filename-based vendor + amount override.
+
+    Kullanici fis dosyalarini 'lidl 97.55.pdf' / 'bereket metzger -63.47.pdf'
+    seklinde adlandiriyor — vendor adi + toplam tutar dosya adinda.
+    Bu fonksiyon parser sonucunu (parsed dict) duzeltir:
+
+    - Vendor: parser default ('Unbekannt') VEYA adres-benzeri VEYA item-line
+      gibi suspect ise -> dosya adindan turetilen vendor'i kullan
+      (KNOWN_VENDORS listesinden veya generic strip).
+    - Total: parser tutari ile dosya adindaki tutar 0.50 EUR/+%2'den fazla
+      farkli VEYA parser 0 ise -> dosya adindaki tutari kullan
+      (OCR'in '63'u '68' okumasi gibi durumlari kompanse eder).
+
+    Hem sync hem async upload path'lerinden cagrilir.
+    Asla raise etmez. parsed dict'i in-place degistirir ve geri doner.
+    """
+    import re as _re_fn
+    if not filename:
+        return parsed
+
+    _fname = filename.lower()
+    _addr_signals = ("str.", "strasse", "straße", "weg", "platz",
+                     "allee", "gasse", "ring", "damm", "ufer", "chaussee")
+    _addr_prefix_re = _re_fn.compile(
+        r"^(?:im|am|an\s+der|auf\s+der|bei\s+der|in\s+der|zur|zum)\s+\w+",
+        _re_fn.IGNORECASE,
+    )
+    _in_address_re = _re_fn.compile(
+        r"^in\s+\S+(?:\s+\S+)?\s+\d{1,4}[a-z]?\s*$",
+        _re_fn.IGNORECASE,
+    )
+
+    def _looks_like_address(line: str) -> bool:
+        if not line:
+            return False
+        ll = line.lower()
+        if any(s in ll for s in _addr_signals):
+            return True
+        if _re_fn.search(r"\b\d{5}\b", line):
+            return True
+        if _addr_prefix_re.match(line.strip()):
+            return True
+        if _in_address_re.match(line.strip()):
+            return True
+        return False
+
+    def _is_suspect(name: str) -> bool:
+        if not name:
+            return True
+        if _re_fn.search(r"\d+[,.]\d{2}", name):
+            return True
+        if len(name.split()) > 4:
+            return True
+        if sum(c.isdigit() for c in name) > 4:
+            return True
+        _alpha = sum(c.isalpha() for c in name)
+        _punct = sum(1 for c in name if c in ".'\"/\\|`~^*+={}[]()<>")
+        if _alpha > 0 and _punct / max(_alpha, 1) > 0.2:
+            return True
+        return False
+
+    # 1) Filename'den vendor cikar
+    _KNOWN_VENDORS = [
+        ("media markt", "Media Markt"), ("mediamarkt", "Media Markt"),
+        ("lidl", "Lidl"), ("lidel", "Lidl"),
+        ("aldi", "Aldi"), ("rewe", "Rewe"), ("edeka", "Edeka"),
+        ("kaufland", "Kaufland"), ("penny", "Penny"), ("netto", "Netto"),
+        ("norma", "Norma"), ("tegut", "Tegut"), ("globus", "Globus"),
+        ("aral", "Aral"), ("shell", "Shell"), ("esso", "Esso"),
+        ("douglas", "Douglas"), ("rossmann", "Rossmann"),
+        ("müller", "Müller"), ("muller", "Müller"),
+        ("saturn", "Saturn"), ("expert", "Expert"), ("euronics", "Euronics"),
+        ("tedi", "TEDI"), ("action", "Action"), ("kik", "KiK"),
+        ("woolworth", "Woolworth"), ("snipes", "Snipes"),
+        ("deichmann", "Deichmann"), ("zara", "Zara"), ("primark", "Primark"),
+        ("h&m", "H&M"), ("c&a", "C&A"),
+        ("ikea", "IKEA"), ("bauhaus", "Bauhaus"), ("obi", "OBI"),
+        ("hornbach", "Hornbach"), ("toom", "Toom"),
+        ("amazon", "Amazon"), ("ebay", "eBay"), ("zalando", "Zalando"),
+        ("dm", "dm"),
+    ]
+    _file_vendor = None
+    for needle, vname in _KNOWN_VENDORS:
+        if len(needle) <= 2:
+            if _re_fn.search(rf"\b{_re_fn.escape(needle)}\b", _fname):
+                _file_vendor = vname
+                break
+        else:
+            if needle in _fname:
+                _file_vendor = vname
+                break
+
+    if not _file_vendor:
+        _base = _re_fn.sub(r"\.[a-z0-9]+$", "", _fname, flags=_re_fn.IGNORECASE)
+        _base = _re_fn.sub(r"[-_\s]+\d{1,5}[.,]?\d{0,2}\s*$", "", _base)
+        _base = _re_fn.sub(r"[-_]+", " ", _base)
+        _base = _re_fn.sub(r"\s+", " ", _base).strip()
+        _GENERIC_FNAME_PREFIXES = ("scan", "img", "image", "photo", "doc",
+                                   "page", "untitled", "kopie", "copy",
+                                   "neu", "neue", "test", "rechnung",
+                                   "invoice", "fatura", "fis")
+        _is_generic = (
+            not _base or len(_base) < 3 or
+            any(_base.lower().startswith(p) and len(_base) <= len(p) + 5
+                for p in _GENERIC_FNAME_PREFIXES)
+        )
+        if not _is_generic:
+            _file_vendor = _base if _base == _base.upper() else _base.title()
+
+    # 2) Filename'den tutar cikar
+    _file_amount = None
+    try:
+        _amt_m = _re_fn.search(
+            r"(\d{1,5})[.,](\d{2})\s*$",
+            _re_fn.sub(r"\.[a-z0-9]+$", "", _fname, flags=_re_fn.IGNORECASE),
+        )
+        if _amt_m:
+            _file_amount = float(f"{_amt_m.group(1)}.{_amt_m.group(2)}")
+    except Exception:
+        pass
+
+    # 3) Vendor override
+    if _file_vendor:
+        _cur = (parsed.get("vendor") or "").strip()
+        _is_default = _cur in ("Unbekannt", "Manual Entry", "") or len(_cur) < 3
+        _file_vendor_lower = _file_vendor.lower().replace(" ", "")
+        _cur_lower = _re_fn.sub(r"[^a-z0-9]", "", _cur.lower())
+        _matches_filename = bool(_file_vendor_lower) and (
+            (len(_file_vendor_lower) >= 3 and _file_vendor_lower in _cur_lower) or
+            (len(_cur_lower) >= 3 and _cur_lower in _file_vendor_lower)
+        )
+        if not _matches_filename and (
+            _is_default or _looks_like_address(_cur) or _is_suspect(_cur)
+        ):
+            logger.info("[FILENAME_OVERRIDE] vendor: %r -> %r", _cur, _file_vendor)
+            parsed["vendor"] = _file_vendor
+
+    # 4) Amount override
+    if _file_amount and _file_amount > 0:
+        _parser_amount = parsed.get("total_amount") or 0
+        try:
+            _parser_amount = float(_parser_amount)
+        except (TypeError, ValueError):
+            _parser_amount = 0
+        _diff = abs(_parser_amount - _file_amount)
+        _max_val = max(_parser_amount, _file_amount)
+        _significant = _parser_amount <= 0 or (_diff >= 0.50 and _diff / _max_val >= 0.02)
+        if _significant:
+            logger.info("[FILENAME_OVERRIDE] amount: %.2f -> %.2f (diff %.2f)",
+                        _parser_amount, _file_amount, _diff)
+            parsed["total_amount"] = _file_amount
+
+    return parsed
+
+
 def auto_create_cash_entry(invoice_id: int, user_id: int, data: dict):
     """Create a CashEntry automatically when an invoice is uploaded."""
     db = SessionLocal()
@@ -2855,6 +3011,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             if is_ocr_valid(_tess_text):
                 logger.info("Using local OCR (Tesseract) sync: %s (%d chars)", file.filename, len(_tess_text))
                 parsed = parse_invoice(_tess_text)
+                parsed = apply_filename_overrides(parsed, file.filename or "")
                 if invoice_type in ("income", "expense"):
                     parsed["invoice_type"] = invoice_type
                 inv_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "")
@@ -2879,6 +3036,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             if len(stripped) >= 200 and _inv_kw:
                 logger.info("Using native PDF text (pdfplumber) sync: %s (%d chars)", file.filename, len(stripped))
                 parsed = parse_invoice(pdf_text)
+                parsed = apply_filename_overrides(parsed, file.filename or "")
                 # Sanity guard: if parser returned no total, don't commit —
                 # fall through to OCR.space which may read the layout better.
                 if safe_float(parsed.get("total_amount")) > 0:
@@ -2907,6 +3065,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             fake = _UF(filename=filename, file=_io.BytesIO(content), headers=_Headers({"content-type": ct or "application/octet-stream"}))
             raw_text, qr_data = await _asyncio.wait_for(extract_text_and_qr(fake, handwriting=handwriting, file_bytes=content), timeout=60)
             parsed = parse_invoice(raw_text)
+            parsed = apply_filename_overrides(parsed, filename or "")
             if invoice_type in ("income", "expense"):
                 parsed["invoice_type"] = invoice_type
             # Update the placeholder invoice
