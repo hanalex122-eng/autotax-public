@@ -3087,6 +3087,16 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                     logger.info("Async OCR completed: invoice %d (%s, €%.2f)", inv_id, parsed.get("vendor"), safe_float(parsed.get("total_amount")))
             finally:
                 db_bg.close()
+
+            # Create the cash-entry mirror in Kassenbuch. The two sync
+            # fast-paths above (Tesseract / pdfplumber) call this directly
+            # — the bg OCR path was missing it, so PDF scans that fall
+            # through to OCR.space ended up in /invoices but never in
+            # /bookkeeping. User reported: 'fisler kassenbucher gitmiyor'.
+            try:
+                auto_create_cash_entry(inv_id, user_sub, parsed)
+            except Exception as ce:
+                logger.warning("Auto cash-entry failed for invoice %d: %s", inv_id, ce)
         except Exception as e:
             logger.warning("Async OCR failed for invoice %d: %s", inv_id, e)
 
