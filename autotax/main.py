@@ -3131,8 +3131,21 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                     inv.payment_method = parsed.get("payment_method") or ""
                     inv.raw_text = raw_text[:2000]
                     inv.processed = True
+                    # Vendor identity fields — A4 fatura icin printout'ta gerekli.
+                    # Sync upload path bunlari save_invoice() icinden zaten yaziyor;
+                    # bg OCR path'i de ayni alanlari yazsin diye buraya eklendi.
+                    # Ust-IdNr / IBAN / email / phone / adres / HRB / domain.
+                    inv.vendor_iban = parsed.get("vendor_iban") or ""
+                    inv.vendor_email = parsed.get("vendor_email") or ""
+                    inv.vendor_phone = parsed.get("vendor_phone") or ""
+                    inv.vendor_address = parsed.get("vendor_address") or ""
+                    inv.vendor_ust_id = parsed.get("vendor_ust_id") or None
+                    inv.vendor_hrb = parsed.get("vendor_hrb") or None
                     db_bg.commit()
-                    logger.info("Async OCR completed: invoice %d (%s, €%.2f)", inv_id, parsed.get("vendor"), safe_float(parsed.get("total_amount")))
+                    logger.info("Async OCR completed: invoice %d (%s, €%.2f, ust_id=%s)",
+                                inv_id, parsed.get("vendor"),
+                                safe_float(parsed.get("total_amount")),
+                                parsed.get("vendor_ust_id") or "-")
             finally:
                 db_bg.close()
 
