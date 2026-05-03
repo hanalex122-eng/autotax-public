@@ -2136,6 +2136,13 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
             r"^(?:im|am|an\s+der|auf\s+der|bei\s+der|in\s+der|zur|zum)\s+\w+",
             _re_v_chk.IGNORECASE,
         )
+        # "In Rotfeld 1" / "In R)tfeld 1" — Lidl tarzi: "In" + kelime + ev numarasi.
+        # 'in' tek basina cok genel oldugu icin (Inception/In Stock vs.) bu pattern'i
+        # ayri bir regex'e koyduk: 'In ' + (en az 1 word) + ' ' + (1-4 rakam, opsiyonel a/b/c) + sonu.
+        _in_address_re = _re_v_chk.compile(
+            r"^in\s+\S+(?:\s+\S+)?\s+\d{1,4}[a-z]?\s*$",
+            _re_v_chk.IGNORECASE,
+        )
 
         def _looks_like_address(line: str) -> bool:
             if not line:
@@ -2146,6 +2153,8 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
             if _re_v_chk.search(r"\b\d{5}\b", line):
                 return True
             if _addr_prefix_re.match(line.strip()):
+                return True
+            if _in_address_re.match(line.strip()):
                 return True
             return False
 
@@ -2193,6 +2202,58 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                             chosen, "UPPERCASE" if _candidate_upper else "ilk-anlamli")
     except Exception as e:
         logger.warning("[VENDOR_FALLBACK] hata: %s", e)
+
+    # --- STEP 2d: Filename-based vendor fallback ---
+    # Kullanici dosyalari "lidl 97.55.pdf" / "LIDEL 63.pdf" / "TEDI 3.00.pdf"
+    # gibi adlandiriyor. OCR vendor'i adres olarak yakalarsa veya bos kalirsa
+    # dosya adindaki bilinen vendor'i fallback olarak kullan.
+    try:
+        _fname = (file.filename or "").lower()
+        if _fname:
+            # Bilinen Almanya zinciri vendor'leri — dosya adinda gecerse match.
+            # Sira: en spesifik (uzun) once, kismi match'leri onler.
+            _KNOWN_VENDORS = [
+                ("media markt", "Media Markt"), ("mediamarkt", "Media Markt"),
+                ("lidl", "Lidl"), ("lidel", "Lidl"),  # tipo
+                ("aldi", "Aldi"), ("rewe", "Rewe"), ("edeka", "Edeka"),
+                ("kaufland", "Kaufland"), ("penny", "Penny"), ("netto", "Netto"),
+                ("norma", "Norma"), ("tegut", "Tegut"), ("globus", "Globus"),
+                ("aral", "Aral"), ("shell", "Shell"), ("esso", "Esso"),
+                ("douglas", "Douglas"), ("rossmann", "Rossmann"),
+                ("müller", "Müller"), ("muller", "Müller"),
+                ("saturn", "Saturn"), ("expert", "Expert"), ("euronics", "Euronics"),
+                ("tedi", "TEDI"), ("action", "Action"), ("kik", "KiK"),
+                ("woolworth", "Woolworth"), ("snipes", "Snipes"),
+                ("deichmann", "Deichmann"), ("zara", "Zara"), ("primark", "Primark"),
+                ("h&m", "H&M"), ("c&a", "C&A"),
+                ("ikea", "IKEA"), ("bauhaus", "Bauhaus"), ("obi", "OBI"),
+                ("hornbach", "Hornbach"), ("toom", "Toom"),
+                ("amazon", "Amazon"), ("ebay", "eBay"), ("zalando", "Zalando"),
+                ("dm", "dm"),  # "dm" en sonda — kisa pattern
+            ]
+            _file_vendor = None
+            for needle, vname in _KNOWN_VENDORS:
+                # "dm" gibi kisa pattern'ler icin word-boundary, digerleri icin substring.
+                if len(needle) <= 2:
+                    if _re_v_chk.search(rf"\b{_re_v_chk.escape(needle)}\b", _fname):
+                        _file_vendor = vname
+                        break
+                else:
+                    if needle in _fname:
+                        _file_vendor = vname
+                        break
+
+            if _file_vendor:
+                _cur = (result.get("vendor") or "").strip()
+                _is_default = _cur in ("Unbekannt", "Manual Entry", "") or len(_cur) < 3
+                # Override edecek miyiz: parser default verdiyse VEYA adres-benzeri
+                # (Im/In/Am ile baslayan, ev numaralı satir) yakaladiysa.
+                if _is_default or _looks_like_address(_cur):
+                    logger.info("[VENDOR_FILENAME] dosya adindan vendor: %r (parser: %r)",
+                                _file_vendor, _cur)
+                    result["vendor"] = _file_vendor
+    except Exception as e:
+        logger.warning("[VENDOR_FILENAME] hata: %s", e)
 
     # --- STEP 3: Merge learning over parser defaults ---
     # Learning wins ONLY for fields where parser returned defaults
