@@ -2243,6 +2243,47 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                         _file_vendor = vname
                         break
 
+            # GENERIC fallback: bilinen listede yoksa dosya adindan
+            # uzantiyi ve fiyat parcasini soyup geriyi vendor adi olarak al.
+            # 'bereket metzger--22.43.pdf' -> 'Bereket Metzger'
+            # 'kebabhaus 12.50.pdf'        -> 'Kebabhaus'
+            # 'scan001.pdf'                -> None (scanner default name)
+            if not _file_vendor:
+                _base = _re_v_chk.sub(r"\.[a-z0-9]+$", "", _fname, flags=_re_v_chk.IGNORECASE)
+                _base = _re_v_chk.sub(r"[-_\s]+\d{1,5}[.,]?\d{0,2}\s*$", "", _base)
+                _base = _re_v_chk.sub(r"[-_]+", " ", _base)
+                _base = _re_v_chk.sub(r"\s+", " ", _base).strip()
+                # Generic scanner default names — bunlar vendor degil
+                _GENERIC_FNAME_PREFIXES = ("scan", "img", "image", "photo", "doc",
+                                           "page", "untitled", "kopie", "copy",
+                                           "neu", "neue", "test", "rechnung",
+                                           "invoice", "fatura", "fis")
+                _base_lower = _base.lower()
+                _is_generic = (
+                    not _base or len(_base) < 3 or
+                    any(_base_lower.startswith(p) and len(_base) <= len(p) + 5
+                        for p in _GENERIC_FNAME_PREFIXES)
+                )
+                if not _is_generic:
+                    if _base == _base.upper():
+                        _file_vendor = _base
+                    else:
+                        _file_vendor = _base.title()
+
+            # FILENAME AMOUNT — kullanici '...-22.43.pdf' / '... 63.47.pdf' formatinda
+            # toplam tutari dosya adina yaziyor. Parser'in bulduguyla farkliysa
+            # filename'e guvenilir referans olarak bakariz.
+            _file_amount = None
+            try:
+                # Sondaki X.YY veya X,YY (1-5 hane integer + 2 hane decimal)
+                _amt_m = _re_v_chk.search(r"(\d{1,5})[.,](\d{2})\s*$",
+                                           _re_v_chk.sub(r"\.[a-z0-9]+$", "", _fname,
+                                                          flags=_re_v_chk.IGNORECASE))
+                if _amt_m:
+                    _file_amount = float(f"{_amt_m.group(1)}.{_amt_m.group(2)}")
+            except Exception:
+                pass
+
             if _file_vendor:
                 _cur = (result.get("vendor") or "").strip()
                 _is_default = _cur in ("Unbekannt", "Manual Entry", "") or len(_cur) < 3
@@ -2263,6 +2304,12 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                     # 4+ rakam: item kodlari
                     if sum(c.isdigit() for c in name) > 4:
                         return True
+                    # OCR garbage: cok fazla noktalama / ozel karakter
+                    # ('Ber Ek F.\'V M Er' gibi parcalanmis logo)
+                    _alpha = sum(c.isalpha() for c in name)
+                    _punct = sum(1 for c in name if c in ".'\"/\\|`~^*+={}[]()<>")
+                    if _alpha > 0 and _punct / max(_alpha, 1) > 0.2:
+                        return True
                     return False
 
                 # Filename'i bulduysak ama parser vendor parser_filename'e yakin
@@ -2270,8 +2317,10 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                 # (ornek: filename 'lidl 97.pdf', parser 'LIDL' -> ayni)
                 _file_vendor_lower = _file_vendor.lower().replace(" ", "")
                 _cur_lower = _re_v_chk.sub(r"[^a-z0-9]", "", _cur.lower())
-                _matches_filename = (_file_vendor_lower in _cur_lower or
-                                     _cur_lower in _file_vendor_lower)
+                _matches_filename = bool(_file_vendor_lower) and (
+                    (len(_file_vendor_lower) >= 3 and _file_vendor_lower in _cur_lower) or
+                    (len(_cur_lower) >= 3 and _cur_lower in _file_vendor_lower)
+                )
 
                 if not _matches_filename and (
                     _is_default or _looks_like_address(_cur) or _is_suspect(_cur)
@@ -2279,6 +2328,21 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                     logger.info("[VENDOR_FILENAME] dosya adindan vendor: %r (parser: %r)",
                                 _file_vendor, _cur)
                     result["vendor"] = _file_vendor
+
+            # Filename amount override — parser total'i ile filename amount'u
+            # cok farkliysa (5+ EUR sapma VEYA parser 0/None ise) filename'i kullan.
+            # Kullanici bilincli olarak adlandirir; OCR Tesseract '63'u '68' okusa
+            # bile filename'deki '63.47' dogru cevap.
+            if _file_amount and _file_amount > 0:
+                _parser_amount = result.get("total_amount") or 0
+                _diff = abs(_parser_amount - _file_amount)
+                _max_val = max(_parser_amount, _file_amount)
+                # Trigger: parser bos VEYA fark >= 0.50 EUR ve >= %2 (kucuk yuvarlamalari yoksay)
+                _significant = _parser_amount <= 0 or (_diff >= 0.50 and _diff / _max_val >= 0.02)
+                if _significant:
+                    logger.info("[AMOUNT_FILENAME] dosya adindan tutar: %.2f (parser: %.2f, fark: %.2f)",
+                                _file_amount, _parser_amount, _diff)
+                    result["total_amount"] = _file_amount
     except Exception as e:
         logger.warning("[VENDOR_FILENAME] hata: %s", e)
 
