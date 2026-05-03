@@ -1548,6 +1548,7 @@ def extract_total(raw_text: str) -> float:
         "discount", "remise", "réduction", "reduction", "descuento", "iskonto", "indirim",
         "restbetrag", "teilbetrag", "anzahlung", "rückgeld", "wechselgeld", "rendu",
         "tip", "trinkgeld", "service",
+        "zwischensumme", "subtotal", "sub-total", "ara toplam",
     )
     # Tax/subtotal rows — skip UNLESS the same line also says "Summe brutto" /
     # "Total inkl MwSt" / "Gesamtbetrag inkl" (those are the actual total).
