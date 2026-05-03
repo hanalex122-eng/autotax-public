@@ -2200,12 +2200,24 @@ def extract_entities(text: str) -> dict:
     phones = [p.strip() for p in raw_tels if sum(c.isdigit() for c in p) >= 7]
     faxes = [f.strip() for f in raw_faxes if sum(c.isdigit() for c in f) >= 7]
 
-    # Address: lines containing street keywords + house number
+    # Address: lines containing street keywords + (optional) house number.
+    # Genisletildi: A4 dijital fatura adresinde sokak adi var ama ev numarasi
+    # baska satirda olabilir (Adobe: "10, Wiesenstrasse Dudweiler"). Ev no
+    # zorunlu degil — sadece sokak keyword'u yeterli.
     addr_keywords = r"(?:str\.|straße|strasse|weg|platz|allee|gasse|ring|damm|ufer|chaussee|avenue|rue|road|street)"
-    addr_pat = r"(?i)(.{0,40}" + addr_keywords + r".{0,30}\d{1,5}.{0,20})"
+    addr_pat = r"(?i)(.{0,40}" + addr_keywords + r".{0,30}\d{0,5}.{0,20})"
     addresses = [a.strip() for a in _re.findall(addr_pat, text)]
-    # Also match "PLZ Ort" pattern: 5-digit ZIP + city name
-    plz_pat = r"\b(\d{5}\s+[A-ZÄÖÜ][a-zäöüß]{2,}(?:\s+[A-ZÄÖÜ][a-zäöüß]{2,})?)\b"
+    # PLZ + Ort — 5 rakam + (Title-case VEYA UPPERCASE) sehir adi.
+    # 'SAARBRUCKEN' gibi tum buyuk harf yazimi da yakalanir
+    # (Adobe ABD/Irlanda dijital faturalari boyle yaziyor).
+    # NOT: \s+ yerine [ \t]+ — newline match etmesin diye (yoksa farkli
+    # satirlardaki kelimeleri birbirine yapistirir).
+    plz_pat = (
+        r"\b(\d{5}[ \t]+"
+        r"(?:[A-ZÄÖÜ][a-zäöüß]{2,}|[A-ZÄÖÜ]{3,})"
+        r"(?:[ \t]+(?:[A-ZÄÖÜ][a-zäöüß]{2,}|[A-ZÄÖÜ]{3,}))?"
+        r")\b"
+    )
     addresses += [a.strip() for a in _re.findall(plz_pat, text)]
 
     # USt-IdNr (Almanya KDV no) — vendor kimlik anahtari, OCR bozulmasina dayanikli
