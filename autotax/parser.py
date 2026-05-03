@@ -2086,61 +2086,21 @@ def parse_invoice(raw_text: str) -> dict:
     date = extract_date(raw_text)
     total = extract_total(raw_text)
 
-    # --- ADDED START: Ensure brutto/betrag (not netto/mwst) is used ---
-    _norm = normalize(raw_text)
-    _norm = normalize_amount_text(_norm)
-
-    # Priority 1: "Betrag" alone (Lidl, Aldi style) — this IS the total you pay
-    _betrag_found = False
-    _betrag_m = re.search(r"(?<!\w)betrag\s*(?!.*(?:mwst|steuer|ust|netto|teil|rest|steuerbetrag))\s*:?\s*(?:eur\s*)?(\d+\.\d{2})", _norm, re.IGNORECASE)
-    if _betrag_m:
-        _bv = float(_betrag_m.group(1))
-        if 0.01 <= _bv < 100000:
-            total = _bv  # Betrag = definitive total, no comparison needed
-            _betrag_found = True
-
-    if not _betrag_found:
-        # Priority 2: explicit brutto keywords
-        _brutto_kws = [r"brutto", r"summe\s*brutto", r"bruttobetrag", r"gesamtbetrag\s*brutto",
-                       r"summe\s*inkl", r"gesamtbetrag\s*inkl", r"inkl\s*mwst", r"total\s*ttc"]
-        _brutto_val = 0.0
-        for _bkw in _brutto_kws:
-            _bm = re.search(rf"(?<!\w){_bkw}\s*:?\s*(\d+\.\d{{2}})", _norm, re.IGNORECASE)
-            if _bm:
-                _bv = float(_bm.group(1))
-                if _bv > _brutto_val and 0.01 <= _bv < 100000:
-                    _brutto_val = _bv
-        if _brutto_val > 0 and _brutto_val > total:
-            total = _brutto_val
-
-        # Priority 3: "summe" without netto/mwst/steuer next to it
-        _summe_m = re.search(r"(?<!\w)(?:summe|gesamt)\s*(?!.*(?:netto|mwst|steuer|ust))\s*:?\s*(\d+\.\d{2})", _norm, re.IGNORECASE)
-        if _summe_m:
-            _sv = float(_summe_m.group(1))
-            if _sv > total and 0.01 <= _sv < 100000:
-                total = _sv
-    # --- ADDED END ---
-
-    # --- ADDED START ---
+    # Single fallback: only if extract_total found nothing.
+    # The previous 5-layer override chain (Betrag/Brutto/Summe/best_amount/
+    # scoring) is what made parsing non-deterministic — each layer used a
+    # slightly different regex, picking different amounts on the same text.
+    # extract_total now does bottom-first scan with negative-line filtering
+    # (Preisvorteil/Restbetrag/MwSt/Netto skipped) and address/date guarding.
+    # Trust it; only invoke a fallback when it returned nothing usable.
     if total is None or total <= 0:
-        better_amount = extract_best_amount(raw_text)
-        if better_amount is not None:
-            total = better_amount
-    # --- ADDED END ---
-
-    # --- ADDED: scoring-based confirmation layer ---
-    if total is None or total <= 0:
-        _scored = _score_total_candidates(raw_text)
-        if _scored:
-            total = _scored[0][0]
-    else:
-        _scored = _score_total_candidates(raw_text)
-        if _scored:
-            _top_val, _top_score = _scored[0]
-            _cur_score = next((s for v, s in _scored if abs(v - total) < 0.01), 0)
-            if _top_val != total and (_top_score - _cur_score) >= 2 and _top_score >= 7:
-                total = _top_val
-    # --- ADDED END ---
+        better = extract_best_amount(raw_text)
+        if better is not None and better > 0:
+            total = better
+        else:
+            _scored = _score_total_candidates(raw_text)
+            if _scored:
+                total = _scored[0][0]
 
     vat_rates, vat_amount = extract_vat_info(raw_text, total, country)
     vat_rate_str = f"{vat_rates[0]}%" if vat_rates else "0%"
