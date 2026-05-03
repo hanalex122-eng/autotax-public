@@ -690,6 +690,15 @@ _VENDOR_OCR_CORRECTIONS = {
     # User-reported OCR misreads (2026-04-12)
     "lyidl": "LIDL", "lydl": "LIDL", "lydi": "LIDL",
     "lidle": "LIDL", "lidel": "LIDL", "lenk": "LIDL",
+    # 2026-05-03: Lidl logosunun kirmizi i-noktasi OCR tarafindan
+    # bazen 'kar' / 'kare' / 'k' olarak yorumlanir.
+    "lkaredl": "LIDL", "likaredl": "LIDL", "lkardl": "LIDL",
+    "lkare": "LIDL", "lkaredi": "LIDL", "lkardi": "LIDL",
+    "likdl": "LIDL", "likdi": "LIDL", "likeredi": "LIDL",
+    # Not: 'ldl' uc-harfli kisa pattern oldugu icin eklenmedi —
+    # 'goldlist' / 'aldhof' gibi kelimelerde false positive verir.
+    # Eger OCR 'LDL' tek basina dondururse asagidaki tam-eslesme yakalar.
+    "l1dl1": "LIDL", "l1dl.": "LIDL",
     "acti0n": "ACTION", "actlon": "ACTION", "actiom": "ACTION",
     "act1on": "ACTION", "aktion": "ACTION",
     "aldl": "ALDI", "a1di": "ALDI", "aldi": "ALDI", "aidi": "ALDI",
