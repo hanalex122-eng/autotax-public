@@ -1337,17 +1337,20 @@ def extract_date(raw_text: str) -> str:
         if result:
             return result
 
-    # 2. Try named month patterns (e.g., "15. März 2024", "16 mars 2026", "3 Ocak 2025")
+    # 2. Try named month patterns. Separator: bosluk, nokta, dash, slash —
+    # cesitli formatlar: "15. März 2024" / "16 mars 2026" / "3 Ocak 2025" /
+    # "05-DEZ-2023" (Adobe ABD/Irlanda dijital fatura) / "15/MAR/2024".
     _month_names = sorted(_MONTH_MAP.keys(), key=len, reverse=True)
     _month_pattern = "|".join(re.escape(m) for m in _month_names)
+    _date_sep = r"[\s.\-/]+"
     month_match = re.search(
-        rf"(\d{{1,2}})\.?\s+({_month_pattern})\s+(\d{{4}})",
+        rf"(\d{{1,2}})\.?{_date_sep}({_month_pattern}){_date_sep}(\d{{4}})",
         text, re.IGNORECASE
     )
     if not month_match:
-        # Also try: "mars 16, 2026" or "March 16 2026" (month first)
+        # Also try: "mars 16, 2026" / "March 16 2026" / "DEC 5, 2023" (month first)
         month_match2 = re.search(
-            rf"({_month_pattern})\s+(\d{{1,2}}),?\s+(\d{{4}})",
+            rf"({_month_pattern}){_date_sep}(\d{{1,2}}),?\s+(\d{{4}})",
             text, re.IGNORECASE
         )
         if month_match2:
