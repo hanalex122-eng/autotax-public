@@ -3138,9 +3138,12 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                     inv.vendor_iban = parsed.get("vendor_iban") or ""
                     inv.vendor_email = parsed.get("vendor_email") or ""
                     inv.vendor_phone = parsed.get("vendor_phone") or ""
+                    inv.vendor_fax = parsed.get("vendor_fax") or ""
                     inv.vendor_address = parsed.get("vendor_address") or ""
+                    inv.vendor_website = parsed.get("vendor_website") or parsed.get("vendor_domain") or ""
                     inv.vendor_ust_id = parsed.get("vendor_ust_id") or None
                     inv.vendor_hrb = parsed.get("vendor_hrb") or None
+                    inv.vendor_steuernr = parsed.get("vendor_steuernr") or None
                     db_bg.commit()
                     logger.info("Async OCR completed: invoice %d (%s, €%.2f, ust_id=%s)",
                                 inv_id, parsed.get("vendor"),

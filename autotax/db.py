@@ -98,7 +98,8 @@ def init_db():
         # --- Vendor contact columns (extracted by parser but previously not persisted) ---
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:
-            for col in ["vendor_iban", "vendor_email", "vendor_phone", "vendor_address"]:
+            for col in ["vendor_iban", "vendor_email", "vendor_phone", "vendor_fax",
+                        "vendor_address", "vendor_website", "vendor_steuernr"]:
                 if col not in inv_cols:
                     conn.execute(text(f"ALTER TABLE invoices ADD COLUMN {col} VARCHAR"))
                     logger.info("Added '%s' column to invoices", col)
@@ -198,10 +199,13 @@ def save_invoice(data: dict, user_id: int, filename: str = None, file_data: byte
             vendor_iban=data.get("vendor_iban") or "",
             vendor_email=data.get("vendor_email") or "",
             vendor_phone=data.get("vendor_phone") or "",
+            vendor_fax=data.get("vendor_fax") or "",
             vendor_address=data.get("vendor_address") or "",
+            vendor_website=data.get("vendor_website") or data.get("vendor_domain") or "",
             # Identity fingerprint
             vendor_ust_id=data.get("vendor_ust_id") or None,
             vendor_hrb=data.get("vendor_hrb") or None,
+            vendor_steuernr=data.get("vendor_steuernr") or None,
             file_hash=file_hash,
             possible_duplicate=possible_duplicate,
         )

@@ -52,10 +52,13 @@ class Invoice(Base):
     vendor_iban = Column(String, nullable=True)
     vendor_email = Column(String, nullable=True)
     vendor_phone = Column(String, nullable=True)
+    vendor_fax = Column(String, nullable=True)
     vendor_address = Column(String, nullable=True)
+    vendor_website = Column(String, nullable=True)
     # Vendor identity fingerprint — kimlik kartı (vendor adi OCR bozulmasindan bagimsiz)
     vendor_ust_id = Column(String(20), nullable=True, index=True)  # DE143571783
     vendor_hrb = Column(String(30), nullable=True)                 # HRB 23012
+    vendor_steuernr = Column(String(30), nullable=True)            # 12/345/67890 (Steuernummer != USt-IdNr)
     # Soft delete
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)

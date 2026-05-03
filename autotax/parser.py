@@ -2163,10 +2163,13 @@ def parse_invoice(raw_text: str) -> dict:
         "vendor_iban": entities.get("ibans", [""])[0] if entities.get("ibans") else "",
         "vendor_email": entities.get("emails", [""])[0] if entities.get("emails") else "",
         "vendor_phone": entities.get("phones", [""])[0] if entities.get("phones") else "",
+        "vendor_fax": entities.get("faxes", [""])[0] if entities.get("faxes") else "",
         "vendor_address": entities.get("addresses", [""])[0] if entities.get("addresses") else "",
         "vendor_ust_id": entities.get("ust_ids", [""])[0] if entities.get("ust_ids") else "",
         "vendor_hrb": entities.get("hrbs", [""])[0] if entities.get("hrbs") else "",
+        "vendor_steuernr": entities.get("steuernrs", [""])[0] if entities.get("steuernrs") else "",
         "vendor_domain": entities.get("domains", [""])[0] if entities.get("domains") else "",
+        "vendor_website": entities.get("domains", [""])[0] if entities.get("domains") else "",
     }
 
 
@@ -2186,16 +2189,16 @@ def extract_entities(text: str) -> dict:
     email_pat = r"\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b"
     emails = _re.findall(email_pat, text)
 
-    # Phone — sadece "Tel/Telefon/Phone/Fon/Fax" label'i sonrasi eslesir.
+    # Phone — Tel/Telefon ayri, Fax ayri (A4 fatura icin printout'ta ikisi de gorunur).
     # Onceki regex tarihleri (16.05.2026), fatura numaralarini, kart numarasinin
-    # parcasini telefon olarak yakalryordu. Aral fisinde uydurma telefon ureten bug.
-    phone_pat = (
-        r"(?i)(?:tel|telefon|telephone|phone|fon|fax)[\s.:\-]*"
-        r"((?:\+\d{1,3}[\s\-/]?)?(?:\(?\d{2,5}\)?[\s\-/]?)?\d{2,4}[\s\-/]?\d{3,8})"
-    )
-    raw_phones = _re.findall(phone_pat, text)
-    phones = [p.strip() for p in raw_phones
-              if sum(c.isdigit() for c in p) >= 7]
+    # parcasini telefon olarak yakalryordu — sadece label'li yakalama dogru.
+    _phone_num = r"((?:\+\d{1,3}[\s\-/]?)?(?:\(?\d{2,5}\)?[\s\-/]?)?\d{2,4}[\s\-/]?\d{3,8})"
+    tel_pat = r"(?i)(?:tel|telefon|telephone|phone|fon)\.?[\s.:\-]*" + _phone_num
+    fax_pat = r"(?i)(?:fax|telefax)\.?[\s.:\-]*" + _phone_num
+    raw_tels = _re.findall(tel_pat, text)
+    raw_faxes = _re.findall(fax_pat, text)
+    phones = [p.strip() for p in raw_tels if sum(c.isdigit() for c in p) >= 7]
+    faxes = [f.strip() for f in raw_faxes if sum(c.isdigit() for c in f) >= 7]
 
     # Address: lines containing street keywords + house number
     addr_keywords = r"(?:str\.|straße|strasse|weg|platz|allee|gasse|ring|damm|ufer|chaussee|avenue|rue|road|street)"
@@ -2212,6 +2215,15 @@ def extract_entities(text: str) -> dict:
     raw_ust = _re.findall(ust_id_pat, text)
     ust_ids = ["DE" + n.replace(" ", "") for _, n in raw_ust]
 
+    # Steuernummer (Almanya yerel vergi no) — USt-IdNr'den FARKLI.
+    # Format: 12/345/67890 veya 123/4567/8901 (genelde "Steuernr.:" / "St.-Nr." sonrasi).
+    steuernr_pat = (
+        r"(?i)(?:steuer-?nr\.?|st\.?-?nr\.?|steuernummer)\s*:?\s*"
+        r"(\d{2,3}\s?/\s?\d{3,4}\s?/\s?\d{4,5})"
+    )
+    raw_steuernr = _re.findall(steuernr_pat, text)
+    steuernrs = [s.replace(" ", "") for s in raw_steuernr]
+
     # HRB / HRA — ticari sicil numarasi. "HRB 12345" veya "HRB Frankfurt 12345" formatinda.
     hrb_pat = r"(?i)\b(HR[BA])\s+(?:[A-ZÄÖÜ][a-zäöüß]+\s+)?(\d{1,7})\b"
     raw_hrb = _re.findall(hrb_pat, text)
@@ -2225,10 +2237,12 @@ def extract_entities(text: str) -> dict:
         "ibans": list(set(ibans)),
         "emails": list(set(emails)),
         "phones": list(set(phones)),
+        "faxes": list(set(faxes)),
         "addresses": list(set(addresses)),
         "ust_ids": list(set(ust_ids)),
         "hrbs": list(set(hrbs)),
         "domains": list(set(domains)),
+        "steuernrs": list(set(steuernrs)),
     }
 
 
