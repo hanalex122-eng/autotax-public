@@ -621,7 +621,10 @@ def invoice_to_dict(i):
         "created_at": i.created_at.strftime("%Y-%m-%dT%H:%M:%S") if i.created_at else "",
         "ocr_snippet": (i.raw_text or "")[:200],
         "konto": _DATEV_KONTO_MAP.get(safe_category(i.category), "6800") if safe_invoice_type(i.invoice_type) == "expense" else _DATEV_KONTO_MAP_INCOME.get(safe_category(i.category), "8400"),
-        "has_original": bool(getattr(i, "file_path", None)) or bool(i.file_data),
+        # file_path = yeni yol (volume); file_data = eski legacy BLOB.
+        # Burada file_data acmiyoruz — defer ile yuklenmiyor, lazy load
+        # yapsa N+1 olur. file_path varsa orijinal var demektir.
+        "has_original": bool(getattr(i, "file_path", None)),
         "filename": safe_str(i.filename) if i.filename else "",
         # Vendor contact info — use DB column if set, else fallback to
         # on-the-fly extraction for backward compat with old invoices.
@@ -1227,9 +1230,16 @@ _DATEV_KONTO_MAP_INCOME = {
 def calculate_dashboard_metrics(user_id: int, year: int = None):
     """Shared function: compute dashboard metrics from invoices table.
     Used by dashboard endpoint AND all exports so numbers always match."""
+    from sqlalchemy.orm import defer as _sa_defer
     db = SessionLocal()
     try:
-        all_inv = db.query(Invoice).filter(
+        # raw_text + file_data dashboard'da kullanilmiyor; her satirda 2-5KB
+        # ekstra yuk olarak gelmesin diye defer edildi. 200 fis icin ~400KB
+        # daha az transfer + Python parsing.
+        all_inv = db.query(Invoice).options(
+            _sa_defer(Invoice.raw_text),
+            _sa_defer(Invoice.file_data),
+        ).filter(
             Invoice.user_id == user_id,
             (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
         ).all()
@@ -2787,7 +2797,14 @@ def list_invoices(
 ):
     db = SessionLocal()
     try:
-        q = db.query(Invoice).filter(Invoice.user_id == user["sub"])
+        from sqlalchemy.orm import defer as _sa_defer
+        # file_data legacy LargeBinary — defer ediliyor (her satirda
+        # MB'larca veri yuklemek list view icin gereksiz).
+        # raw_text invoice_to_dict icinde ocr_snippet uretmek icin
+        # kullaniliyor (ilk 200 char) — defer edilirse N+1 olur, bu yuzden eager yuklenir.
+        q = db.query(Invoice).options(
+            _sa_defer(Invoice.file_data),
+        ).filter(Invoice.user_id == user["sub"])
         # --- ADDED: exclude soft-deleted ---
         q = q.filter((Invoice.is_deleted == False) | (Invoice.is_deleted == None))
         # --- END ---
