@@ -1,11 +1,12 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
-  "build": {
-    "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile"
-  },
   "deploy": {
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
-  }
+    "restartPolicyType": "ON_FAILURE"
+  },
+  "volumes": [
+    {
+      "mountPath": "/app/data/uploads",
+      "name": "uploads"
+    }
+  ]
 }
