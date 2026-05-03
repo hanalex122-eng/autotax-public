@@ -763,18 +763,28 @@ def local_ocr_tesseract(image):
             img_cv = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
         gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
         h, w = gray.shape[:2]
-        resized = cv2.resize(gray, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
-        tess_cfg = "--oem 3 --psm 6"
-        text = pytesseract.image_to_string(resized, lang="deu+eng", config=tess_cfg)
-        text = text.strip() if text else ""
-        logger.info("[OCR] tesseract rot=0 length=%d", len(text))
 
-        # Safe retry: if first pass produced almost nothing, try 90/180/270.
-        # Pick the longest result. Does not change behavior when rot=0 already works.
-        # Esik 20 -> 80: yan/egri cekilmis fotograflarda Tesseract 30-50 char
-        # uretebilir ama icerik bozuk olur — 4 rotasyon denemesiyle dogru aciya
-        # ulasilir. EXIF rotation calistiginda bu blok genelde tetiklenmez.
-        if len(text) < 80:
+        # Conditional 2x upscale — only useful for small/zoomed-out shots.
+        # Modern phone fishler are 1200-3000px wide and don't gain accuracy
+        # from upscaling, but Tesseract is ~4x slower on a 4x area image.
+        # Threshold 1500: covers iPhone Portrait (1290), legacy 720p, etc.
+        if w < 1500:
+            work = cv2.resize(gray, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+            _scale_note = "2x"
+        else:
+            work = gray
+            _scale_note = "1x"
+        tess_cfg = "--oem 3 --psm 6"
+        text = pytesseract.image_to_string(work, lang="deu+eng", config=tess_cfg)
+        text = text.strip() if text else ""
+        logger.info("[OCR] tesseract rot=0 length=%d scale=%s wh=%dx%d", len(text), _scale_note, w, h)
+
+        # Safe retry only when first pass returned almost no text (clearly
+        # rotated 90/180/270). Threshold lowered 80 -> 30: 30+ chars means
+        # Tesseract is reading SOMETHING — multi-rotation is 3x extra OCR
+        # passes and rarely helps when the body is already partially readable.
+        # Rotation passes use the SAME image (no extra upscaling) for speed.
+        if len(text) < 30:
             best_text, best_rot = text, 0
             for rot_code, rot_deg in (
                 (cv2.ROTATE_90_CLOCKWISE, 90),
@@ -782,7 +792,7 @@ def local_ocr_tesseract(image):
                 (cv2.ROTATE_90_COUNTERCLOCKWISE, 270),
             ):
                 try:
-                    rot_img = cv2.rotate(resized, rot_code)
+                    rot_img = cv2.rotate(work, rot_code)
                     t = pytesseract.image_to_string(rot_img, lang="deu+eng", config=tess_cfg)
                     t = t.strip() if t else ""
                     logger.info("[OCR] tesseract rot=%d length=%d", rot_deg, len(t))
