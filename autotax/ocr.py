@@ -207,37 +207,43 @@ async def extract_image_text(content: bytes, filename: str) -> str:
         local_text = ""
     logger.info("[OCR] mode=%s local_length=%d", "PDF" if is_pdf else "IMAGE", len(local_text))
 
-    # Header-quality fallback (images only). Tesseract often returns 500+
-    # readable chars but with the logo area mangled into "5 et Be" /
-    # "i AE 4 Een 4" — the body is fine, the vendor line is garbage. We
-    # only swap to OCR.space when the *header* looks broken AND we have
-    # an API key configured. PDFs keep the existing length gate.
-    if not is_pdf:
-        if local_text and len(local_text) > 10:
-            ratio, real_words = _header_garbage_score(local_text)
-            # Thresholds: <0.35 ratio OR <4 real words = header is garbage.
-            # Receipts usually have at least vendor + city + street name in
-            # the first ~250 chars when OCR works = 5+ real words easily.
-            header_bad = (ratio < 0.35 or real_words < 4)
-            if header_bad and OCR_API_KEY:
-                logger.info(
-                    "[OCR] tesseract header garbage (ratio=%.2f, words=%d) — trying OCR.space",
-                    ratio, real_words,
-                )
-                # fall through to API path below
-            else:
-                if header_bad:
-                    logger.info(
-                        "[OCR] tesseract header weak (ratio=%.2f, words=%d) but no OCR_API_KEY — keeping local",
-                        ratio, real_words,
-                    )
-                else:
-                    logger.info("[OCR] using local OCR (image, ratio=%.2f, words=%d)", ratio, real_words)
-                return local_text
-    else:
-        if local_text and len(local_text) > 50:
-            logger.info("[OCR] using local OCR (pdf)")
+    # OCR.space fallback triggers — TWO independent conditions:
+    #
+    # 1) Header garbage: Tesseract returns 500+ chars but logo area is
+    #    mangled into "5 et Be" / "i AE 4 Een 4" — body fine, vendor line
+    #    broken. _header_garbage_score detects this.
+    #
+    # 2) Single-line collapse: Tesseract concatenates all lines into one
+    #    blob ("1m Rotfeld66115 SaarbrwænmpenBarRueckgeld 0,59 ..."). This
+    #    happens with PDF-rendered images on Lidl/Aldi style receipts.
+    #    Per-line scan in extract_total can't find anchors when there are
+    #    no line breaks. OCR.space typically preserves layout newlines.
+    if local_text and len(local_text) > 10:
+        ratio, real_words = _header_garbage_score(local_text)
+        header_bad = (ratio < 0.35 or real_words < 4)
+        line_count = local_text.count("\n")
+        single_line_collapse = line_count < 3 and len(local_text) > 200
+
+        if (header_bad or single_line_collapse) and OCR_API_KEY:
+            reason = "header garbage" if header_bad else "single-line collapse"
+            logger.info(
+                "[OCR] tesseract %s (ratio=%.2f, words=%d, lines=%d, len=%d) — trying OCR.space",
+                reason, ratio, real_words, line_count, len(local_text),
+            )
+            # fall through to API path below
+        elif header_bad or single_line_collapse:
+            logger.info(
+                "[OCR] tesseract weak (ratio=%.2f, lines=%d) but no OCR_API_KEY — keeping local",
+                ratio, line_count,
+            )
             return local_text
+        else:
+            logger.info("[OCR] using local OCR (ratio=%.2f, words=%d, lines=%d)",
+                        ratio, real_words, line_count)
+            return local_text
+    elif is_pdf and local_text and len(local_text) > 50:
+        logger.info("[OCR] using local OCR (pdf, short)")
+        return local_text
     logger.info("[OCR] fallback to API")
     # --- MODIFIED END ---
     if not OCR_API_KEY:
