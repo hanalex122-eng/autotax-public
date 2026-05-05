@@ -17,6 +17,7 @@ class User(Base):
     registered_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     gdpr_consent_at = Column(DateTime, nullable=True)  # Art. 7(1) DSGVO — proof of consent
     is_kleinunternehmer = Column(Boolean, default=False, nullable=False)
+    has_cloud_addon = Column(Boolean, default=False, nullable=False)  # AutoTax-Cloud upsell unlock
 
 
 class Invoice(Base):

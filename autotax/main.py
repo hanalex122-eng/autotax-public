@@ -2034,12 +2034,14 @@ def get_account_me(user: dict = Depends(get_current_user)):
         inv_count = db.query(Invoice).filter(Invoice.user_id == user["sub"], (Invoice.is_deleted == False) | (Invoice.is_deleted == None)).count()
         companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
         return {
+            "id": u.id,
             "email": u.email,
             "full_name": u.full_name or "",
             "plan": u.plan or "free",
             "plan_name": {"free":"Free","early":"Early Adopter","pro":"Pro"}.get(u.plan or "free", "Free"),
             "registered_at": u.registered_at.isoformat() if u.registered_at else "",
             "is_kleinunternehmer": getattr(u, 'is_kleinunternehmer', False),
+            "has_cloud_addon": getattr(u, 'has_cloud_addon', False),
             "invoice_count": inv_count,
             "company_name": companies[0].company_name if companies else "",
         }

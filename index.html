@@ -180,6 +180,7 @@ const I={
   reset:"M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
   trash:"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16",
   help:"M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3m.08 4h.01M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
+  gift:"M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V6a2 2 0 10-2 2h2zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7",
 };
 
 function Sparkline({data=[],color=theme.accent,h=40,w=120}){
@@ -435,6 +436,17 @@ function AuthScreen({onLogin}){
 function Sidebar({active,onNav,onLogout,collapsed}){
   const _t=typeof t==="function"?t:k=>k;
   const F=(window.FEATURES||{});
+  // AutoTax-Cloud add-on durumu — /account/me'den has_cloud_addon
+  const[hasCloudAddon,setHasCloudAddon]=useState(false);
+  const[showCloudModal,setShowCloudModal]=useState(false);
+  useEffect(()=>{
+    api("/account/me").then(d=>setHasCloudAddon(!!(d&&d.has_cloud_addon))).catch(()=>{});
+  },[]);
+  const CLOUD_URL="https://autotax-cloud.vercel.app";
+  const onCloudClick=()=>{
+    if(hasCloudAddon){window.open(CLOUD_URL,"_blank");}
+    else{setShowCloudModal(true);}
+  };
   const items=[
     {id:"dashboard",icon:I.dashboard,label:_t("dashboard")},
     ...(F.email_import!==false?[{id:"email-import",icon:I.chat,label:"Email-Import",href:"/email-settings"}]:[]),
@@ -448,6 +460,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     {id:"export",icon:I.export,label:_t("export")},
     {id:"companies",icon:I.invoice,label:_t("companies")},
     ...(F.ai_chat!==false?[{id:"chat",icon:I.chat,label:_t("chat")}]:[]),
+    {id:"cloud-addon",icon:I.gift,label:"E-Fatura senden",onClick:onCloudClick,addon:true},
     {id:"_sep"},
     {id:"pricing",icon:I.export,label:_t("pricing")},
     {id:"help",icon:I.help,label:_t("help")},
@@ -461,7 +474,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
       {!collapsed&&<div style={{display:"flex",flexDirection:"column",lineHeight:1}}><span style={{fontSize:15,fontWeight:700,color:theme.text,whiteSpace:"nowrap"}}>AutoTax <span style={{background:"#f59e0b",color:"#000",fontSize:8,fontWeight:700,padding:"1px 4px",borderRadius:3,verticalAlign:"middle"}}>BETA</span></span><span style={{fontSize:10,fontWeight:800,color:"#00a8cc",letterSpacing:2}}>HUB</span></div>}
     </div>
     <div style={{flex:1,padding:"14px 10px",display:"flex",flexDirection:"column",gap:2,overflowY:"auto"}}>
-      {items.map(it=>it.id==="_sep"?<div key="_sep" style={{height:1,background:theme.border,margin:"6px 8px"}}/>:(<div key={it.id} onClick={()=>it.href?(window.location.href=it.href):onNav(it.id)} onMouseEnter={()=>setHovered(it.id)} onMouseLeave={()=>setHovered(null)}
+      {items.map(it=>it.id==="_sep"?<div key="_sep" style={{height:1,background:theme.border,margin:"6px 8px"}}/>:(<div key={it.id} onClick={()=>it.onClick?it.onClick():it.href?(window.location.href=it.href):onNav(it.id)} onMouseEnter={()=>setHovered(it.id)} onMouseLeave={()=>setHovered(null)}
         style={{display:"flex",alignItems:"center",gap:12,padding:collapsed?"10px 16px":"8px 14px",borderRadius:10,cursor:"pointer",
         transition:"all 0.2s cubic-bezier(0.4,0,0.2,1)",
         transitionDelay:hovered===it.id&&active!==it.id?"70ms":"0ms",
@@ -470,10 +483,11 @@ function Sidebar({active,onNav,onLogout,collapsed}){
         transform:hovered===it.id&&active!==it.id&&!collapsed?"translateX(3px)":"translateX(0)",
         position:"relative",
         borderLeft:active===it.id?`3px solid ${theme.accent}`:"3px solid transparent"}}>
-        <div style={{transition:"transform 0.2s",transform:hovered===it.id&&active!==it.id?"scale(1.1)":"scale(1)"}}><Icon d={it.icon} size={20}/></div>
-        {!collapsed&&<span style={{fontSize:14,fontWeight:active===it.id?600:450,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{it.label}</span>}
+        <div style={{transition:"transform 0.2s",transform:hovered===it.id&&active!==it.id?"scale(1.1)":"scale(1)",color:it.addon?"#f59e0b":"inherit"}}><Icon d={it.icon} size={20}/></div>
+        {!collapsed&&<span style={{fontSize:14,fontWeight:active===it.id?600:450,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",flex:1}}>{it.label}</span>}
+        {!collapsed&&it.addon&&<span style={{background:"linear-gradient(135deg,#f59e0b,#ef4444)",color:"#fff",fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,letterSpacing:0.5,textShadow:"0 1px 2px rgba(0,0,0,0.3)",boxShadow:"0 0 8px rgba(245,158,11,0.5)"}}>ADD-ON</span>}
         {collapsed&&hovered===it.id&&<div style={{position:"absolute",left:64,top:"50%",transform:"translateY(-50%)",background:theme.card,border:"1px solid "+theme.border,borderRadius:8,padding:"8px 14px",whiteSpace:"nowrap",zIndex:100,boxShadow:"0 4px 16px rgba(0,0,0,0.4)"}}>
-          <div style={{fontSize:13,fontWeight:600,color:theme.text}}>{it.label}</div>
+          <div style={{fontSize:13,fontWeight:600,color:theme.text}}>{it.label}{it.addon&&<span style={{marginLeft:6,background:"#f59e0b",color:"#000",fontSize:9,fontWeight:800,padding:"1px 5px",borderRadius:3}}>ADD-ON</span>}</div>
         </div>}
       </div>))}
     </div>
@@ -486,6 +500,33 @@ function Sidebar({active,onNav,onLogout,collapsed}){
         <Icon d={I.logout} size={20}/>{!collapsed&&<span style={{fontSize:14}}>{typeof t==="function"?t("logout"):"Abmelden"}</span>}
       </div>
     </div>
+    {showCloudModal&&<div onClick={()=>setShowCloudModal(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:theme.surface,border:"1px solid "+theme.border,borderRadius:16,maxWidth:440,width:"100%",padding:32,boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}>
+          <div style={{width:48,height:48,borderRadius:12,background:"linear-gradient(135deg,#f59e0b,#ef4444)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 20px rgba(245,158,11,0.5)"}}>
+            <Icon d={I.gift} size={24} color="#fff"/>
+          </div>
+          <div>
+            <h2 style={{margin:0,fontSize:20,fontWeight:700,color:theme.text}}>AutoTax-Cloud</h2>
+            <span style={{fontSize:11,fontWeight:800,color:"#f59e0b",letterSpacing:1}}>ADD-ON</span>
+          </div>
+        </div>
+        <p style={{color:theme.text,fontSize:14,lineHeight:1.6,margin:"16px 0 8px"}}>
+          E-Faturalar otomatik olarak oluşturulur ve müşterilere e-mail ile gönderilir.
+        </p>
+        <p style={{color:theme.textMuted,fontSize:13,lineHeight:1.5,margin:"0 0 20px"}}>
+          E-Rechnungen automatisch erstellen und per E-Mail versenden.
+        </p>
+        <div style={{display:"flex",alignItems:"baseline",gap:6,padding:"14px 18px",background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:10,marginBottom:24}}>
+          <span style={{fontSize:32,fontWeight:800,color:"#f59e0b"}}>€5</span>
+          <span style={{fontSize:14,color:theme.textMuted}}>/ Monat</span>
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setShowCloudModal(false)} style={{flex:1,padding:"12px 16px",background:"transparent",color:theme.textMuted,border:"1px solid "+theme.border,borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Abbrechen</button>
+          <button onClick={()=>{window.open(CLOUD_URL,"_blank");setShowCloudModal(false);}} style={{flex:2,padding:"12px 16px",background:"linear-gradient(135deg,#f59e0b,#ef4444)",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(245,158,11,0.4)"}}>Jetzt freischalten →</button>
+        </div>
+      </div>
+    </div>}
   </div>);
 }
 

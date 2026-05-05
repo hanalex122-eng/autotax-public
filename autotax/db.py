@@ -51,6 +51,9 @@ def init_db():
             if "is_kleinunternehmer" not in user_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN is_kleinunternehmer BOOLEAN DEFAULT FALSE"))
                 logger.info("Added 'is_kleinunternehmer' column to users")
+            if "has_cloud_addon" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN has_cloud_addon BOOLEAN DEFAULT FALSE"))
+                logger.info("Added 'has_cloud_addon' column to users")
         # Invoice table — file storage columns
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:
