@@ -681,8 +681,10 @@ async def shutdown_email_auto_sync():
         logger.exception("Failed to stop email auto-sync task")
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
+    """Health check — UptimeRobot ve benzeri monitor'lar HEAD kullaniyor.
+    GET = JSON detay, HEAD = sadece 200 status (otomatik)."""
     ocr_key = os.getenv("OCR_API_KEY", "")
     db_ok = True
     try:
