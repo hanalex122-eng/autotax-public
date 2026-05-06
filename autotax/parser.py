@@ -595,6 +595,109 @@ _TOTAL_LINE_RE = re.compile(
 )
 
 
+# Vendor fingerprint detection — barcode prefix / cash-register serial / company-name pattern.
+# Used as a HIGH-priority signal BEFORE logo OCR (which is fragile). Each
+# entry is (regex, canonical_vendor_name). First match wins, so order
+# matters — most specific patterns first.
+#
+# Why this works: the 22-digit Lidl barcode (e.g. 0888303235949102030326)
+# starts with 0888303 on every Lidl receipt regardless of branch. The
+# 'LDL-NNN-XXXX' kasa serial is printed as text on every receipt. Even
+# when the logo is mangled by OCR, these stable strings survive.
+_VENDOR_FINGERPRINTS = [
+    # Lidl — barcode prefix '0888303' + cash register 'LDL-NNN-NNNN'
+    (r"\b0888303\d{14,15}\b", "LIDL"),
+    (r"\bLDL[-_]\w{0,3}\d{2,3}[-_]\d{3,4}", "LIDL"),
+    (r"\bLidl\s+Stiftung", "LIDL"),
+    (r"\bLidl\s+Plus\b", "LIDL"),
+    # Aldi
+    (r"\bALD[I1l][-_]\d", "ALDI"),
+    (r"\bALDI\s+SE\b|\bAldi\s+(?:Süd|Sued|Nord|Einkauf)\b", "ALDI"),
+    # Rewe
+    (r"\bREW[E3][-_]\d|\bRewe\s+Markt\s+GmbH\b", "REWE"),
+    # Edeka
+    (r"\bEDK[-_]\d|\bEDEKA\s+(?:Center|Markt)\b", "EDEKA"),
+    # Penny
+    (r"\bPenny\s+Markt\b|\bPNY[-_]\d", "PENNY"),
+    # Netto
+    (r"\bNetto\s+Marken[-\s]?Discount\b|\bNTT[-_]\d", "NETTO"),
+    # Kaufland
+    (r"\bKaufland\s+(?:Dienstleistung|Stiftung|Warenhandel)", "KAUFLAND"),
+    # Norma
+    (r"\bNORMA\s+Lebensmittelfilialbetrieb", "NORMA"),
+    # Action — Action Deutschland GmbH
+    (r"\bAction\s+Deutschland\s+GmbH", "ACTION"),
+    # TEDI — TEDi GmbH & Co. KG
+    (r"\bTEDi\s+GmbH\b|\bTEDi\.de\b|\bSteinstr\.?\s*2/4\s*66115", "TEDI"),
+    # KiK
+    (r"\bKiK\s+Textilien\b", "KIK"),
+    # Drugstores
+    (r"\bdm[-\s]?drogerie\s+markt\b|\bdm\s+Drogeriemarkt\b", "DM"),
+    (r"\bDirk\s+Rossmann\b|\bRossmann\s+GmbH\b|\bROSSMANN\s+\d", "ROSSMANN"),
+    (r"\bMüller\s+Holding\b|\bDrogerie\s+Müller\b", "MÜLLER"),
+    # Electronics
+    (r"\bMedia\s*[-\s]?Markt\s+(?:Saturn|TV)\b|\bMediaMarktSaturn\b", "MEDIA MARKT"),
+    (r"\bSaturn\s+Electro\b", "SATURN"),
+    # Fuel stations
+    (r"\bAral\s+(?:AG|Tankstelle)\b|\bARAL\s+AG\s+27/151", "ARAL"),
+    (r"\bShell\s+Deutschland\b|\bShell\s+Tankstelle\b", "SHELL"),
+    (r"\bEsso\s+Tankstelle\b|\bEsso\s+Deutschland\b", "ESSO"),
+    (r"\bJet\s+Tankstellen\s+Deutschland\b", "JET"),
+    # Clothing / Fashion
+    (r"\bSNIPES\s+SE\b|\bsnipes:", "SNIPES"),
+    (r"\bDeichmann\s+SE\b|\bDeichmann\s+Schuhe\b", "DEICHMANN"),
+    (r"\bH&M\s+Hennes\s+&\s+Mauritz\b", "H&M"),
+    (r"\bC&A\s+Mode\b", "C&A"),
+    (r"\bPRIMARK\s+Deutschland\b", "PRIMARK"),
+    (r"\bZARA\s+Deutschland\b", "ZARA"),
+    # Home / DIY
+    (r"\bIKEA\s+Deutschland\b", "IKEA"),
+    (r"\bBauhaus\s+(?:AG|Vertriebs)\b", "BAUHAUS"),
+    (r"\bOBI\s+(?:GmbH|Bau)\b", "OBI"),
+    (r"\bHornbach\s+Baumarkt\b", "HORNBACH"),
+    (r"\bToom\s+Baumarkt\b", "TOOM"),
+    # Software / Tech (digital invoices)
+    (r"\bAdobe\s+Systems\s+Software\b|\bAdobe\s+Ireland\b", "Adobe Systems Ireland"),
+    (r"\bMicrosoft\s+(?:Ireland|Deutschland|Corporation)\b", "Microsoft"),
+    (r"\bGoogle\s+(?:Ireland|Cloud|LLC)\b", "Google"),
+    (r"\bAmazon\s+(?:EU|Web\s+Services|Services\s+Europe)\b", "Amazon"),
+    (r"\bApple\s+(?:Distribution|Inc\.?)\b", "Apple"),
+    (r"\bTopaz\s+Labs\b", "Topaz Labs"),
+    # Telecom
+    (r"\bDeutsche\s+Telekom\s+AG\b|\bTelekom\s+Deutschland\b", "Telekom"),
+    (r"\bVodafone\s+(?:GmbH|Deutschland)\b", "Vodafone"),
+    (r"\bO2\s+Telef[óo]nica\b", "O2"),
+    # Logistics
+    (r"\bDeutsche\s+Post\s+AG\b|\bDHL\s+Paket\b", "DHL"),
+    (r"\bHermes\s+Germany\b", "Hermes"),
+]
+
+_VENDOR_FINGERPRINT_COMPILED = [
+    (re.compile(pat, re.IGNORECASE), name) for pat, name in _VENDOR_FINGERPRINTS
+]
+
+
+def detect_vendor_from_fingerprint(raw_text: str) -> str:
+    """Detect vendor from machine-readable signals (barcode prefix /
+    cash-register serial / company-name pattern) instead of fragile logo
+    OCR. Returns canonical vendor name or empty string if no match.
+
+    Scans the entire OCR text including any '[QR] ...' suffix added by
+    main.py after QR decode — so the 22-digit Lidl barcode body is also
+    matched.
+
+    Why a separate function: extract_vendor() works line-by-line on the
+    HEAD of the receipt where the logo lives. Fingerprints are scattered
+    across the whole receipt (cash register block, footer, tax block).
+    """
+    if not raw_text:
+        return ""
+    for rx, name in _VENDOR_FINGERPRINT_COMPILED:
+        if rx.search(raw_text):
+            return name
+    return ""
+
+
 def extract_vendor(raw_text: str) -> str:
     """Extract vendor/store name from the first meaningful lines of OCR text."""
     lines = raw_text.strip().split("\n")
@@ -2090,14 +2193,24 @@ def parse_invoice(raw_text: str) -> dict:
             "raw_text": raw_text or "",
         }
 
-    vendor = extract_vendor(raw_text)
-    vendor_source = "primary"
-    # If vendor not found, try deep search in full OCR text
-    if vendor == "Unbekannt" or len(vendor) <= 2:
-        deep_vendor = _deep_vendor_search(raw_text)
-        if deep_vendor != "Unbekannt":
-            vendor = deep_vendor
-            vendor_source = "deep"
+    # FINGERPRINT — barcode/serial/company-name pattern. Deterministik,
+    # OCR'in logo bozulmasindan etkilenmez. Tum raw_text'i tarar (QR ekleri
+    # dahil). Match olursa vendor kesin belli; logo OCR'a guvenmek yerine
+    # bunu kullaniriz. (Lidl '0888303...' barcode prefix + 'LDL-' kasa
+    # serial / Adobe 'Adobe Systems' / Aral 'Aral AG' / vs.)
+    fp_vendor = detect_vendor_from_fingerprint(raw_text)
+    if fp_vendor:
+        vendor = fp_vendor
+        vendor_source = "fingerprint"
+    else:
+        vendor = extract_vendor(raw_text)
+        vendor_source = "primary"
+        # If vendor not found, try deep search in full OCR text
+        if vendor == "Unbekannt" or len(vendor) <= 2:
+            deep_vendor = _deep_vendor_search(raw_text)
+            if deep_vendor != "Unbekannt":
+                vendor = deep_vendor
+                vendor_source = "deep"
     # Last resort: pick a meaningful first-line candidate so small unknown
     # stores (Bereket, De Nico, Topaz) surface a real name instead of
     # 'Unbekannt'. User can correct it in the editor.
