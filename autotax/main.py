@@ -1132,7 +1132,12 @@ def admin_page():
 
 <script>
 const API = location.origin;
-const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+// Ana app token'i 'atx_token' anahtarinda saklar (eski kod 'token' icin
+// fallback). Ikisini de kontrol ederek hangisi varsa kullan.
+const token = localStorage.getItem("atx_token")
+  || localStorage.getItem("token")
+  || sessionStorage.getItem("atx_token")
+  || sessionStorage.getItem("token");
 
 async function api(path, opts) {
   opts = opts || {};
