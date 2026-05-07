@@ -1205,6 +1205,7 @@ async function loadUsers() {
         <td class="small">${u.registered_at ? u.registered_at.slice(0,10) : '—'}</td>
         <td><div class="actions">
           <button class="ghost" onclick="proCloud(${u.id})" title="Pro + Cloud Aktif Et">⭐ Pro+Cloud</button>
+          <button class="ghost" onclick="downloadInvoice(${u.id}, '${u.plan}')" title="Manuel Subscription Fatura PDF">📄 Fatura</button>
           <button class="danger" onclick="delUser(${u.id}, '${esc(u.email)}')">Sil</button>
         </div></td>
       </tr>
@@ -1249,6 +1250,29 @@ async function delUser(uid, email) {
   if (!confirm(`KALICI silmek mi istiyorsun?\\n\\n${email}\\n\\nKullanicinin tum fislerini ve verilerini siler. Geri alinamaz.`)) return;
   try { await api("/admin/users/"+uid, {method:"DELETE"}); await refreshAll(); }
   catch(e){ alert("Hata: "+e.message); }
+}
+
+async function downloadInvoice(uid, currentPlan) {
+  const plan = prompt("Plan (free / early / pro):", currentPlan === "free" ? "pro" : currentPlan);
+  if (!plan) return;
+  const months = prompt("Kac ay icin? (1-12)", "1");
+  if (!months) return;
+  // Auth header'i fetch ile gondermek icin blob indir
+  try {
+    const r = await fetch(API+`/admin/users/${uid}/invoice?plan=${encodeURIComponent(plan)}&months=${encodeURIComponent(months)}`, {
+      headers: {"Authorization": "Bearer "+token}
+    });
+    if (!r.ok) { alert("Hata: HTTP "+r.status); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Rechnung-User-${uid}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) { alert("Hata: "+e.message); }
 }
 
 document.getElementById("searchInput").addEventListener("keydown", e => {
@@ -1577,6 +1601,194 @@ def admin_stats(user: dict = Depends(get_current_user)):
             "monthly_revenue_estimate_eur": revenue_estimate,
             "new_users_7d": new_7d,
         }
+    finally:
+        db.close()
+
+
+@app.get("/admin/users/{user_id}/invoice")
+def admin_subscription_invoice(
+    user_id: int,
+    plan: str = Query("pro"),
+    months: int = Query(1, ge=1, le=12),
+    invoice_no: Optional[str] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    """Manuel abonelik faturasi (PDF) — admin'in firma bilgileriyle.
+    Stripe gelene kadar manuel takip icin: muşteriye email atilacak,
+    SEPA havalesi onayinda admin panelden Pro+Cloud isaretlenir."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas as pdf_canvas
+        from reportlab.lib.units import cm
+        from reportlab.lib.colors import HexColor
+    except ImportError:
+        err(501, "PDF generation not available")
+
+    PLAN_PRICES = {"free": 0, "early": 10, "pro": 20}
+    CLOUD_PRICE = 5
+
+    db = SessionLocal()
+    try:
+        target = db.query(User).filter(User.id == user_id).first()
+        if not target:
+            err(404, "User not found")
+
+        plan = (plan or "pro").lower()
+        if plan not in PLAN_PRICES:
+            err(400, "Invalid plan")
+
+        plan_price = PLAN_PRICES[plan] * months
+        cloud_price = CLOUD_PRICE * months if getattr(target, "has_cloud_addon", False) else 0
+        net = plan_price + cloud_price
+        # Kleinunternehmer -> KDV yok (§19 UStG)
+        sender_ku = bool(os.getenv("BILLING_KLEINUNTERNEHMER", "1") == "1")
+        vat_rate = 0 if sender_ku else 19
+        vat_amount = round(net * vat_rate / 100, 2)
+        total = round(net + vat_amount, 2)
+
+        # Sender (operator firma bilgileri — env var'larla esnek)
+        SENDER_NAME = os.getenv("BILLING_NAME", "Hüseyin Hancer")
+        SENDER_ADDR = os.getenv("BILLING_ADDRESS", "Wiesenstr. 10")
+        SENDER_CITY = os.getenv("BILLING_CITY", "66115 Saarbrücken")
+        SENDER_COUNTRY = os.getenv("BILLING_COUNTRY", "Deutschland")
+        SENDER_EMAIL = os.getenv("BILLING_EMAIL", "info@autotaxhub.de")
+        SENDER_IBAN = os.getenv("BILLING_IBAN", "DE00 0000 0000 0000 0000 00")
+        SENDER_BIC = os.getenv("BILLING_BIC", "")
+        SENDER_USTID = os.getenv("BILLING_USTID", "")
+
+        if not invoice_no:
+            invoice_no = f"AT-{datetime.now().strftime('%Y%m')}-{user_id:04d}"
+
+        buf = io.BytesIO()
+        c = pdf_canvas.Canvas(buf, pagesize=A4)
+        w, h = A4
+
+        # Header
+        c.setFillColor(HexColor("#10b981"))
+        c.setFont("Helvetica-Bold", 28)
+        c.drawString(2*cm, h-2.5*cm, "RECHNUNG")
+        c.setFillColor(HexColor("#64748b"))
+        c.setFont("Helvetica", 10)
+        c.drawString(2*cm, h-3.1*cm, f"Rechnungs-Nr.: {invoice_no}")
+        c.drawString(2*cm, h-3.55*cm, f"Datum: {datetime.now().strftime('%d.%m.%Y')}")
+
+        # Sender (Absender)
+        c.setFillColor(HexColor("#0f172a"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(2*cm, h-5*cm, SENDER_NAME)
+        c.setFont("Helvetica", 10)
+        c.drawString(2*cm, h-5.45*cm, SENDER_ADDR)
+        c.drawString(2*cm, h-5.9*cm, SENDER_CITY)
+        c.drawString(2*cm, h-6.35*cm, SENDER_COUNTRY)
+        c.drawString(2*cm, h-6.95*cm, f"E-Mail: {SENDER_EMAIL}")
+        if SENDER_USTID:
+            c.drawString(2*cm, h-7.4*cm, f"USt-IdNr.: {SENDER_USTID}")
+
+        # Recipient (Empfänger)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(12*cm, h-5*cm, "Rechnung an:")
+        c.setFont("Helvetica", 10)
+        if target.full_name:
+            c.drawString(12*cm, h-5.45*cm, target.full_name)
+            c.drawString(12*cm, h-5.9*cm, target.email)
+        else:
+            c.drawString(12*cm, h-5.45*cm, target.email)
+
+        # Items table
+        y = h - 9.5*cm
+        c.setStrokeColor(HexColor("#cbd5e1"))
+        c.line(2*cm, y, 19*cm, y)
+        y -= 0.2*cm
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColor(HexColor("#334155"))
+        c.drawString(2*cm, y-0.4*cm, "Beschreibung")
+        c.drawRightString(13*cm, y-0.4*cm, "Menge")
+        c.drawRightString(16*cm, y-0.4*cm, "Einzel")
+        c.drawRightString(19*cm, y-0.4*cm, "Summe")
+        y -= 0.7*cm
+        c.line(2*cm, y, 19*cm, y)
+
+        c.setFont("Helvetica", 10)
+        c.setFillColor(HexColor("#0f172a"))
+        # Plan line
+        plan_label = {"free": "Free", "early": "Early Adopter", "pro": "Pro"}.get(plan, plan)
+        period = f"{months} Monat" if months == 1 else f"{months} Monate"
+        y -= 0.7*cm
+        c.drawString(2*cm, y, f"AutoTax-HUB {plan_label} ({period})")
+        c.drawRightString(13*cm, y, str(months))
+        c.drawRightString(16*cm, y, f"{PLAN_PRICES[plan]:.2f} EUR")
+        c.drawRightString(19*cm, y, f"{plan_price:.2f} EUR")
+
+        if cloud_price > 0:
+            y -= 0.6*cm
+            c.drawString(2*cm, y, f"AutoTax-Cloud Add-on ({period})")
+            c.drawRightString(13*cm, y, str(months))
+            c.drawRightString(16*cm, y, f"{CLOUD_PRICE:.2f} EUR")
+            c.drawRightString(19*cm, y, f"{cloud_price:.2f} EUR")
+
+        # Totals
+        y -= 1.2*cm
+        c.line(13*cm, y, 19*cm, y)
+        y -= 0.6*cm
+        c.setFont("Helvetica", 10)
+        c.drawRightString(16*cm, y, "Netto:")
+        c.drawRightString(19*cm, y, f"{net:.2f} EUR")
+        y -= 0.5*cm
+        if vat_rate > 0:
+            c.drawRightString(16*cm, y, f"USt {vat_rate}%:")
+            c.drawRightString(19*cm, y, f"{vat_amount:.2f} EUR")
+            y -= 0.5*cm
+        else:
+            c.setFillColor(HexColor("#64748b"))
+            c.setFont("Helvetica-Oblique", 9)
+            c.drawRightString(19*cm, y, "Kein Ausweis von USt gem. § 19 UStG (Kleinunternehmer)")
+            c.setFillColor(HexColor("#0f172a"))
+            c.setFont("Helvetica", 10)
+            y -= 0.5*cm
+        c.line(13*cm, y, 19*cm, y)
+        y -= 0.5*cm
+        c.setFont("Helvetica-Bold", 12)
+        c.setFillColor(HexColor("#10b981"))
+        c.drawRightString(16*cm, y, "Gesamtbetrag:")
+        c.drawRightString(19*cm, y, f"{total:.2f} EUR")
+
+        # Bank info
+        y -= 2*cm
+        c.setFillColor(HexColor("#f59e0b"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(2*cm, y, "Zahlung per SEPA-Überweisung")
+        c.setFillColor(HexColor("#0f172a"))
+        c.setFont("Helvetica", 10)
+        y -= 0.6*cm
+        c.drawString(2*cm, y, f"Empfänger: {SENDER_NAME}")
+        y -= 0.45*cm
+        c.drawString(2*cm, y, f"IBAN: {SENDER_IBAN}")
+        if SENDER_BIC:
+            y -= 0.45*cm
+            c.drawString(2*cm, y, f"BIC: {SENDER_BIC}")
+        y -= 0.45*cm
+        c.drawString(2*cm, y, f"Verwendungszweck: {invoice_no}")
+        y -= 0.7*cm
+        c.setFillColor(HexColor("#64748b"))
+        c.setFont("Helvetica-Oblique", 9)
+        c.drawString(2*cm, y, "Bitte zahlen Sie innerhalb von 14 Tagen.")
+
+        # Footer
+        c.setFillColor(HexColor("#94a3b8"))
+        c.setFont("Helvetica", 8)
+        c.drawString(2*cm, 1.5*cm, f"{SENDER_NAME} · {SENDER_ADDR} · {SENDER_CITY}")
+        c.drawString(2*cm, 1.1*cm, f"E-Mail: {SENDER_EMAIL}" + (f" · USt-IdNr.: {SENDER_USTID}" if SENDER_USTID else ""))
+
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        logger.info("ADMIN_INVOICE generated id=%s plan=%s months=%d total=%.2f for user_id=%d by=%s",
+                    invoice_no, plan, months, total, user_id, user.get("email"))
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={invoice_no}.pdf"},
+        )
     finally:
         db.close()
 
