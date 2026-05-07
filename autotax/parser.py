@@ -2040,7 +2040,21 @@ def extract_vat_info(raw_text: str, total: float, country: str) -> tuple[list[fl
         amount = round(total * rate / (100 + rate), 2)
         return vat_rates, amount
 
-    # 5. Country default
+    # 5. Country default — SADECE metinde VAT/KDV sinyali varsa.
+    # Aksi halde KDV uydurmus olursunuz (ABD/UK/Isvicre disi A4 fatura
+    # KDV'siz olabilir; Verdent gibi USD aboneliklerde 'Subtotal $19,
+    # Total $19' var, KDV yok). Bu durumda 0/0% donmek dogru cevap.
+    has_vat_signal = bool(
+        re.search(
+            r"\b(?:mwst|ust|mehrwertsteuer|umsatzsteuer|steuer|"
+            r"vat|tva|iva|gst|hst|impuesto|tax)\b",
+            text, re.IGNORECASE,
+        )
+        or "%" in text
+    )
+    if not has_vat_signal:
+        return [0.0], 0.0
+
     default_rate = COUNTRY_VAT_DEFAULTS.get(country, 19.0)
     if total > 0:
         amount = round(total * default_rate / (100 + default_rate), 2)
