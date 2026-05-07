@@ -2305,16 +2305,21 @@ def extract_entities(text: str) -> dict:
     email_pat = r"\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b"
     emails = _re.findall(email_pat, text)
 
-    # Phone — Tel/Telefon ayri, Fax ayri (A4 fatura icin printout'ta ikisi de gorunur).
-    # Onceki regex tarihleri (16.05.2026), fatura numaralarini, kart numarasinin
-    # parcasini telefon olarak yakalryordu — sadece label'li yakalama dogru.
-    _phone_num = r"((?:\+\d{1,3}[\s\-/]?)?(?:\(?\d{2,5}\)?[\s\-/]?)?\d{2,4}[\s\-/]?\d{3,8})"
+    # Phone — Tel/Telefon ayri, Fax ayri. Permissive number pattern:
+    # uluslararasi format destegi (+353 1 2345678 / +49 89 1234567 /
+    # +44 20 7946 0958 / 0681 12345 / 030 1234567 hepsi).
+    # 8-25 karakter, baslangic + veya rakam, icerik rakam/bosluk/dash/paren/slash.
+    _phone_num = r"([\+\d][\d\s\-/()]{7,24})"
     tel_pat = r"(?i)(?:tel|telefon|telephone|phone|fon)\.?[\s.:\-]*" + _phone_num
     fax_pat = r"(?i)(?:fax|telefax)\.?[\s.:\-]*" + _phone_num
     raw_tels = _re.findall(tel_pat, text)
     raw_faxes = _re.findall(fax_pat, text)
-    phones = [p.strip() for p in raw_tels if sum(c.isdigit() for c in p) >= 7]
-    faxes = [f.strip() for f in raw_faxes if sum(c.isdigit() for c in f) >= 7]
+    # Filter: at least 7 digits (otherwise too generic) + reject if too many spaces
+    def _is_phone(s: str) -> bool:
+        digits = sum(c.isdigit() for c in s)
+        return digits >= 7 and digits <= 16  # max 16 digits (E.164 limit)
+    phones = [p.strip() for p in raw_tels if _is_phone(p)]
+    faxes = [f.strip() for f in raw_faxes if _is_phone(f)]
 
     # Address: lines containing street keywords + (optional) house number.
     # Genisletildi: A4 dijital fatura adresinde sokak adi var ama ev numarasi
