@@ -1047,6 +1047,218 @@ def ccpa_do_not_sell(user: dict = Depends(get_current_user)):
             "status": "confirmed", "applies_to": "CCPA (California), all regions"}
 
 
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    """Admin paneli — login JWT cookie/Bearer ile auth, sayfa kendisi
+    ADMIN_EMAILS koruma altinda /admin/* middleware'iyle. Bu HTML
+    public ama icindeki API cagrilari yetkisiz erisimi block eder."""
+    return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head>
+<meta charset="UTF-8"><title>Admin Panel — AutoTax-HUB</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,'DM Sans',sans-serif;background:#050a12;color:#e8edf5;margin:0;padding:24px;line-height:1.5}
+  h1{color:#10b981;font-size:24px;margin:0 0 6px}
+  .sub{color:#64748b;font-size:13px;margin:0 0 24px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:28px}
+  .card{background:#0c1420;border:1px solid #1f2937;border-radius:12px;padding:16px}
+  .card .label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  .card .val{color:#e8edf5;font-size:24px;font-weight:700;margin-top:4px}
+  .card.acc .val{color:#10b981}
+  .card.warn .val{color:#f59e0b}
+  table{width:100%;border-collapse:collapse;background:#0c1420;border-radius:12px;overflow:hidden;border:1px solid #1f2937}
+  th{text-align:left;padding:12px 14px;background:#111c2c;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+  td{padding:12px 14px;border-top:1px solid #1f2937;font-size:13px;vertical-align:middle}
+  tr:hover td{background:rgba(255,255,255,0.02)}
+  select,input,button{font-family:inherit;font-size:13px;padding:6px 10px;border-radius:6px;background:#1f2937;color:#e8edf5;border:1px solid #334155;outline:none}
+  select:focus,input:focus{border-color:#10b981}
+  button{cursor:pointer;background:#10b981;border-color:#10b981;color:#000;font-weight:600}
+  button:hover{background:#0d9668}
+  button.danger{background:#ef4444;border-color:#ef4444;color:#fff}
+  button.danger:hover{background:#dc2626}
+  button.ghost{background:transparent;color:#94a3b8;border-color:#334155}
+  button.ghost:hover{color:#e8edf5;border-color:#475569}
+  .toggle{position:relative;display:inline-block;width:36px;height:20px}
+  .toggle input{opacity:0;width:0;height:0}
+  .toggle .slider{position:absolute;cursor:pointer;inset:0;background:#334155;border-radius:20px;transition:.2s}
+  .toggle .slider:before{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:.2s}
+  .toggle input:checked + .slider{background:#10b981}
+  .toggle input:checked + .slider:before{transform:translateX(16px)}
+  .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+  .badge.free{background:rgba(100,116,139,.2);color:#94a3b8}
+  .badge.early{background:rgba(245,158,11,.15);color:#f59e0b}
+  .badge.pro{background:rgba(16,185,129,.15);color:#10b981}
+  .badge.cloud{background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff}
+  .toolbar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+  .err{color:#ef4444;padding:14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin:12px 0}
+  .actions{display:flex;gap:6px;flex-wrap:wrap}
+  .small{font-size:11px;color:#64748b}
+  a{color:#10b981;text-decoration:none}
+</style></head><body>
+
+<p><a href="/">← App</a></p>
+<h1>🛠️ Admin Panel</h1>
+<p class="sub">Kullanici yonetimi · Plan degisikligi · Manuel odeme onayi</p>
+
+<div id="loginGate" style="display:none">
+  <div class="err">Bu sayfaya erisim icin admin email'iyle giris yapmis olmaniz gerekir.</div>
+  <p><a href="/">← Login sayfasina don</a></p>
+</div>
+
+<div id="content" style="display:none">
+
+<div id="stats" class="stats"></div>
+
+<div class="toolbar">
+  <input id="searchInput" placeholder="Email ara..." style="flex:1;min-width:200px"/>
+  <select id="planFilter">
+    <option value="">Tum planlar</option>
+    <option value="free">Free</option>
+    <option value="early">Early</option>
+    <option value="pro">Pro</option>
+  </select>
+  <button onclick="loadUsers()">🔍 Ara</button>
+  <button class="ghost" onclick="refreshAll()">↻ Yenile</button>
+</div>
+
+<table id="usersTable">
+  <thead><tr>
+    <th>ID</th><th>Email</th><th>Ad</th><th>Plan</th><th>Cloud</th><th>KU</th>
+    <th>Fis</th><th>Kayit</th><th>Aksiyon</th>
+  </tr></thead>
+  <tbody id="usersBody"><tr><td colspan="9" style="text-align:center;color:#64748b">Yukleniyor...</td></tr></tbody>
+</table>
+
+</div>
+
+<script>
+const API = location.origin;
+const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+
+async function api(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({"Content-Type":"application/json","Authorization":"Bearer "+token}, opts.headers||{});
+  const r = await fetch(API+path, opts);
+  if (r.status === 403) {
+    document.getElementById("content").style.display = "none";
+    document.getElementById("loginGate").style.display = "block";
+    throw new Error("forbidden");
+  }
+  if (!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+
+if (!token) {
+  document.getElementById("loginGate").style.display = "block";
+} else {
+  document.getElementById("content").style.display = "block";
+  refreshAll();
+}
+
+async function refreshAll() {
+  await loadStats();
+  await loadUsers();
+}
+
+async function loadStats() {
+  try {
+    const s = await api("/admin/stats");
+    document.getElementById("stats").innerHTML = `
+      <div class="card"><div class="label">Toplam Kullanici</div><div class="val">${s.total_users}</div></div>
+      <div class="card acc"><div class="label">Aylik Tahmini Gelir</div><div class="val">€${s.monthly_revenue_estimate_eur}</div></div>
+      <div class="card"><div class="label">Toplam Fis</div><div class="val">${s.total_invoices}</div></div>
+      <div class="card warn"><div class="label">Son 7 Gun Yeni</div><div class="val">${s.new_users_7d}</div></div>
+      <div class="card"><div class="label">Free / Early / Pro</div><div class="val" style="font-size:18px">${s.users_by_plan.free} / ${s.users_by_plan.early} / ${s.users_by_plan.pro}</div></div>
+      <div class="card"><div class="label">Cloud Add-on</div><div class="val">${s.cloud_addon_users}</div></div>
+    `;
+  } catch (e) { console.error("stats", e); }
+}
+
+async function loadUsers() {
+  try {
+    const search = document.getElementById("searchInput").value;
+    const plan = document.getElementById("planFilter").value;
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (plan) params.set("plan", plan);
+    const r = await api("/admin/users?"+params.toString());
+    const tbody = document.getElementById("usersBody");
+    if (!r.users.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#64748b">Kullanici bulunamadi</td></tr>';
+      return;
+    }
+    tbody.innerHTML = r.users.map(u => `
+      <tr data-uid="${u.id}">
+        <td class="small">${u.id}</td>
+        <td><strong>${esc(u.email)}</strong>${u.company_name?'<br><span class="small">'+esc(u.company_name)+'</span>':''}</td>
+        <td>${esc(u.full_name)||'<span class="small">—</span>'}</td>
+        <td>
+          <select onchange="changePlan(${u.id}, this.value, this)">
+            <option value="free" ${u.plan==='free'?'selected':''}>Free</option>
+            <option value="early" ${u.plan==='early'?'selected':''}>Early €10</option>
+            <option value="pro" ${u.plan==='pro'?'selected':''}>Pro €20</option>
+          </select>
+          <span class="badge ${u.plan}" style="margin-left:6px">${u.plan}</span>
+        </td>
+        <td><label class="toggle"><input type="checkbox" ${u.has_cloud_addon?'checked':''} onchange="toggleCloud(${u.id}, this.checked, this)"><span class="slider"></span></label></td>
+        <td><label class="toggle"><input type="checkbox" ${u.is_kleinunternehmer?'checked':''} onchange="toggleKU(${u.id}, this.checked, this)"><span class="slider"></span></label></td>
+        <td>${u.invoice_count}</td>
+        <td class="small">${u.registered_at ? u.registered_at.slice(0,10) : '—'}</td>
+        <td><div class="actions">
+          <button class="ghost" onclick="proCloud(${u.id})" title="Pro + Cloud Aktif Et">⭐ Pro+Cloud</button>
+          <button class="danger" onclick="delUser(${u.id}, '${esc(u.email)}')">Sil</button>
+        </div></td>
+      </tr>
+    `).join("");
+  } catch (e) { console.error("users", e); }
+}
+
+function esc(s){return String(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+async function patch(uid, body) {
+  return api("/admin/users/"+uid, {method:"PATCH", body: JSON.stringify(body)});
+}
+
+async function changePlan(uid, plan, el) {
+  el.disabled = true;
+  try { await patch(uid, {plan}); await loadStats(); await loadUsers(); }
+  catch(e){ alert("Hata: "+e.message); }
+  el.disabled = false;
+}
+
+async function toggleCloud(uid, val, el) {
+  el.disabled = true;
+  try { await patch(uid, {has_cloud_addon: val}); await loadStats(); }
+  catch(e){ alert("Hata: "+e.message); el.checked = !val; }
+  el.disabled = false;
+}
+
+async function toggleKU(uid, val, el) {
+  el.disabled = true;
+  try { await patch(uid, {is_kleinunternehmer: val}); }
+  catch(e){ alert("Hata: "+e.message); el.checked = !val; }
+  el.disabled = false;
+}
+
+async function proCloud(uid) {
+  if (!confirm("Bu kullaniciyi Pro plan + Cloud Add-on yapayim mi? (manuel odeme alindiginda)")) return;
+  try { await patch(uid, {plan:"pro", has_cloud_addon:true}); await refreshAll(); }
+  catch(e){ alert("Hata: "+e.message); }
+}
+
+async function delUser(uid, email) {
+  if (!confirm(`KALICI silmek mi istiyorsun?\\n\\n${email}\\n\\nKullanicinin tum fislerini ve verilerini siler. Geri alinamaz.`)) return;
+  try { await api("/admin/users/"+uid, {method:"DELETE"}); await refreshAll(); }
+  catch(e){ alert("Hata: "+e.message); }
+}
+
+document.getElementById("searchInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") loadUsers();
+});
+</script>
+
+</body></html>""")
+
+
 @app.get("/impressum", response_class=HTMLResponse)
 def impressum_page():
     """Impressum nach § 5 DDG (Almanya yasal zorunluluk)."""
@@ -1208,6 +1420,189 @@ def admin_reparse(user: dict = Depends(get_current_user)):
         db.rollback()
         logger.exception("Reparse failed")
         err(500, "Reparse failed")
+    finally:
+        db.close()
+
+
+# ════════════════════════════════════════════════════════════════
+# ADMIN PANEL — kullanici/abonelik yonetimi
+# ════════════════════════════════════════════════════════════════
+
+@app.get("/admin/users")
+def admin_users(
+    search: Optional[str] = Query(None),
+    plan: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    user: dict = Depends(get_current_user),
+):
+    """Tum kullanicilari listeler (sadece admin). Search + plan filter."""
+    db = SessionLocal()
+    try:
+        q = db.query(User)
+        if search:
+            q = q.filter(User.email.ilike(f"%{search}%"))
+        if plan:
+            q = q.filter(User.plan == plan)
+        users = q.order_by(User.id.desc()).limit(limit).all()
+        out = []
+        for u in users:
+            inv_count = db.query(Invoice).filter(
+                Invoice.user_id == u.id,
+                (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
+            ).count()
+            companies = db.query(UserCompany).filter(UserCompany.user_id == u.id).all()
+            out.append({
+                "id": u.id,
+                "email": u.email,
+                "full_name": u.full_name or "",
+                "plan": u.plan or "free",
+                "has_cloud_addon": getattr(u, "has_cloud_addon", False),
+                "is_kleinunternehmer": getattr(u, "is_kleinunternehmer", False),
+                "registered_at": u.registered_at.isoformat() if u.registered_at else "",
+                "invoice_count": inv_count,
+                "company_name": companies[0].company_name if companies else "",
+            })
+        return {"users": out, "total": len(out)}
+    finally:
+        db.close()
+
+
+@app.patch("/admin/users/{user_id}")
+def admin_update_user(
+    user_id: int,
+    body: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Plan ve cloud addon degistirir. Manuel odeme aldigi anda admin
+    panelinden tek tikla aktif eder."""
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user_id).first()
+        if not u:
+            err(404, "User not found")
+
+        changed = []
+        if "plan" in body:
+            new_plan = (body["plan"] or "").strip().lower()
+            if new_plan not in ("free", "early", "pro"):
+                err(400, "Invalid plan: must be free|early|pro")
+            old = u.plan
+            u.plan = new_plan
+            changed.append(f"plan: {old} -> {new_plan}")
+        if "has_cloud_addon" in body:
+            old = bool(getattr(u, "has_cloud_addon", False))
+            u.has_cloud_addon = bool(body["has_cloud_addon"])
+            changed.append(f"cloud: {old} -> {u.has_cloud_addon}")
+        if "is_kleinunternehmer" in body:
+            old = bool(getattr(u, "is_kleinunternehmer", False))
+            u.is_kleinunternehmer = bool(body["is_kleinunternehmer"])
+            changed.append(f"ku: {old} -> {u.is_kleinunternehmer}")
+        if "full_name" in body and isinstance(body["full_name"], str):
+            u.full_name = body["full_name"][:200]
+            changed.append("full_name")
+
+        db.commit()
+        logger.info("ADMIN UPDATE user_id=%d by=%s changes=%s", user_id, user.get("email"), ", ".join(changed))
+        return {
+            "success": True,
+            "user": {
+                "id": u.id, "email": u.email, "plan": u.plan,
+                "has_cloud_addon": getattr(u, "has_cloud_addon", False),
+                "is_kleinunternehmer": getattr(u, "is_kleinunternehmer", False),
+                "full_name": u.full_name or "",
+            },
+            "changes": changed,
+        }
+    finally:
+        db.close()
+
+
+@app.delete("/admin/users/{user_id}")
+def admin_delete_user(user_id: int, user: dict = Depends(get_current_user)):
+    """Kullanici siler — kullanicinin tum fis/cash/company verisi de silinir."""
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user_id).first()
+        if not u:
+            err(404, "User not found")
+        # Admin kendini silemesin (kilit risk)
+        if u.email == user.get("email"):
+            err(400, "Cannot delete yourself")
+        email = u.email
+        db.query(Invoice).filter(Invoice.user_id == user_id).delete()
+        db.query(CashEntry).filter(CashEntry.user_id == user_id).delete()
+        db.query(UserCompany).filter(UserCompany.user_id == user_id).delete()
+        db.delete(u)
+        db.commit()
+        logger.warning("ADMIN DELETE user id=%d email=%s by=%s", user_id, email, user.get("email"))
+        return {"success": True, "deleted": email}
+    finally:
+        db.close()
+
+
+@app.get("/admin/stats")
+def admin_stats(user: dict = Depends(get_current_user)):
+    """Genel istatistik — toplam kullanici, fis, plan dagilimi, gelir tahmini."""
+    db = SessionLocal()
+    try:
+        total_users = db.query(User).count()
+        users_by_plan = {}
+        for plan_id in ("free", "early", "pro"):
+            users_by_plan[plan_id] = db.query(User).filter(User.plan == plan_id).count()
+        cloud_users = db.query(User).filter(User.has_cloud_addon == True).count()
+
+        total_invoices = db.query(Invoice).filter(
+            (Invoice.is_deleted == False) | (Invoice.is_deleted == None)
+        ).count()
+
+        # Aylik gelir tahmini (Stripe gelmeden once el ile takip)
+        # Ucretler: free=0, early=10, pro=20, cloud=+5
+        revenue_estimate = (
+            users_by_plan.get("early", 0) * 10
+            + users_by_plan.get("pro", 0) * 20
+            + cloud_users * 5
+        )
+
+        # Son 7 gun yeni kayit
+        from sqlalchemy import func as _func
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        new_7d = db.query(User).filter(User.registered_at >= cutoff).count() if True else 0
+
+        return {
+            "total_users": total_users,
+            "users_by_plan": users_by_plan,
+            "cloud_addon_users": cloud_users,
+            "total_invoices": total_invoices,
+            "monthly_revenue_estimate_eur": revenue_estimate,
+            "new_users_7d": new_7d,
+        }
+    finally:
+        db.close()
+
+
+@app.get("/admin/users/{user_id}/details")
+def admin_user_details(user_id: int, user: dict = Depends(get_current_user)):
+    """Tek kullanicinin detayli bilgileri (manuel fatura / debug icin)."""
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user_id).first()
+        if not u:
+            err(404, "User not found")
+        invoices = db.query(Invoice).filter(
+            Invoice.user_id == user_id,
+            (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
+        ).count()
+        companies = db.query(UserCompany).filter(UserCompany.user_id == user_id).all()
+        return {
+            "id": u.id, "email": u.email, "full_name": u.full_name or "",
+            "plan": u.plan or "free",
+            "has_cloud_addon": getattr(u, "has_cloud_addon", False),
+            "is_kleinunternehmer": getattr(u, "is_kleinunternehmer", False),
+            "registered_at": u.registered_at.isoformat() if u.registered_at else "",
+            "invoice_count": invoices,
+            "companies": [{"id": c.id, "name": c.company_name} for c in companies],
+        }
     finally:
         db.close()
 
