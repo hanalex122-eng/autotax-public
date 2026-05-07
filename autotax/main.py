@@ -1138,20 +1138,32 @@ async function api(path, opts) {
   opts = opts || {};
   opts.headers = Object.assign({"Content-Type":"application/json","Authorization":"Bearer "+token}, opts.headers||{});
   const r = await fetch(API+path, opts);
-  if (r.status === 403) {
-    document.getElementById("content").style.display = "none";
-    document.getElementById("loginGate").style.display = "block";
-    throw new Error("forbidden");
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    throw new Error("HTTP "+r.status+(txt?": "+txt.slice(0,200):""));
   }
-  if (!r.ok) throw new Error("HTTP "+r.status);
   return r.json();
 }
 
 if (!token) {
-  document.getElementById("loginGate").style.display = "block";
+  // Hic token yok -> direkt login sayfasina yonlendir
+  window.location.href = "/?next=/admin";
 } else {
+  // Token var -> content goster (API call sonucu ne olursa olsun)
   document.getElementById("content").style.display = "block";
-  refreshAll();
+  refreshAll().catch(e => {
+    console.error("admin load error:", e);
+    if (String(e.message).includes("403")) {
+      // Yetki yok -> aciklayici mesaj
+      document.getElementById("content").innerHTML =
+        '<div class="err">Bu hesap admin yetkili degil.<br>'+
+        '<small>ADMIN_EMAILS env var\\'inda olan bir email ile giris yap.</small><br>'+
+        '<a href="/">← Ana sayfa</a></div>';
+    } else {
+      document.getElementById("stats").innerHTML =
+        '<div class="err">Veri yuklenemedi: '+e.message+'</div>';
+    }
+  });
 }
 
 async function refreshAll() {
