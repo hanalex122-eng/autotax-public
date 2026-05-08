@@ -1084,9 +1084,10 @@ def admin_page():
   .toggle input:checked + .slider{background:#10b981}
   .toggle input:checked + .slider:before{transform:translateX(16px)}
   .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
-  .badge.free{background:rgba(100,116,139,.2);color:#94a3b8}
-  .badge.early{background:rgba(245,158,11,.15);color:#f59e0b}
-  .badge.pro{background:rgba(16,185,129,.15);color:#10b981}
+  .badge.free{background:#475569;color:#fff}
+  .badge.early{background:#f59e0b;color:#000}
+  .badge.pro{background:#10b981;color:#000}
+  .badge.large{font-size:13px;padding:4px 12px;border-radius:6px}
   .badge.cloud{background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff}
   .toolbar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
   .err{color:#ef4444;padding:14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin:12px 0}
@@ -1109,14 +1110,15 @@ def admin_page():
 <div id="stats" class="stats"></div>
 
 <div class="toolbar">
-  <input id="searchInput" placeholder="Email ara..." style="flex:1;min-width:200px"/>
-  <select id="planFilter">
+  <input id="searchInput" placeholder="Email ara (free/early/pro yazarsan plan filtreler)..." style="flex:1;min-width:240px"/>
+  <select id="planFilter" onchange="loadUsers()">
     <option value="">Tum planlar</option>
-    <option value="free">Free</option>
-    <option value="early">Early</option>
-    <option value="pro">Pro</option>
+    <option value="free">Sadece Free</option>
+    <option value="early">Sadece Early</option>
+    <option value="pro">Sadece Pro</option>
   </select>
   <button onclick="loadUsers()">🔍 Ara</button>
+  <button class="ghost" onclick="document.getElementById('searchInput').value='';document.getElementById('planFilter').value='';loadUsers();">✕ Temizle</button>
   <button class="ghost" onclick="refreshAll()">↻ Yenile</button>
 </div>
 
@@ -1192,15 +1194,25 @@ async function loadStats() {
 
 async function loadUsers() {
   try {
-    const search = document.getElementById("searchInput").value;
-    const plan = document.getElementById("planFilter").value;
+    let search = document.getElementById("searchInput").value.trim();
+    let plan = document.getElementById("planFilter").value;
+    // Smart: 'free' / 'early' / 'pro' yazinca otomatik plan filter'a yonlendir
+    const smartPlan = ["free", "early", "pro"].find(p => p === search.toLowerCase());
+    if (smartPlan && !plan) {
+      plan = smartPlan;
+      search = "";
+    }
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (plan) params.set("plan", plan);
     const r = await api("/admin/users?"+params.toString());
     const tbody = document.getElementById("usersBody");
     if (!r.users.length) {
-      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#64748b">Kullanici bulunamadi</td></tr>';
+      const filterDesc = plan ? `plan=${plan}` : (search ? `email contains "${search}"` : "no filter");
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#f59e0b;padding:24px">
+        ⚠️ Eslesen kullanici yok (${filterDesc})<br>
+        <small style="color:#64748b">Filtre temizlemek icin <strong>✕ Temizle</strong> butonuna bas</small>
+      </td></tr>`;
       return;
     }
     tbody.innerHTML = r.users.map(u => `
@@ -1209,12 +1221,13 @@ async function loadUsers() {
         <td><strong>${esc(u.email)}</strong>${u.company_name?'<br><span class="small">'+esc(u.company_name)+'</span>':''}</td>
         <td>${esc(u.full_name)||'<span class="small">—</span>'}</td>
         <td>
-          <select onchange="changePlan(${u.id}, this.value, this)">
+          <span class="badge large ${u.plan}">${u.plan.toUpperCase()}</span>
+          <br>
+          <select onchange="changePlan(${u.id}, this.value, this)" style="margin-top:4px">
             <option value="free" ${u.plan==='free'?'selected':''}>Free</option>
             <option value="early" ${u.plan==='early'?'selected':''}>Early €10</option>
             <option value="pro" ${u.plan==='pro'?'selected':''}>Pro €20</option>
           </select>
-          <span class="badge ${u.plan}" style="margin-left:6px">${u.plan}</span>
         </td>
         <td><label class="toggle"><input type="checkbox" ${u.has_cloud_addon?'checked':''} onchange="toggleCloud(${u.id}, this.checked, this)"><span class="slider"></span></label></td>
         <td><label class="toggle"><input type="checkbox" ${u.is_kleinunternehmer?'checked':''} onchange="toggleKU(${u.id}, this.checked, this)"><span class="slider"></span></label></td>
