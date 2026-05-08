@@ -1113,7 +1113,10 @@ def admin_page():
   .badge.free{background:#475569;color:#fff}
   .badge.early{background:#f59e0b;color:#000}
   .badge.pro{background:#10b981;color:#000}
+  .badge.admin{background:linear-gradient(135deg,#a855f7,#ec4899);color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.3);box-shadow:0 0 8px rgba(168,85,247,0.4)}
   .badge.large{font-size:13px;padding:4px 12px;border-radius:6px}
+  tr.admin-row{background:rgba(168,85,247,0.04)}
+  tr.admin-row:hover td{background:rgba(168,85,247,0.06) !important}
   .badge.cloud{background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff}
   .toolbar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
   .err{color:#ef4444;padding:14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin:12px 0}
@@ -1269,8 +1272,8 @@ async function loadStats() {
   try {
     const s = await api("/admin/stats");
     document.getElementById("stats").innerHTML = `
-      <div class="card"><div class="label">Toplam Kullanici</div><div class="val">${s.total_users}</div></div>
-      <div class="card acc"><div class="label">Aylik Tahmini Gelir</div><div class="val">€${s.monthly_revenue_estimate_eur}</div></div>
+      <div class="card"><div class="label">Odeyebilir Musteri</div><div class="val">${s.paying_users || s.total_users}</div>${s.admin_count?'<div class="small" style="margin-top:4px">+ '+s.admin_count+' admin</div>':''}</div>
+      <div class="card acc"><div class="label">Aylik Tahmini Gelir</div><div class="val">€${s.monthly_revenue_estimate_eur}</div><div class="small" style="margin-top:4px">admin haric</div></div>
       <div class="card"><div class="label">Toplam Fis</div><div class="val">${s.total_invoices}</div></div>
       <div class="card warn"><div class="label">Son 7 Gun Yeni</div><div class="val">${s.new_users_7d}</div></div>
       <div class="card"><div class="label">Free / Early / Pro</div><div class="val" style="font-size:18px">${s.users_by_plan.free} / ${s.users_by_plan.early} / ${s.users_by_plan.pro}</div></div>
@@ -1303,18 +1306,21 @@ async function loadUsers() {
       return;
     }
     tbody.innerHTML = r.users.map(u => `
-      <tr data-uid="${u.id}">
+      <tr data-uid="${u.id}" class="${u.is_admin?'admin-row':''}">
         <td class="small">${u.id}</td>
-        <td><strong>${esc(u.email)}</strong>${u.company_name?'<br><span class="small">'+esc(u.company_name)+'</span>':''}</td>
+        <td><strong>${esc(u.email)}</strong>${u.is_admin?' <span class="badge admin" style="font-size:9px;padding:2px 6px;margin-left:4px">⚡ ADMIN</span>':''}${u.company_name?'<br><span class="small">'+esc(u.company_name)+'</span>':''}</td>
         <td>${esc(u.full_name)||'<span class="small">—</span>'}</td>
         <td>
-          <span class="badge large ${u.plan}">${u.plan.toUpperCase()}</span>
-          <br>
-          <select onchange="changePlan(${u.id}, this.value, this)" style="margin-top:4px">
-            <option value="free" ${u.plan==='free'?'selected':''}>Free</option>
-            <option value="early" ${u.plan==='early'?'selected':''}>Early €10</option>
-            <option value="pro" ${u.plan==='pro'?'selected':''}>Pro €20</option>
-          </select>
+          ${u.is_admin
+            ? '<span class="badge large admin">⚡ ADMIN</span><br><span class="small" style="margin-top:4px;display:inline-block">Plan: '+u.plan+' (revenue\\'a sayilmaz)</span>'
+            : `<span class="badge large ${u.plan}">${u.plan.toUpperCase()}</span>
+               <br>
+               <select onchange="changePlan(${u.id}, this.value, this)" style="margin-top:4px">
+                 <option value="free" ${u.plan==='free'?'selected':''}>Free</option>
+                 <option value="early" ${u.plan==='early'?'selected':''}>Early €10</option>
+                 <option value="pro" ${u.plan==='pro'?'selected':''}>Pro €20</option>
+               </select>`
+          }
         </td>
         <td><label class="toggle"><input type="checkbox" ${u.has_cloud_addon?'checked':''} onchange="toggleCloud(${u.id}, this.checked, this)"><span class="slider"></span></label></td>
         <td><label class="toggle"><input type="checkbox" ${u.is_kleinunternehmer?'checked':''} onchange="toggleKU(${u.id}, this.checked, this)"><span class="slider"></span></label></td>
@@ -1585,6 +1591,8 @@ def admin_users(
         if plan:
             q = q.filter(User.plan == plan)
         users = q.order_by(User.id.desc()).limit(limit).all()
+        # Admin email seti (env'den) — frontend admin badge gostersin diye
+        _admin_set = set(filter(None, os.getenv("ADMIN_EMAILS", "").split(",")))
         out = []
         for u in users:
             inv_count = db.query(Invoice).filter(
@@ -1599,6 +1607,7 @@ def admin_users(
                 "plan": u.plan or "free",
                 "has_cloud_addon": getattr(u, "has_cloud_addon", False),
                 "is_kleinunternehmer": getattr(u, "is_kleinunternehmer", False),
+                "is_admin": u.email in _admin_set,
                 "registered_at": u.registered_at.isoformat() if u.registered_at else "",
                 "invoice_count": inv_count,
                 "company_name": companies[0].company_name if companies else "",
@@ -1683,14 +1692,25 @@ def admin_delete_user(user_id: int, user: dict = Depends(get_current_user)):
 
 @app.get("/admin/stats")
 def admin_stats(user: dict = Depends(get_current_user)):
-    """Genel istatistik — toplam kullanici, fis, plan dagilimi, gelir tahmini."""
+    """Genel istatistik — toplam kullanici, fis, plan dagilimi, gelir tahmini.
+    Admin hesaplari (ADMIN_EMAILS) revenue hesabindan haric tutulur — kendi
+    hesabini 'pro' yapsan bile MRR'a eklenmez."""
     db = SessionLocal()
     try:
+        _admin_set = set(filter(None, os.getenv("ADMIN_EMAILS", "").split(",")))
+        admin_count = db.query(User).filter(User.email.in_(_admin_set)).count() if _admin_set else 0
         total_users = db.query(User).count()
+        # Plan dagilimi — admin'leri haric tut
         users_by_plan = {}
         for plan_id in ("free", "early", "pro"):
-            users_by_plan[plan_id] = db.query(User).filter(User.plan == plan_id).count()
-        cloud_users = db.query(User).filter(User.has_cloud_addon == True).count()
+            q = db.query(User).filter(User.plan == plan_id)
+            if _admin_set:
+                q = q.filter(~User.email.in_(_admin_set))
+            users_by_plan[plan_id] = q.count()
+        cloud_q = db.query(User).filter(User.has_cloud_addon == True)
+        if _admin_set:
+            cloud_q = cloud_q.filter(~User.email.in_(_admin_set))
+        cloud_users = cloud_q.count()
 
         total_invoices = db.query(Invoice).filter(
             (Invoice.is_deleted == False) | (Invoice.is_deleted == None)
@@ -1712,6 +1732,8 @@ def admin_stats(user: dict = Depends(get_current_user)):
 
         return {
             "total_users": total_users,
+            "admin_count": admin_count,
+            "paying_users": total_users - admin_count,  # admin'siz toplam
             "users_by_plan": users_by_plan,
             "cloud_addon_users": cloud_users,
             "total_invoices": total_invoices,
