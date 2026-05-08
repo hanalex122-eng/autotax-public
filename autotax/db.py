@@ -222,6 +222,7 @@ def save_invoice(data: dict, user_id: int, filename: str = None, file_data: byte
             vendor_fax=data.get("vendor_fax") or "",
             vendor_address=data.get("vendor_address") or "",
             vendor_website=data.get("vendor_website") or data.get("vendor_domain") or "",
+            due_date=data.get("due_date") or None,
             # Identity fingerprint
             vendor_ust_id=data.get("vendor_ust_id") or None,
             vendor_hrb=data.get("vendor_hrb") or None,

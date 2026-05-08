@@ -1525,6 +1525,95 @@ def extract_date(raw_text: str) -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def extract_due_date(raw_text: str) -> str:
+    """Faturadaki son odeme tarihini cikarir (Rechnung due date).
+
+    Sadece BELIRGIN ANCHOR'lar yakalanir — yoksa false-positive (mesela
+    'Datum 12.03.2026' tarihi 'Zahlbar bis' yerine yakalanmamali). Default
+    fatura tarihinden 14 gun sonra DEGIL — anchor yoksa bos string doner,
+    DB'de NULL kalir, kullanici manuel girer.
+
+    Anchor patternleri (Almanya + uluslararasi):
+      - 'Zahlbar bis 15.03.2026'
+      - 'Faellig am 15.03.2026' / 'Fallig am'
+      - 'Zahlungsziel 15.03.2026'
+      - 'Zahlung bis 15.03.2026'
+      - 'Date due April 29, 2026'
+      - 'Due date 2026-04-29'
+      - 'Payment due April 29, 2026'
+      - 'Bezahlen bis 15.03.2026'
+    """
+    if not raw_text:
+        return ""
+    text = raw_text
+
+    # Anchor + tarih (ayni satir veya yakin). Almanca'da umlaut OCR'da
+    # bazen 'ae' olarak yazilir: 'fällig' ve 'faellig' her ikisi yakalanir.
+    anchors = (
+        r"zahlbar\s*bis", r"zahlungsziel", r"zahlung\s*bis", r"bezahlen\s*bis",
+        r"f(?:ä|ae)llig\s*am", r"f(?:ä|ae)llig\s*bis", r"f(?:ä|ae)lligkeit",
+        r"date\s*due", r"due\s*date", r"payment\s*due", r"net\s*due",
+        r"[ée]ch[ée]ance", r"[ée]ch[ée]ance\s*au", r"a\s*payer\s*avant",
+    )
+    anchor_re = "(?:" + "|".join(anchors) + ")"
+
+    # Format 1: anchor + 'DD.MM.YYYY' veya 'DD-MM-YYYY' veya 'DD/MM/YYYY'
+    m = re.search(
+        rf"{anchor_re}\s*:?\s*(\d{{1,2}})[.\-/](\d{{1,2}})[.\-/](\d{{2,4}})",
+        text, re.IGNORECASE,
+    )
+    if m:
+        d, mo, y = m.group(1), m.group(2), m.group(3)
+        if len(y) == 2:
+            y = "20" + y
+        result = _validate_future_date(y, mo.zfill(2), d.zfill(2))
+        if result:
+            return result
+
+    # Format 2: anchor + 'YYYY-MM-DD' (ISO)
+    m = re.search(
+        rf"{anchor_re}\s*:?\s*(\d{{4}})-(\d{{2}})-(\d{{2}})",
+        text, re.IGNORECASE,
+    )
+    if m:
+        result = _validate_future_date(m.group(1), m.group(2), m.group(3))
+        if result:
+            return result
+
+    # Format 3: anchor + 'D Month YYYY' (e.g., '29 April 2026', '15. März 2024')
+    _month_names = sorted(_MONTH_MAP.keys(), key=len, reverse=True)
+    _month_pattern = "|".join(re.escape(mn) for mn in _month_names)
+    m = re.search(
+        rf"{anchor_re}\s*:?\s*(\d{{1,2}})\.?[\s.\-/]+({_month_pattern})[\s.\-/]+(\d{{4}})",
+        text, re.IGNORECASE,
+    )
+    if m:
+        day = m.group(1).zfill(2)
+        month_str = m.group(2).lower()
+        year = m.group(3)
+        if month_str in _MONTH_MAP:
+            result = _validate_future_date(year, _MONTH_MAP[month_str], day)
+            if result:
+                return result
+
+    # Format 4: anchor + 'Month D, YYYY' / 'Month D YYYY'
+    # ('Date due April 29, 2026' — Verdent format)
+    m = re.search(
+        rf"{anchor_re}\s*:?\s*({_month_pattern})\s+(\d{{1,2}}),?\s+(\d{{4}})",
+        text, re.IGNORECASE,
+    )
+    if m:
+        month_str = m.group(1).lower()
+        day = m.group(2).zfill(2)
+        year = m.group(3)
+        if month_str in _MONTH_MAP:
+            result = _validate_future_date(year, _MONTH_MAP[month_str], day)
+            if result:
+                return result
+
+    return ""
+
+
 def _validate_date(year: str, month: str, day: str) -> str | None:
     """Validate and return YYYY-MM-DD or None. Rejects unrealistic years and future dates."""
     try:
@@ -1535,6 +1624,19 @@ def _validate_date(year: str, month: str, day: str) -> str | None:
                 days_ahead = (dt.date() - today.date()).days
                 if days_ahead > 7:
                     return None
+            return dt.strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _validate_future_date(year: str, month: str, day: str) -> str | None:
+    """Due date validator — gelecek tarihlere izin verir (12 ay'a kadar).
+    Past tarihler de OK (gecmis odeme vadesi). Rejects unrealistic years."""
+    try:
+        dt = datetime(int(year), int(month), int(day))
+        today = datetime.now()
+        if 2020 <= dt.year <= today.year + 2:
             return dt.strftime("%Y-%m-%d")
     except (ValueError, TypeError):
         pass
@@ -2237,6 +2339,7 @@ def parse_invoice(raw_text: str) -> dict:
     currency = detect_currency(raw_text)
     category = detect_category(vendor, raw_text)
     date = extract_date(raw_text)
+    due_date = extract_due_date(raw_text)
     total = extract_total(raw_text)
 
     # Single fallback: only if extract_total found nothing.
@@ -2290,6 +2393,7 @@ def parse_invoice(raw_text: str) -> dict:
         "raw_text": raw_text,
         "merchant": merchant,
         "merchant_confidence": merchant_confidence,
+        "due_date": due_date,
         "vendor_iban": entities.get("ibans", [""])[0] if entities.get("ibans") else "",
         "vendor_email": entities.get("emails", [""])[0] if entities.get("emails") else "",
         "vendor_phone": entities.get("phones", [""])[0] if entities.get("phones") else "",

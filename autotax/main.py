@@ -4066,6 +4066,9 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                     inv.vendor_ust_id = parsed.get("vendor_ust_id") or None
                     inv.vendor_hrb = parsed.get("vendor_hrb") or None
                     inv.vendor_steuernr = parsed.get("vendor_steuernr") or None
+                    # Reminder system: parser'dan otomatik due_date geldiyse yaz
+                    if parsed.get("due_date"):
+                        inv.due_date = parsed["due_date"]
                     db_bg.commit()
                     logger.info("Async OCR completed: invoice %d (%s, €%.2f, ust_id=%s)",
                                 inv_id, parsed.get("vendor"),
