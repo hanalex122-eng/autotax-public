@@ -632,6 +632,10 @@ def invoice_to_dict(i):
         "vendor_email": safe_str(i.vendor_email) if hasattr(i, "vendor_email") and i.vendor_email else "",
         "vendor_phone": safe_str(i.vendor_phone) if hasattr(i, "vendor_phone") and i.vendor_phone else _extract_first_phone(i.raw_text or ""),
         "vendor_address": safe_str(i.vendor_address) if hasattr(i, "vendor_address") and i.vendor_address else _extract_first_address(i.raw_text or ""),
+        # Reminder system
+        "due_date": safe_str(getattr(i, "due_date", None) or ""),
+        "payment_status": safe_str(getattr(i, "payment_status", None) or "unpaid"),
+        "paid_at": (i.paid_at.strftime("%Y-%m-%dT%H:%M:%S") if getattr(i, "paid_at", None) else ""),
     }
 
 
