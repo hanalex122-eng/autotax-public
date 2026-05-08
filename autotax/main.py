@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, Body, Request
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -681,6 +681,28 @@ async def shutdown_email_auto_sync():
         logger.exception("Failed to stop email auto-sync task")
 
 
+# Rechnung Reminder System — gunluk 09:00 Europe/Berlin tick
+_reminder_task = None
+
+
+@app.on_event("startup")
+async def startup_reminders():
+    global _reminder_task
+    try:
+        from autotax.reminders import reminder_loop
+        _reminder_task = asyncio.create_task(reminder_loop())
+        logger.info("Reminder background loop scheduled")
+    except Exception:
+        logger.exception("Failed to start reminder loop")
+
+
+@app.on_event("shutdown")
+async def shutdown_reminders():
+    global _reminder_task
+    if _reminder_task and not _reminder_task.done():
+        _reminder_task.cancel()
+
+
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     """Health check — UptimeRobot ve benzeri monitor'lar HEAD kullaniyor.
@@ -1109,6 +1131,12 @@ def admin_page():
 
 <div id="stats" class="stats"></div>
 
+<div id="reminders" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px"></div>
+<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+  <button class="ghost" onclick="runRemindersNow()" style="font-size:12px">▶ Reminder Cycle Calistir</button>
+  <span id="reminderResult" class="small"></span>
+</div>
+
 <div class="toolbar">
   <input id="searchInput" placeholder="Email ara (free/early/pro yazarsan plan filtreler)..." style="flex:1;min-width:240px"/>
   <select id="planFilter" onchange="loadUsers()">
@@ -1175,7 +1203,62 @@ if (!token) {
 
 async function refreshAll() {
   await loadStats();
+  await loadReminders();
   await loadUsers();
+}
+
+async function loadReminders() {
+  try {
+    const [up, ov] = await Promise.all([
+      api("/reminders/upcoming?days=7"),
+      api("/reminders/overdue"),
+    ]);
+    const div = document.getElementById("reminders");
+    div.innerHTML = `
+      <div class="card" style="border-color:${ov.count > 0 ? '#dc2626' : '#1f2937'}">
+        <div class="label" style="color:${ov.count > 0 ? '#dc2626' : '#64748b'}">🚨 Überfällig</div>
+        <div class="val" style="color:${ov.count > 0 ? '#dc2626' : '#94a3b8'}">${ov.count}</div>
+        ${ov.count > 0 ? '<div class="small" style="color:#dc2626;margin-top:6px">€'+ov.total_amount.toFixed(2)+' offen</div>' : ''}
+        ${renderRemList(ov.items, true)}
+      </div>
+      <div class="card">
+        <div class="label">📅 Nächste 7 Tage fällig</div>
+        <div class="val">${up.count}</div>
+        ${renderRemList(up.items, false)}
+      </div>
+    `;
+  } catch (e) { console.error("reminders", e); }
+}
+
+function renderRemList(items, isOverdue) {
+  if (!items.length) return '<div class="small" style="margin-top:8px;color:#64748b">— Yok —</div>';
+  return '<div style="margin-top:10px;font-size:12px;display:flex;flex-direction:column;gap:6px">' +
+    items.slice(0, 5).map(i => {
+      const days = i.days_until_due;
+      const tag = isOverdue ? `<span style="color:#dc2626">${Math.abs(days)} gün geçti</span>` :
+                  (days === 0 ? '<span style="color:#f59e0b">BUGÜN</span>' :
+                   days === 1 ? '<span style="color:#f59e0b">YARIN</span>' :
+                   `${days} gün kaldı`);
+      return `<div style="display:flex;justify-content:space-between;gap:6px;padding:6px;background:rgba(255,255,255,0.02);border-radius:6px">
+        <span>${esc(i.vendor)} <span class="small">·  ${i.due_date || '—'}</span></span>
+        <span>€${i.total_amount.toFixed(2)} ${tag}</span>
+      </div>`;
+    }).join('') +
+    (items.length > 5 ? `<div class="small" style="text-align:center;color:#64748b">+ ${items.length-5} daha</div>` : '') +
+    '</div>';
+}
+
+async function runRemindersNow() {
+  document.getElementById("reminderResult").textContent = "Calisiyor...";
+  try {
+    const r = await api("/admin/reminders/run-now", {method:"POST"});
+    const s = r.stats;
+    document.getElementById("reminderResult").textContent =
+      `✓ ${s.checked} kontrol, ${s.sent_telegram} Telegram, ${s.sent_email} email`;
+    await loadReminders();
+  } catch (e) {
+    document.getElementById("reminderResult").textContent = "Hata: "+e.message;
+  }
 }
 
 async function loadStats() {
@@ -1633,6 +1716,139 @@ def admin_stats(user: dict = Depends(get_current_user)):
         }
     finally:
         db.close()
+
+
+# ════════════════════════════════════════════════════════════════
+# RECHNUNG REMINDER SYSTEM — odeme takibi endpoint'leri
+# ════════════════════════════════════════════════════════════════
+
+@app.patch("/invoices/{invoice_id}/payment")
+def update_invoice_payment(
+    invoice_id: int,
+    body: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Faturanin odeme bilgisini guncelle (due_date, payment_status, paid_at).
+    body: {due_date?: 'YYYY-MM-DD', payment_status?: 'paid|unpaid|overdue'}"""
+    db = SessionLocal()
+    try:
+        inv = db.query(Invoice).filter(
+            Invoice.id == invoice_id, Invoice.user_id == user["sub"],
+        ).first()
+        if not inv:
+            err(404, "Invoice not found")
+
+        changed = []
+        if "due_date" in body:
+            d = (body["due_date"] or "").strip()
+            if d and not _re_global.match(r"^\d{4}-\d{2}-\d{2}$", d):
+                err(400, "due_date must be YYYY-MM-DD")
+            inv.due_date = d or None
+            # due_date degisince reminder kodlarini sifirla — yeni tarih
+            # icin reminder'lar tekrar verilir.
+            inv.reminder_sent_codes = None
+            changed.append(f"due_date={inv.due_date}")
+        if "payment_status" in body:
+            ps = (body["payment_status"] or "").lower()
+            if ps not in ("paid", "unpaid", "overdue"):
+                err(400, "payment_status must be paid|unpaid|overdue")
+            inv.payment_status = ps
+            inv.paid_at = datetime.now(timezone.utc) if ps == "paid" else None
+            changed.append(f"status={ps}")
+        db.commit()
+        return {
+            "id": inv.id,
+            "due_date": inv.due_date,
+            "payment_status": inv.payment_status,
+            "paid_at": inv.paid_at.isoformat() if inv.paid_at else None,
+            "changes": changed,
+        }
+    finally:
+        db.close()
+
+
+def _serialize_reminder_invoice(inv: Invoice) -> dict:
+    today = datetime.now(timezone.utc).date()
+    due_str = inv.due_date or ""
+    days_until = None
+    if due_str:
+        try:
+            d = datetime.strptime(due_str[:10], "%Y-%m-%d").date()
+            days_until = (d - today).days
+        except ValueError:
+            pass
+    return {
+        "id": inv.id,
+        "vendor": inv.vendor or "",
+        "total_amount": safe_float(inv.total_amount),
+        "invoice_number": inv.invoice_number or "",
+        "date": inv.date or "",
+        "due_date": inv.due_date or "",
+        "payment_status": inv.payment_status or "unpaid",
+        "days_until_due": days_until,
+        "is_overdue": days_until is not None and days_until < 0,
+    }
+
+
+@app.get("/reminders/upcoming")
+def reminders_upcoming(
+    days: int = Query(7, ge=1, le=90),
+    user: dict = Depends(get_current_user),
+):
+    """Onumuzdeki N gun icinde vadesi gelecek odenmemis faturalar."""
+    db = SessionLocal()
+    try:
+        today = datetime.now(timezone.utc).date()
+        upper = (today + timedelta(days=days)).isoformat()
+        invoices = (
+            db.query(Invoice)
+            .filter(Invoice.user_id == user["sub"])
+            .filter((Invoice.is_deleted == False) | (Invoice.is_deleted == None))
+            .filter(Invoice.payment_status != "paid")
+            .filter(Invoice.due_date.isnot(None))
+            .filter(Invoice.due_date >= today.isoformat())
+            .filter(Invoice.due_date <= upper)
+            .order_by(Invoice.due_date.asc())
+            .all()
+        )
+        return {
+            "items": [_serialize_reminder_invoice(i) for i in invoices],
+            "count": len(invoices),
+            "window_days": days,
+        }
+    finally:
+        db.close()
+
+
+@app.get("/reminders/overdue")
+def reminders_overdue(user: dict = Depends(get_current_user)):
+    """Vadesi gecmis odenmemis faturalar."""
+    db = SessionLocal()
+    try:
+        today = datetime.now(timezone.utc).date()
+        invoices = (
+            db.query(Invoice)
+            .filter(Invoice.user_id == user["sub"])
+            .filter((Invoice.is_deleted == False) | (Invoice.is_deleted == None))
+            .filter(Invoice.payment_status != "paid")
+            .filter(Invoice.due_date.isnot(None))
+            .filter(Invoice.due_date < today.isoformat())
+            .order_by(Invoice.due_date.asc())
+            .all()
+        )
+        items = [_serialize_reminder_invoice(i) for i in invoices]
+        total_overdue = sum(i["total_amount"] for i in items)
+        return {"items": items, "count": len(items), "total_amount": round(total_overdue, 2)}
+    finally:
+        db.close()
+
+
+@app.post("/admin/reminders/run-now")
+async def admin_run_reminders_now(user: dict = Depends(get_current_user)):
+    """Manuel olarak reminder cycle'ini calistir (test icin). Sadece admin."""
+    from autotax.reminders import process_reminders
+    stats = await process_reminders()
+    return {"success": True, "stats": stats}
 
 
 @app.get("/admin/users/{user_id}/invoice")

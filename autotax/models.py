@@ -66,6 +66,13 @@ class Invoice(Base):
     # Duplicate detection
     file_hash = Column(String(32), index=True, nullable=True)
     possible_duplicate = Column(Boolean, default=False, nullable=False)
+    # Rechnung Reminder System — odeme takibi
+    due_date = Column(String, nullable=True, index=True)  # YYYY-MM-DD format
+    payment_status = Column(String(20), default="unpaid", nullable=False, index=True)  # unpaid|paid|overdue
+    paid_at = Column(DateTime, nullable=True)
+    # JSON array string: hangi reminder'lar gonderildi — '["7d","1d","on_day","overdue"]'
+    # Ayni reminder'in tekrar gonderilmesini onler.
+    reminder_sent_codes = Column(String, nullable=True)
 
 
 class CashEntry(Base):

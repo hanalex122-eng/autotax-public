@@ -106,6 +106,23 @@ def init_db():
                 if col not in inv_cols:
                     conn.execute(text(f"ALTER TABLE invoices ADD COLUMN {col} VARCHAR"))
                     logger.info("Added '%s' column to invoices", col)
+        # --- Rechnung Reminder System columns ---
+        inv_cols = [c["name"] for c in insp.get_columns("invoices")]
+        with engine.begin() as conn:
+            if "due_date" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN due_date VARCHAR"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_due_date ON invoices(due_date)"))
+                logger.info("Added 'due_date' column to invoices")
+            if "payment_status" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid'"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_payment_status ON invoices(payment_status)"))
+                logger.info("Added 'payment_status' column to invoices")
+            if "paid_at" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN paid_at TIMESTAMP"))
+                logger.info("Added 'paid_at' column to invoices")
+            if "reminder_sent_codes" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN reminder_sent_codes VARCHAR"))
+                logger.info("Added 'reminder_sent_codes' column to invoices")
         # --- Vendor identity fingerprint (USt-IdNr + HRB) ---
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:
