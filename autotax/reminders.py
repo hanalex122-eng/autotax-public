@@ -37,6 +37,9 @@ logger = logging.getLogger("autotax.reminders")
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+# Alternatif: uptime-bot webhook'una gondererek Telegram'a forward
+# (autotax-hub'a TELEGRAM_TOKEN duplicate etmemek icin temiz mimari).
+NOTIFY_WEBHOOK_URL = os.getenv("NOTIFY_WEBHOOK_URL", "").strip()
 SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "").strip()
@@ -103,26 +106,44 @@ def determine_reminder_code(due_date_str: Optional[str], today: Optional[date] =
 # ───────────────────────────────────────────────────────────────────
 
 async def send_telegram(text: str) -> bool:
-    """Direkt Telegram Bot API'ye mesaj gonderir."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.debug("[REMINDER] telegram skipped — no TELEGRAM_TOKEN/CHAT_ID")
-        return False
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(url, json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            })
-            if r.status_code != 200:
-                logger.warning("[REMINDER] telegram failed %s: %s", r.status_code, r.text[:200])
+    """Telegram'a mesaj gonder. Iki yol:
+    1) NOTIFY_WEBHOOK_URL set ise -> uptime-bot'un webhook'una POST et
+       (uptime-bot Telegram'a forward eder; credentials orada saklanir).
+    2) TELEGRAM_TOKEN+CHAT_ID set ise -> direkt Telegram Bot API'ye gonder.
+    """
+    # Yol 1: webhook (tercih edilen — credentials autotax-hub'da yok)
+    if NOTIFY_WEBHOOK_URL:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(NOTIFY_WEBHOOK_URL, json={"text": text})
+                if r.status_code == 200:
+                    return True
+                logger.warning("[REMINDER] webhook failed %s: %s", r.status_code, r.text[:200])
+        except Exception as e:
+            logger.warning("[REMINDER] webhook error: %s", e)
+            # Fall through — direkt API'yi dene
+
+    # Yol 2: direkt Telegram API
+    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, json={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                })
+                if r.status_code == 200:
+                    return True
+                logger.warning("[REMINDER] telegram API failed %s: %s", r.status_code, r.text[:200])
                 return False
-            return True
-    except Exception as e:
-        logger.warning("[REMINDER] telegram error: %s", e)
-        return False
+        except Exception as e:
+            logger.warning("[REMINDER] telegram error: %s", e)
+            return False
+
+    logger.debug("[REMINDER] no telegram channel configured")
+    return False
 
 
 def send_email(to_addr: str, subject: str, body_html: str) -> bool:
