@@ -1170,6 +1170,7 @@ function UploadView({triggerRefresh,onNav,showToast}){
     if(res.status===401){const newTk=await _refreshToken();if(newTk){const fd2=new FormData();fd2.append("file",f);fd2.append("invoice_type",invoiceType);res=await _fetchWithBackoff(API+"/invoices/upload-async",{method:"POST",headers:{Authorization:"Bearer "+newTk},body:fd2},onWait,3);tk=newTk;}}
     if(!res.ok&&res.status>=500)throw new Error("Server error "+res.status);
     const d=await res.json();
+    if(d.duplicate&&d.can_force)return{status:"duplicate",data:d};
     if(d.status==="done")return{status:"done",data:d};
     if(d.status==="processing"&&d.id){
       // Poll every 2s, max 30s
@@ -1189,29 +1190,30 @@ function UploadView({triggerRefresh,onNav,showToast}){
   const uploadAsync=async()=>{
     if(!files.length)return;
     setUploading(true);setResults([]);
+    // Auto-scroll so the user sees progress immediately, not stuck on the upload zone
+    setTimeout(()=>{resultsRef.current?.scrollIntoView({behavior:"smooth",block:"start"});},250);
     let token=localStorage.getItem("atx_token");
-    let okCount=0;const allResults=[];
+    let okCount=0;const allResults=[];const duplicates=[];
     for(const f of files){
       allResults.push({filename:f.name,status:"processing",message:"⏳ Processing..."});
       setResults([...allResults]);
-      // Refresh invoice list so placeholder appears
       if(triggerRefresh)triggerRefresh();
       try{
         token=localStorage.getItem("atx_token");
         const _idxNow=allResults.length-1;
         const _onWait=(ms,attempt)=>{const sec=Math.ceil(ms/1000);allResults[_idxNow]={filename:f.name,status:"processing",message:"⏳ Limit erreicht — warte "+sec+"s (Versuch "+attempt+"/3)"};setResults([...allResults]);};
-        // Try async first, fallback to sync on 502
         let r;
         try{r=await _uploadAsync(f,token,_onWait);}catch(asyncErr){
-          // 502 = server overloaded, fallback to sync upload
-          try{const syncRes=await _uploadOne(f,token,_onWait);const sd=await syncRes.json();r={status:syncRes.ok?"done":"error",data:sd};}catch(syncErr){r={status:"error",data:{message:syncErr.message}};}
+          try{const syncRes=await _uploadOne(f,token,_onWait);const sd=await syncRes.json();r={status:syncRes.ok?"done":(sd&&sd.duplicate&&sd.can_force?"duplicate":"error"),data:sd};}catch(syncErr){r={status:"error",data:{message:syncErr.message}};}
         }
         const idx=allResults.length-1;
-        if(r.status==="done"){
-          allResults[idx]={filename:f.name,status:"ok",message:"✅ OK — €"+((r.data.total_amount||0).toFixed(2))+(r.data.vendor?" ("+r.data.vendor+")":"")};
+        if(r.status==="duplicate"){
+          duplicates.push({file:f,data:r.data});
+          allResults[idx]={filename:f.name,status:"skipped",message:"⚠️ Duplikat erkannt",is_duplicate:true,id:r.data?.id};
+        }else if(r.status==="done"){
+          allResults[idx]={filename:f.name,status:"ok",message:"✅ OK — €"+((r.data.total_amount||0).toFixed(2))+(r.data.vendor?" ("+r.data.vendor+")":""),id:r.data?.id};
           okCount++;
           if(showToast)showToast("Rechnung erfolgreich verarbeitet: "+(r.data.vendor||"OK"),"success");
-          // Refresh list so processed invoice replaces placeholder
           if(triggerRefresh)triggerRefresh();
         }else if(r.status==="timeout"){
           allResults[idx]={filename:f.name,status:"warn",message:"⏱ OCR taking longer than expected",id:r.data?.id};
@@ -1224,8 +1226,34 @@ function UploadView({triggerRefresh,onNav,showToast}){
         setResults([...allResults]);
       }
     }
+    // Ask once for ALL duplicates (same UX as sync flow)
+    if(duplicates.length>0){
+      const names=duplicates.map(d=>d.file.name).join("\n• ");
+      const reupload=confirm(duplicates.length+" Duplikat(e) gefunden:\n\n• "+names+"\n\nAlle erneut hochladen? (force_upload)");
+      if(reupload){
+        for(const dup of duplicates){
+          try{
+            const fd2=new FormData();fd2.append("file",dup.file);fd2.append("invoice_type",invoiceType);fd2.append("force_upload","true");
+            const res2=await _fetchWithBackoff(API+"/invoices/upload-async",{method:"POST",headers:{Authorization:"Bearer "+token},body:fd2},null,3);
+            const d2=await res2.json();
+            const idx=allResults.findIndex(r=>r.filename===dup.file.name);
+            if(idx>=0){
+              if(d2.status==="done"){
+                allResults[idx]={filename:dup.file.name,status:"ok",message:"✅ OK (erneut) — €"+((d2.total_amount||0).toFixed(2))+(d2.vendor?" ("+d2.vendor+")":""),id:d2.id};
+                okCount++;
+              }else{
+                allResults[idx]={filename:dup.file.name,status:"warn",message:"⏱ verarbeitet — siehe Liste",id:d2.id};
+              }
+            }
+          }catch(ex){}
+        }
+        setResults([...allResults]);
+      }
+    }
     setUploading(false);setFiles([]);
     if(triggerRefresh)triggerRefresh();
+    // Scroll to the end of the results card so action buttons (📄/📒/⚡) are visible
+    setTimeout(()=>{const node=resultsRef.current;if(node){const r=node.getBoundingClientRect();window.scrollTo({top:window.scrollY+r.bottom-window.innerHeight+40,behavior:"smooth"});}},400);
     if(okCount>0&&showToast)showToast(okCount+t("uploaded_ok"),"success");
   };
   /* --- ADDED END --- */
@@ -1336,8 +1364,8 @@ function UploadView({triggerRefresh,onNav,showToast}){
     }}
     catch(e){setResults([{filename:"Error",status:"error",message:e.message}]);}
     setUploading(false);setFiles([]);
-    // Auto-scroll to results so user doesn't need to scroll manually
-    setTimeout(()=>{resultsRef.current?.scrollIntoView({behavior:"smooth",block:"start"});},300);
+    // Scroll all the way down so the action buttons (📄/📒/⚡) under the results card are visible
+    setTimeout(()=>{const node=resultsRef.current;if(node){const r=node.getBoundingClientRect();window.scrollTo({top:window.scrollY+r.bottom-window.innerHeight+40,behavior:"smooth"});}},400);
     if(triggerRefresh)triggerRefresh();
     if(okCount>0){
       if(showToast)showToast(okCount+t("uploaded_ok"),"success");

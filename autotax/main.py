@@ -4197,8 +4197,9 @@ def get_invoice_detail(invoice_id: int, user: dict = Depends(get_current_user)):
 _bg_tasks: set = set()  # prevent GC of background tasks
 
 @app.post("/invoices/upload-async")
-async def upload_invoice_async(request: Request, file: UploadFile = File(...), handwriting: bool = False, invoice_type: str = "expense", user: dict = Depends(get_current_user)):
-    """Async upload: Tesseract first, if fails creates placeholder invoice + runs OCR.space in background."""
+async def upload_invoice_async(request: Request, file: UploadFile = File(...), handwriting: bool = False, invoice_type: str = "expense", force_upload: bool = False, user: dict = Depends(get_current_user)):
+    """Async upload: Tesseract first, if fails creates placeholder invoice + runs OCR.space in background.
+    Mirrors the duplicate-check pattern from sync /upload so the same file can't be ingested twice."""
     _enforce_upload_quota(user["sub"])
     import asyncio as _asyncio
     if file.content_type not in ALLOWED_TYPES:
@@ -4208,6 +4209,27 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
         err(400, "Datei zu groß")
     if len(content) == 0:
         err(400, "Leere Datei")
+
+    # --- Hard duplicate check (md5) — same shape as sync /upload ---
+    file_hash = generate_file_hash(content)
+    db_check = SessionLocal()
+    try:
+        existing = find_hard_duplicate(db_check, user["sub"], file_hash)
+        if existing and not force_upload:
+            logger.info("Async hard duplicate: user=%s hash=%s -> invoice %d", user["sub"], file_hash, existing.id)
+            return {
+                "status": "duplicate",
+                "id": existing.id,
+                "total_amount": safe_float(existing.total_amount),
+                "filename": existing.filename,
+                "vendor": existing.vendor or "",
+                "duplicate": True,
+                "can_force": True,
+                "message": "Diese Datei wurde bereits hochgeladen.",
+            }
+    finally:
+        db_check.close()
+    # --- End hard duplicate check ---
 
     # Sync fast-path: Tesseract for images, pdfplumber for digital PDFs.
     # Both are local + fast; avoids the async OCR.space round-trip that
