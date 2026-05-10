@@ -1938,6 +1938,14 @@ async def admin_run_mahnung_now(user: dict = Depends(get_current_user)):
     return {"success": True, "stats": stats}
 
 
+@app.post("/admin/monthly-summary/run-now")
+async def admin_run_monthly_summary_now(user: dict = Depends(get_current_user)):
+    """Manuel monthly summary (ay 1'i degil de test edebilmek icin force=True)."""
+    from autotax.reminders import process_monthly_summary
+    stats = await process_monthly_summary(force=True)
+    return {"success": True, "stats": stats}
+
+
 @app.get("/invoices/{invoice_id}/mahnung-pdf")
 def get_mahnung_pdf(
     invoice_id: int,

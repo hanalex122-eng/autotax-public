@@ -231,6 +231,89 @@ def _format_email_body(inv: Invoice, code: str) -> str:
 # Core: scan + send
 # ───────────────────────────────────────────────────────────────────
 
+async def process_monthly_summary(force: bool = False) -> dict:
+    """Her ayin 1'inde, kullanicinin onceki ay verisini ozetleyip Telegram +
+    email gonderir. Ay icinde kayitsiz hicbir is yapmaz (tarih kontrolu).
+    force=True: tarih kontrolunu pas gec (manuel test icin)."""
+    from autotax.db import SessionLocal
+    from autotax.models import User, Invoice
+    from datetime import date as _date
+    from sqlalchemy import func as _f
+    today = _date.today()
+    if today.day != 1 and not force:
+        return {"skipped": True, "reason": "not first of month"}
+    # Onceki ay (1 Mayis -> Nisan ozetle)
+    if today.month == 1:
+        py, pm = today.year - 1, 12
+    else:
+        py, pm = today.year, today.month - 1
+    month_str = f"{py:04d}-{pm:02d}"
+    label = ["Januar","Februar","März","April","Mai","Juni","Juli","August",
+             "September","Oktober","November","Dezember"][pm-1]
+
+    db = SessionLocal()
+    stats = {"checked": 0, "sent_telegram": 0, "sent_email": 0}
+    try:
+        users = db.query(User).all()
+        stats["checked"] = len(users)
+        for u in users:
+            try:
+                rows = (
+                    db.query(Invoice)
+                    .filter(Invoice.user_id == u.id)
+                    .filter(Invoice.date.like(f"{month_str}%"))
+                    .filter((Invoice.is_deleted == False) | (Invoice.is_deleted == None))
+                    .all()
+                )
+                if not rows:
+                    continue
+                inc = sum(r.total_amount or 0 for r in rows if r.invoice_type == "income")
+                exp = sum(r.total_amount or 0 for r in rows if r.invoice_type != "income")
+                vat = sum(r.vat_amount or 0 for r in rows if r.invoice_type != "income")
+                profit = inc - exp
+                top = {}
+                for r in rows:
+                    v = r.vendor or "?"
+                    top[v] = top.get(v, 0) + 1
+                top_list = sorted(top.items(), key=lambda x: -x[1])[:3]
+
+                msg = (
+                    f"📊 <b>Monatszusammenfassung: {label} {py}</b>\n\n"
+                    f"<b>Kunde:</b> {u.email}\n\n"
+                    f"💰 Einnahmen:  €{inc:.2f}\n"
+                    f"💸 Ausgaben:   €{exp:.2f}\n"
+                    f"📈 Gewinn:     €{profit:.2f}\n"
+                    f"📑 USt-Betrag: €{vat:.2f}\n"
+                    f"🧾 Belege:     {len(rows)}\n\n"
+                    f"<b>Top Vendor:</b>\n" +
+                    "\n".join([f"  {i+1}. {n} ({c})" for i,(n,c) in enumerate(top_list)])
+                )
+                if await send_telegram(msg):
+                    stats["sent_telegram"] += 1
+                # Email versiyonu (HTML)
+                if u.email:
+                    body = f"""<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:560px;padding:20px">
+                    <h2 style="color:#10b981">📊 Monatszusammenfassung — {label} {py}</h2>
+                    <table style="width:100%;border-collapse:collapse;font-size:14px">
+                    <tr><td>Einnahmen</td><td style="text-align:right;color:#10b981"><strong>€{inc:.2f}</strong></td></tr>
+                    <tr><td>Ausgaben</td><td style="text-align:right;color:#ef4444"><strong>€{exp:.2f}</strong></td></tr>
+                    <tr style="border-top:2px solid #cbd5e1"><td><strong>Gewinn</strong></td><td style="text-align:right"><strong>€{profit:.2f}</strong></td></tr>
+                    <tr><td>USt-Betrag (geschuldet)</td><td style="text-align:right">€{vat:.2f}</td></tr>
+                    <tr><td>Belege erfasst</td><td style="text-align:right">{len(rows)}</td></tr>
+                    </table>
+                    <p style="color:#64748b;font-size:13px;margin-top:24px">AutoTax-HUB · Automatische Monatsübersicht</p>
+                    </body></html>"""
+                    if send_email(u.email, f"📊 {label} {py} — Monatsübersicht", body):
+                        stats["sent_email"] += 1
+            except Exception:
+                logger.exception("[SUMMARY] error for user %s", u.id)
+        if stats["sent_telegram"] or stats["sent_email"]:
+            logger.info("[SUMMARY] %s %s: %s", label, py, stats)
+    finally:
+        db.close()
+    return stats
+
+
 async def process_trial_expiry() -> dict:
     """Trial'i dolmus kullanicilari plan=free'ye dusur, admin'e Telegram alert.
     Trial 3/1 gun kala kullaniciya hatirlatma da burada gonderilir
@@ -417,6 +500,10 @@ async def reminder_loop():
                 await process_mahnungen()
             except Exception:
                 logger.exception("[MAHNUNG] tick failed")
+            try:
+                await process_monthly_summary()
+            except Exception:
+                logger.exception("[SUMMARY] tick failed")
         except Exception as e:
             logger.exception("[REMINDER] loop tick error: %s", e)
         # Sonraki 09:00'a kadar uyu (en az 60 sn, en cok 24 saat)
