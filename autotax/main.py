@@ -195,19 +195,32 @@ def _user_plan(user_id: int) -> str:
 
 def _enforce_upload_quota(user_id: int, chat: bool = False) -> None:
     """Raise HTTPException 429 when the user hits either their per-minute
-    burst limit or their per-day cap for the current plan."""
+    burst limit or their per-day cap for the current plan.
+    Includes Retry-After header so the client can wait the right amount."""
     plan = _user_plan(user_id)
     if chat:
         cap = _CHAT_DAILY_CAP.get(plan, _CHAT_DAILY_CAP["free"])
         if not _window_check("chat_day", user_id, cap, 86400):
-            err(429, f"AI-Chat Tageslimit erreicht ({cap}/Tag auf Plan '{plan}'). Morgen wieder verfügbar oder Plan upgraden.")
+            raise HTTPException(
+                status_code=429,
+                detail={"success": False, "error": f"AI-Chat Tageslimit erreicht ({cap}/Tag auf Plan '{plan}'). Morgen wieder verfügbar oder Plan upgraden."},
+                headers={"Retry-After": "3600"},
+            )
         return
     day_cap = _DAILY_CAP.get(plan, _DAILY_CAP["free"])
     min_cap = _MINUTE_CAP.get(plan, _MINUTE_CAP["free"])
     if not _window_check("upload_min", user_id, min_cap, 60):
-        err(429, f"Zu viele Uploads in kurzer Zeit (max {min_cap}/Minute). Bitte etwas warten.")
+        raise HTTPException(
+            status_code=429,
+            detail={"success": False, "error": f"Zu viele Uploads in kurzer Zeit (max {min_cap}/Minute). Bitte etwas warten."},
+            headers={"Retry-After": "30"},
+        )
     if not _window_check("upload_day", user_id, day_cap, 86400):
-        err(429, f"Tageslimit erreicht ({day_cap} Belege/Tag auf Plan '{plan}'). Upgraden oder morgen fortsetzen.")
+        raise HTTPException(
+            status_code=429,
+            detail={"success": False, "error": f"Tageslimit erreicht ({day_cap} Belege/Tag auf Plan '{plan}'). Upgraden oder morgen fortsetzen."},
+            headers={"Retry-After": "3600"},
+        )
 
 
 # 4. Disk quota check helper (called from upload endpoints if integrated)

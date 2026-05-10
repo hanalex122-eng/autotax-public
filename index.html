@@ -86,6 +86,66 @@ const _t = typeof t === "function" ? t : k => k;
 
 const API = window.location.origin;
 
+/* ══════════════════════════════════════════
+   Resilience layer — kept self-contained so the OCR pipeline keeps working
+   even if the backend returns object-shaped error bodies, hits 429, etc.
+   ══════════════════════════════════════════ */
+function _extractErr(d){
+  if(d==null) return "Fehler";
+  if(typeof d==="string") return d;
+  if(typeof d.detail==="string") return d.detail;
+  if(d.detail && typeof d.detail==="object") return d.detail.error||d.detail.message||d.detail.detail||"Fehler";
+  if(typeof d.error==="string") return d.error;
+  if(typeof d.message==="string") return d.message;
+  try{ return JSON.stringify(d); }catch(e){ return "Fehler"; }
+}
+function _safeMsg(v){
+  if(v==null) return "";
+  if(typeof v==="string") return v;
+  if(typeof v==="number"||typeof v==="boolean") return String(v);
+  return _extractErr(v);
+}
+window._extractErr=_extractErr;
+window._safeMsg=_safeMsg;
+
+class ErrorBoundary extends React.Component {
+  constructor(p){super(p); this.state={hasError:false,msg:""};}
+  static getDerivedStateFromError(err){return{hasError:true,msg:err&&err.message?err.message:String(err)};}
+  componentDidCatch(err,info){try{console.error("ErrorBoundary:",err,info);}catch(e){}}
+  render(){
+    if(this.state.hasError){
+      return React.createElement("div",{style:{padding:24,maxWidth:560,margin:"40px auto",background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,color:"var(--text)",fontFamily:"DM Sans, system-ui, sans-serif",boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}},
+        React.createElement("h2",{style:{margin:"0 0 8px",color:"#ef4444",fontSize:20}},"Anzeige-Fehler"),
+        React.createElement("p",{style:{margin:"0 0 16px",color:"var(--text-muted)",fontSize:14,lineHeight:1.5}},"Die Seite konnte nicht angezeigt werden. Ihre Daten sind sicher."),
+        React.createElement("p",{style:{margin:"0 0 16px",color:"var(--text-dim)",fontSize:12,fontFamily:"monospace",background:"rgba(239,68,68,0.08)",padding:8,borderRadius:6,wordBreak:"break-word"}}, this.state.msg||"Unbekannter Fehler"),
+        React.createElement("button",{onClick:()=>window.location.reload(),style:{padding:"10px 20px",background:"#10b981",color:"#fff",border:"none",borderRadius:10,cursor:"pointer",fontWeight:600,fontSize:14}},"🔄 Seite neu laden")
+      );
+    }
+    return this.props.children;
+  }
+}
+window._ErrorBoundary=ErrorBoundary;
+
+/* Smart fetch with 429 backoff — wraps a single request, returns Response.
+   Honors Retry-After header (seconds). Up to maxRetries attempts.
+   onWait(ms, attempt) is called before each wait so UI can show countdown. */
+async function _fetchWithBackoff(url, opts, onWait, maxRetries){
+  const max = (typeof maxRetries==="number")?maxRetries:3;
+  let attempt=0;
+  while(true){
+    const res = await fetch(url, opts);
+    if(res.status!==429 || attempt>=max) return res;
+    let waitSec=0;
+    const ra=res.headers.get("Retry-After");
+    if(ra && !isNaN(parseInt(ra,10))) waitSec=parseInt(ra,10);
+    if(!waitSec) waitSec = Math.min(60, 15*Math.pow(2,attempt)); // 15s, 30s, 60s
+    if(typeof onWait==="function") try{ onWait(waitSec*1000, attempt+1); }catch(e){}
+    await new Promise(r=>setTimeout(r, waitSec*1000));
+    attempt++;
+  }
+}
+window._fetchWithBackoff=_fetchWithBackoff;
+
 const theme = {
   bg: "var(--bg)", surface: "var(--surface)", surfaceAlt: "var(--surface-alt)", card: "var(--card)",
   border: "var(--border)", accent: "#10b981", accentSoft: "rgba(16,185,129,0.12)",
@@ -1102,12 +1162,12 @@ function UploadView({triggerRefresh,onNav,showToast}){
     // Scroll to upload button so user sees it
     setTimeout(()=>{uploadBtnRef.current?.scrollIntoView({behavior:"smooth",block:"center"});},200);};
   const _refreshToken=async()=>{const refresh=localStorage.getItem("atx_refresh");if(!refresh)return null;try{const r=await fetch(API+"/auth/refresh",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh_token:refresh})});if(r.ok){const d=await r.json();localStorage.setItem("atx_token",d.token);if(d.refresh_token)localStorage.setItem("atx_refresh",d.refresh_token);return d.token;}}catch(e){}return null;};
-  const _uploadOne=async(f,tk)=>{const fd=new FormData();fd.append("file",f);fd.append("invoice_type",invoiceType);let res=await fetch(API+"/invoices/upload",{method:"POST",headers:{Authorization:"Bearer "+tk},body:fd});if(res.status===401){const newTk=await _refreshToken();if(newTk){const fd2=new FormData();fd2.append("file",f);fd2.append("invoice_type",invoiceType);res=await fetch(API+"/invoices/upload",{method:"POST",headers:{Authorization:"Bearer "+newTk},body:fd2});}}return res;};
+  const _uploadOne=async(f,tk,onWait)=>{const fd=new FormData();fd.append("file",f);fd.append("invoice_type",invoiceType);let res=await _fetchWithBackoff(API+"/invoices/upload",{method:"POST",headers:{Authorization:"Bearer "+tk},body:fd},onWait,3);if(res.status===401){const newTk=await _refreshToken();if(newTk){const fd2=new FormData();fd2.append("file",f);fd2.append("invoice_type",invoiceType);res=await _fetchWithBackoff(API+"/invoices/upload",{method:"POST",headers:{Authorization:"Bearer "+newTk},body:fd2},onWait,3);}}return res;};
   /* --- ADDED START: Async OCR upload with polling --- */
-  const _uploadAsync=async(f,tk)=>{
+  const _uploadAsync=async(f,tk,onWait)=>{
     const fd=new FormData();fd.append("file",f);fd.append("invoice_type",invoiceType);
-    let res=await fetch(API+"/invoices/upload-async",{method:"POST",headers:{Authorization:"Bearer "+tk},body:fd});
-    if(res.status===401){const newTk=await _refreshToken();if(newTk){const fd2=new FormData();fd2.append("file",f);fd2.append("invoice_type",invoiceType);res=await fetch(API+"/invoices/upload-async",{method:"POST",headers:{Authorization:"Bearer "+newTk},body:fd2});tk=newTk;}}
+    let res=await _fetchWithBackoff(API+"/invoices/upload-async",{method:"POST",headers:{Authorization:"Bearer "+tk},body:fd},onWait,3);
+    if(res.status===401){const newTk=await _refreshToken();if(newTk){const fd2=new FormData();fd2.append("file",f);fd2.append("invoice_type",invoiceType);res=await _fetchWithBackoff(API+"/invoices/upload-async",{method:"POST",headers:{Authorization:"Bearer "+newTk},body:fd2},onWait,3);tk=newTk;}}
     if(!res.ok&&res.status>=500)throw new Error("Server error "+res.status);
     const d=await res.json();
     if(d.status==="done")return{status:"done",data:d};
@@ -1138,11 +1198,13 @@ function UploadView({triggerRefresh,onNav,showToast}){
       if(triggerRefresh)triggerRefresh();
       try{
         token=localStorage.getItem("atx_token");
+        const _idxNow=allResults.length-1;
+        const _onWait=(ms,attempt)=>{const sec=Math.ceil(ms/1000);allResults[_idxNow]={filename:f.name,status:"processing",message:"⏳ Limit erreicht — warte "+sec+"s (Versuch "+attempt+"/3)"};setResults([...allResults]);};
         // Try async first, fallback to sync on 502
         let r;
-        try{r=await _uploadAsync(f,token);}catch(asyncErr){
+        try{r=await _uploadAsync(f,token,_onWait);}catch(asyncErr){
           // 502 = server overloaded, fallback to sync upload
-          try{const syncRes=await _uploadOne(f,token);const sd=await syncRes.json();r={status:syncRes.ok?"done":"error",data:sd};}catch(syncErr){r={status:"error",data:{message:syncErr.message}};}
+          try{const syncRes=await _uploadOne(f,token,_onWait);const sd=await syncRes.json();r={status:syncRes.ok?"done":"error",data:sd};}catch(syncErr){r={status:"error",data:{message:syncErr.message}};}
         }
         const idx=allResults.length-1;
         if(r.status==="done"){
@@ -1154,7 +1216,7 @@ function UploadView({triggerRefresh,onNav,showToast}){
         }else if(r.status==="timeout"){
           allResults[idx]={filename:f.name,status:"warn",message:"⏱ OCR taking longer than expected",id:r.data?.id};
         }else{
-          allResults[idx]={filename:f.name,status:"error",message:r.data?.detail||r.data?.message||"Error",id:r.data?.id};
+          allResults[idx]={filename:f.name,status:"error",message:_extractErr(r.data),id:r.data?.id};
         }
         setResults([...allResults]);
       }catch(ex){
@@ -1171,7 +1233,7 @@ function UploadView({triggerRefresh,onNav,showToast}){
     // Scroll to results area when upload STARTS (not after it finishes)
     setTimeout(()=>{resultsRef.current?.scrollIntoView({behavior:"smooth",block:"start"});},300);
     let okCount=0;
-    try{if(files.length===1){const res=await _uploadOne(files[0],token);const d=await res.json();
+    try{if(files.length===1){const _onWait1=(ms,attempt)=>{const sec=Math.ceil(ms/1000);setResults([{filename:files[0].name,status:"processing",message:"⏳ Limit erreicht — warte "+sec+"s (Versuch "+attempt+"/3)"}]);};const res=await _uploadOne(files[0],token,_onWait1);const d=await res.json();
       /* --- ADDED START: duplicate force upload --- */
       if(d.duplicate&&d.can_force){
         const userConfirmed = await window.showDuplicateModal(files[0].name);
@@ -1191,7 +1253,7 @@ function UploadView({triggerRefresh,onNav,showToast}){
         }else{setResults([{filename:files[0].name,status:"skipped",message:"Gelöschtes Duplikat — skipped"}]);}
       }
       /* --- ADDED END --- */
-      else{setResults([{filename:files[0].name,status:res.ok?"ok":"error",message:res.ok?"OK — €"+(d.total_amount?.toFixed(2)||"0.00"):d.detail}]);if(res.ok){okCount=1;if(d.warning&&showToast)showToast(d.warning,"warn");}}}
+      else{setResults([{filename:files[0].name,status:res.ok?"ok":"error",message:res.ok?"OK — €"+(d.total_amount?.toFixed(2)||"0.00"):_extractErr(d)}]);if(res.ok){okCount=1;if(d.warning&&showToast)showToast(d.warning,"warn");}}}
     else{
       /* Upload files one by one with auto token refresh + live progress */
       const allResults=[];
@@ -1203,7 +1265,9 @@ function UploadView({triggerRefresh,onNav,showToast}){
       for(const f of files){
         try{
           token=localStorage.getItem("atx_token");
-          const res=await _uploadOne(f,token);
+          const _curIdx=idx;
+          const _onWaitMulti=(ms,attempt)=>{const sec=Math.ceil(ms/1000);allResults[_curIdx]={filename:f.name,status:"processing",message:"⏳ Limit erreicht — warte "+sec+"s (Versuch "+attempt+"/3)"};setResults([...allResults]);};
+          const res=await _uploadOne(f,token,_onWaitMulti);
           const d=await res.json();
           if(d && d.duplicate && d.can_force){
             duplicates.push({file:f,data:d});
@@ -1221,7 +1285,7 @@ function UploadView({triggerRefresh,onNav,showToast}){
           }
           const _vendor=(d.vendor||"").slice(0,24);
           const _total=d.total_amount?.toFixed(2)||"0.00";
-          allResults[idx]={filename:f.name,status:res.ok?"ok":"error",message:res.ok?("✓ "+_vendor+" — €"+_total):(d.detail||d.message||"Error"),id:d.id};
+          allResults[idx]={filename:f.name,status:res.ok?"ok":"error",message:res.ok?("✓ "+_vendor+" — €"+_total):_extractErr(d),id:d.id};
           setResults([...allResults]);
           if(res.ok)okCount++;
         }catch(ex){
@@ -1300,12 +1364,12 @@ function UploadView({triggerRefresh,onNav,showToast}){
       <div style={{marginTop:12,fontSize:11,color:theme.textDim,display:"inline-flex",alignItems:"center",gap:6,padding:"6px 12px",background:theme.surfaceAlt,borderRadius:20,border:"1px dashed "+theme.border}}>📦 {getLang()==="de"?"Auch ZIP möglich — ganze Ordner, alle Belege werden einzeln verarbeitet":"ZIP supported — upload a whole folder, each receipt is processed individually"}</div>
     </div>
     <div style={{display:"flex",gap:12,justifyContent:"center",marginBottom:4}}>
-      <input id="cameraInput" type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;setUploading(true);setResults([]);const token=localStorage.getItem("atx_token");const fd=new FormData();fd.append("file",f);fd.append("invoice_type",invoiceType);try{const res=await fetch(API+"/invoices/upload",{method:"POST",headers:{Authorization:"Bearer "+token},body:fd});const d=await res.json();setResults([{filename:f.name,status:res.ok?"ok":"error",message:res.ok?"OK — €"+(d.total_amount?.toFixed(2)||"0.00"):d.detail}]);if(res.ok){if(d.warning&&showToast)showToast(d.warning,"warn");if(showToast)showToast("Foto-Beleg uploaded successfully","success");if(triggerRefresh)triggerRefresh();/* --- MODIFIED START --- */ console.log("Auto navigation disabled - staying on result screen"); /* --- MODIFIED END --- */}}catch(ex){setResults([{filename:f.name,status:"error",message:ex.message}]);}setUploading(false);e.target.value="";}}/>
+      <input id="cameraInput" type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;setUploading(true);setResults([]);const token=localStorage.getItem("atx_token");const fd=new FormData();fd.append("file",f);fd.append("invoice_type",invoiceType);try{const res=await fetch(API+"/invoices/upload",{method:"POST",headers:{Authorization:"Bearer "+token},body:fd});const d=await res.json();setResults([{filename:f.name,status:res.ok?"ok":"error",message:res.ok?"OK — €"+(d.total_amount?.toFixed(2)||"0.00"):_extractErr(d)}]);if(res.ok){if(d.warning&&showToast)showToast(d.warning,"warn");if(showToast)showToast("Foto-Beleg uploaded successfully","success");if(triggerRefresh)triggerRefresh();/* --- MODIFIED START --- */ console.log("Auto navigation disabled - staying on result screen"); /* --- MODIFIED END --- */}}catch(ex){setResults([{filename:f.name,status:"error",message:ex.message}]);}setUploading(false);e.target.value="";}}/>
       <button style={{background:"linear-gradient(135deg,#00e5a0,#00c2ff)",color:"#050a12",border:"none",borderRadius:12,padding:"14px 28px",fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:10,boxShadow:"0 0 30px rgba(0,229,160,0.3)",transition:"all 0.3s",opacity:uploading?0.6:1}} onClick={()=>document.getElementById("cameraInput")?.click()} disabled={uploading} onMouseOver={e=>{if(!uploading)e.currentTarget.style.transform="scale(1.05)";}} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}>{uploading?"⏳ ...":"📸 "+_t("upload_photo")}</button>
     </div>
     <div style={{textAlign:"center",fontSize:11,color:theme.textDim,marginBottom:8}}>Open camera — photograph receipt directly</div>
     <div style={{display:"flex",gap:12,alignItems:"center",background:"rgba(168,85,247,0.08)",border:"2px solid #a855f7",borderRadius:12,padding:"12px 16px"}}>
-      <input id="erechnungInput" type="file" accept=".xml,.XML,.pdf,.PDF" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;const tk=localStorage.getItem("atx_token");const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/invoices/upload-erechnung",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await r.json();if(d.success)alert("E-Invoice importiert: "+d.vendor+" — €"+d.total_amount?.toFixed(2)+"\nKategorie: "+d.category+"\nKonto: "+d.konto);else alert("Error: "+(d.detail||"unbekannt"));}catch(ex){alert("E-Invoice Import fehlgeschlagen");}e.target.value="";}}/>
+      <input id="erechnungInput" type="file" accept=".xml,.XML,.pdf,.PDF" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;const tk=localStorage.getItem("atx_token");const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/invoices/upload-erechnung",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await r.json();if(d.success)alert("E-Invoice importiert: "+d.vendor+" — €"+d.total_amount?.toFixed(2)+"\nKategorie: "+d.category+"\nKonto: "+d.konto);else alert("Error: "+_extractErr(d));}catch(ex){alert("E-Invoice Import fehlgeschlagen");}e.target.value="";}}/>
       <button style={{...css.btnOutline,background:"#a855f7",border:"none",color:"#fff",fontSize:14,padding:"10px 22px",fontWeight:600}} onClick={()=>document.getElementById("erechnungInput")?.click()}>Import E-Invoice (XML / ZUGFeRD-PDF)</button>
       <span style={{fontSize:11,color:"#c4b5fd"}}>XRechnung, ZUGFeRD, Factur-X</span>
     </div>
@@ -1354,7 +1418,7 @@ function UploadView({triggerRefresh,onNav,showToast}){
         <span style={{fontSize:18,minWidth:24,textAlign:"center"}}>{r.status==="processing"?"⏳":r.status==="ok"?"✅":r.status==="warn"?"⚠️":"❌"}</span>
         {/* --- ADDED END --- */}
         <span style={{color:theme.text,flex:1,fontSize:13}}>{r.filename}</span>
-        <span style={{fontSize:11,color:r.status==="processing"?theme.blue:r.status==="ok"?theme.accent:r.status==="warn"?"#f59e0b":theme.danger,fontWeight:500}}>{r.message}</span>
+        <span style={{fontSize:11,color:r.status==="processing"?theme.blue:r.status==="ok"?theme.accent:r.status==="warn"?"#f59e0b":theme.danger,fontWeight:500}}>{_safeMsg(r.message)}</span>
         {r.status==="ok"&&r.id&&<button style={{background:theme.blueSoft,border:"1px solid "+theme.blue+"33",color:theme.blue,padding:"4px 10px",borderRadius:6,fontSize:11,cursor:"pointer",fontWeight:600}} onClick={()=>window.open("/editor?id="+r.id,"_blank")} title="Open in Split-View Editor">✏️ Edit</button>}
         {(r.status==="warn"||r.status==="error")&&r.id&&<button style={{background:"transparent",border:"1px solid "+theme.border,color:theme.textMuted,padding:"4px 10px",borderRadius:6,fontSize:11,cursor:"pointer",fontFamily:"inherit"}} onClick={async()=>{const tk=localStorage.getItem("atx_token");try{const s=await fetch(API+"/invoices/"+r.id+"/status",{headers:{Authorization:"Bearer "+tk}});if(s.ok){const d=await s.json();if(d.status==="done"){const nr=[...results];nr[i]={...r,status:"ok",message:"✅ OK — €"+(d.total_amount||0).toFixed(2)+(d.vendor?" ("+d.vendor+")":"")};setResults(nr);if(triggerRefresh)triggerRefresh();}}}catch(e){}}}>🔄 Prüfen</button>}
       </div>))}
@@ -1489,7 +1553,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   const[searchKB,setSearchKB]=useState("");
   const csvRef=useRef(null);
   const[importing,setImporting]=useState(false);
-  const importCSV=async(e)=>{const f=e.target.files?.[0];if(!f)return;setImporting(true);const fd=new FormData();fd.append("file",f);const tk=localStorage.getItem("atx_token");if(!tk){alert("Bitte zuerst einloggen");setImporting(false);return;}try{const res=await fetch(API+"/bookkeeping/import-csv",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await res.json();if(d.success)alert(d.imported+" entries imported"+(d.errors?.length?" ("+d.errors.length+" Error)":""));else alert("Error: "+(d.detail||JSON.stringify(d)));load();}catch(ex){alert("Import fehlgeschlagen: "+ex.message);}setImporting(false);e.target.value="";};
+  const importCSV=async(e)=>{const f=e.target.files?.[0];if(!f)return;setImporting(true);const fd=new FormData();fd.append("file",f);const tk=localStorage.getItem("atx_token");if(!tk){alert("Bitte zuerst einloggen");setImporting(false);return;}try{const res=await fetch(API+"/bookkeeping/import-csv",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await res.json();if(d.success)alert(d.imported+" entries imported"+(d.errors?.length?" ("+d.errors.length+" Error)":""));else alert("Error: "+_extractErr(d));load();}catch(ex){alert("Import fehlgeschlagen: "+ex.message);}setImporting(false);e.target.value="";};
   const load=()=>{api("/bookkeeping?limit=1000").then(d=>{const items=Array.isArray(d)?d:(d.items||[]);setEntries(items);if(d.summary)setSummary(d.summary);setSelected(new Set());}).catch(e=>{console.error("KASSENBUCH LOAD ERROR:",e);}).finally(()=>setLoading(false));
     api("/bookkeeping/summary/overview").then(s=>{if(s)setSummary(prev=>({...prev,...s}));}).catch(()=>{});};
   useEffect(load,[refreshKey]);
@@ -1526,7 +1590,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
         <button style={{...css.btn("#f59e0b"),fontSize:13}} onClick={sync} disabled={syncing}>{syncing?"⏳ Sync...":"🔄 "+_t("sync_invoices")}</button>
         <button style={{...css.btn("#10b981"),fontSize:13}} onClick={()=>onNav&&onNav("export")}>📤 Export</button>
         <button style={{...css.btn("#3b82f6"),fontSize:13}} onClick={()=>csvRef.current?.click()} disabled={importing}>{importing?"⏳ Importing...":"📥 CSV Import"}</button>
-        <input ref={csvRef} type="file" accept=".csv,.txt,.CSV,text/csv,application/vnd.ms-excel" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;const tk=localStorage.getItem("atx_token");if(!tk){alert("Bitte zuerst einloggen");return;}setImporting(true);const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/bookkeeping/import-csv",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await r.json();if(d.success){alert(d.imported+" entries imported");load();if(triggerRefresh)triggerRefresh();}else alert("Error: "+(d.detail||"unbekannt"));}catch(ex){alert("Import fehlgeschlagen: "+ex.message);}setImporting(false);e.target.value="";}}/>
+        <input ref={csvRef} type="file" accept=".csv,.txt,.CSV,text/csv,application/vnd.ms-excel" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;const tk=localStorage.getItem("atx_token");if(!tk){alert("Bitte zuerst einloggen");return;}setImporting(true);const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/bookkeeping/import-csv",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await r.json();if(d.success){alert(d.imported+" entries imported");load();if(triggerRefresh)triggerRefresh();}else alert("Error: "+_extractErr(d));}catch(ex){alert("Import fehlgeschlagen: "+ex.message);}setImporting(false);e.target.value="";}}/>
       </div>
     </div>
     <div style={{display:"flex",gap:8,margin:"12px 0",maxWidth:500}}>
@@ -1904,7 +1968,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
             if(goTo&&onNav)onNav("bookkeeping");
             return;}
           else{setRawRows(d.raw_rows||[]);setErrorMsg(_t("no_table"));}
-        }else{setErrorMsg(d.detail||d.message||"Import failed");}
+        }else{setErrorMsg(_extractErr(d)||"Import failed");}
       }else{
         // CSV only: parse client-side for column mapping
         try{
@@ -2685,7 +2749,7 @@ function DuplicateModalRoot() {
 }
 /* --- ADDED END --- */
 
-ReactDOM.render(React.createElement(Fragment, null, React.createElement(App), React.createElement(DuplicateModalRoot)), document.getElementById("root"));
+ReactDOM.render(React.createElement(ErrorBoundary, null, React.createElement(Fragment, null, React.createElement(App), React.createElement(DuplicateModalRoot))), document.getElementById("root"));
 </script>
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}</script>
 </body>
