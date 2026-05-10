@@ -1914,6 +1914,22 @@ def reminders_overdue(user: dict = Depends(get_current_user)):
         db.close()
 
 
+@app.get("/steuer/upcoming")
+def steuer_upcoming(user: dict = Depends(get_current_user)):
+    """Kullanicinin yaklasan vergi vadeleri (USt/ESt/GewSt/Jahres).
+    Kleinunternehmer'a USt yok."""
+    from autotax.steuer import upcoming_for_user
+    return {"items": upcoming_for_user(user["sub"])}
+
+
+@app.post("/admin/steuer/run-now")
+async def admin_run_steuer_now(user: dict = Depends(get_current_user)):
+    """Manuel steuer reminder cycle (test icin)."""
+    from autotax.steuer import process_steuer_reminders
+    stats = await process_steuer_reminders()
+    return {"success": True, "stats": stats}
+
+
 @app.post("/admin/reminders/run-now")
 async def admin_run_reminders_now(user: dict = Depends(get_current_user)):
     """Manuel olarak reminder cycle'ini calistir (test icin). Sadece admin."""

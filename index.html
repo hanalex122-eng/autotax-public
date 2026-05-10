@@ -544,6 +544,7 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
   const[data,setData]=useState(null);const[loading,setLoading]=useState(true);const[allInv,setAllInv]=useState([]);
   const[me,setMe]=useState(null);
   const[reminders,setReminders]=useState({overdue:null,upcoming:null});
+  const[steuer,setSteuer]=useState([]);
   const load=()=>{
     setLoading(true);
     api("/invoices/dashboard?country=DE").then(setData).catch(()=>{}).finally(()=>setLoading(false));
@@ -553,6 +554,7 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
       api("/reminders/overdue").catch(()=>({count:0,total_amount:0,items:[]})),
       api("/reminders/upcoming?days=7").catch(()=>({count:0,items:[]})),
     ]).then(([ov,up])=>setReminders({overdue:ov,upcoming:up}));
+    api("/steuer/upcoming").then(d=>setSteuer(d.items||[])).catch(()=>{});
   };
   useEffect(load,[refreshKey]);
 
@@ -616,6 +618,35 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
       </div>
       <div style={{fontSize:13,fontWeight:600,color:"#ef4444"}}>Upgrade →</div>
     </div>}
+    {steuer.length > 0 && (() => {
+      // Sadece sonraki 30 gun icindekileri goster
+      const close = steuer.filter(s => s.days_until !== null && s.days_until <= 30 && s.days_until >= -1);
+      if (!close.length) return null;
+      const urgent = close.find(s => s.days_until <= 7);
+      const accent = urgent ? "#ef4444" : (close[0].days_until <= 14 ? "#f59e0b" : "#3b82f6");
+      const bg = urgent ? "rgba(239,68,68,0.06)" : (close[0].days_until <= 14 ? "rgba(245,158,11,0.06)" : "rgba(59,130,246,0.06)");
+      return (
+        <div style={{padding:"14px 20px",background:bg,borderRadius:12,border:`1px solid ${accent}40`}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <span style={{fontSize:20}}>📅</span>
+            <span style={{fontSize:14,fontWeight:700,color:accent}}>Steuer-Termine</span>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {close.slice(0,4).map((s,i) => {
+              const c = s.days_until < 0 ? "#ef4444" : s.days_until <= 3 ? "#ef4444" : s.days_until <= 7 ? "#f59e0b" : theme.text;
+              const tag = s.days_until < 0 ? `${Math.abs(s.days_until)}T überfällig` :
+                         s.days_until === 0 ? "HEUTE" :
+                         s.days_until === 1 ? "morgen" :
+                         `in ${s.days_until} Tagen`;
+              return (<div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0"}}>
+                <span style={{color:theme.text}}>{s.label}</span>
+                <span style={{color:c,fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{s.date} · <span style={{fontSize:11}}>{tag}</span></span>
+              </div>);
+            })}
+          </div>
+        </div>
+      );
+    })()}
     {(reminders.overdue?.count > 0 || reminders.upcoming?.count > 0) && <div style={{display:"flex",flexDirection:"column",gap:10}}>
       {reminders.overdue?.count > 0 && <div onClick={()=>onNav&&onNav("invoices")} style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px",background:"rgba(239,68,68,0.08)",borderRadius:12,border:"1px solid rgba(239,68,68,0.4)",flexWrap:"wrap",gap:10,boxShadow:"0 0 12px rgba(239,68,68,0.15)"}}>
         <div style={{display:"flex",alignItems:"center",gap:14}}>

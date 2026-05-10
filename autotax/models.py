@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from sqlalchemy import UniqueConstraint
 from sqlalchemy import Column, Integer, Float, Text, String, Boolean, DateTime, ForeignKey, LargeBinary
 from sqlalchemy.orm import declarative_base
 
@@ -22,6 +23,24 @@ class User(Base):
     # NULL  = trial baslamadi VEYA manuel odeme aldik (kalici Pro)
     # deger = trial bitis tarihi (cron expire eder)
     trial_ends_at = Column(DateTime, nullable=True)
+    # Steuer reminder'larini hangi vergiler icin alacagi (JSON list)
+    # NULL = hepsi default. Kullanici muteyi ayarlayabilir.
+    # ornek: '["ust","est"]' (sadece USt + ESt, GewSt'siz)
+    steuer_subscriptions = Column(String, nullable=True)
+
+
+class SteuerReminderLog(Base):
+    """Steuer deadline reminder dedup tablosu — ayni reminder ikinci kez
+    gonderilmesin diye. (user_id, deadline_type, deadline_date, code)
+    unique."""
+    __tablename__ = "steuer_reminder_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    deadline_type = Column(String(20), nullable=False)  # ust|est|gewst|jahres
+    deadline_date = Column(String(10), nullable=False)  # YYYY-MM-DD
+    code = Column(String(10), nullable=False)  # 7d|3d|1d|on_day|overdue
+    sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class Invoice(Base):
