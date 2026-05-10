@@ -32,6 +32,7 @@ from sqlalchemy import text as sql_text
 
 from autotax.db import SessionLocal
 from autotax.models import Invoice, User
+from datetime import timedelta as _td
 
 logger = logging.getLogger("autotax.reminders")
 
@@ -230,6 +231,64 @@ def _format_email_body(inv: Invoice, code: str) -> str:
 # Core: scan + send
 # ───────────────────────────────────────────────────────────────────
 
+async def process_trial_expiry() -> dict:
+    """Trial'i dolmus kullanicilari plan=free'ye dusur, admin'e Telegram alert.
+    Trial 3/1 gun kala kullaniciya hatirlatma da burada gonderilir
+    ('upgrade et yoksa free'ye dusersin')."""
+    db = SessionLocal()
+    stats = {"checked": 0, "downgraded": 0, "warnings_sent": 0}
+    try:
+        now_utc = datetime.now(timezone.utc)
+        users = db.query(User).filter(User.trial_ends_at.isnot(None)).all()
+        stats["checked"] = len(users)
+
+        for u in users:
+            try:
+                if not u.trial_ends_at:
+                    continue
+                delta = u.trial_ends_at - now_utc
+                days_left = delta.days
+
+                # Trial dolmus -> free'ye dusur
+                if u.trial_ends_at <= now_utc:
+                    if u.plan == "pro":
+                        u.plan = "free"
+                        u.trial_ends_at = None  # bir daha dusurmemek icin temizle
+                        stats["downgraded"] += 1
+                        await send_telegram(
+                            f"⏰ <b>Trial bitti — Free'ye düşürüldü</b>\n"
+                            f"Müşteri: {u.email}\n"
+                            f"Kayıt: {u.registered_at.strftime('%Y-%m-%d') if u.registered_at else '—'}\n"
+                            f"<i>Müşteri ödeme yaparsa admin panelden Pro'ya geri çevir.</i>"
+                        )
+                # 3 gun kala uyari (sadece bir kez)
+                elif days_left == 3:
+                    await send_telegram(
+                        f"⚠️ <b>Trial 3 gün kaldı</b>\n"
+                        f"Müşteri: {u.email}"
+                    )
+                    stats["warnings_sent"] += 1
+                elif days_left == 1:
+                    await send_telegram(
+                        f"🔔 <b>Trial yarın bitiyor</b>\n"
+                        f"Müşteri: {u.email}\n"
+                        f"<i>Müşteri ile iletişime geç.</i>"
+                    )
+                    stats["warnings_sent"] += 1
+            except Exception as e:
+                logger.exception("[TRIAL] error processing user %s: %s", u.id, e)
+
+        db.commit()
+        if stats["downgraded"] or stats["warnings_sent"]:
+            logger.info("[TRIAL] cycle: %s", stats)
+    except Exception:
+        db.rollback()
+        logger.exception("[TRIAL] fatal error")
+    finally:
+        db.close()
+    return stats
+
+
 async def process_reminders() -> dict:
     """Tum kullanicilarin unpaid faturalarini tarar, gerekli reminder
     kodunu hesaplar, daha once gonderilmediyse Telegram + email atar.
@@ -347,6 +406,7 @@ async def reminder_loop():
     while True:
         try:
             await process_reminders()
+            await process_trial_expiry()
         except Exception as e:
             logger.exception("[REMINDER] loop tick error: %s", e)
         # Sonraki 09:00'a kadar uyu (en az 60 sn, en cok 24 saat)

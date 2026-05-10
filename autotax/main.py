@@ -1114,6 +1114,10 @@ def admin_page():
   .badge.early{background:#f59e0b;color:#000}
   .badge.pro{background:#10b981;color:#000}
   .badge.admin{background:linear-gradient(135deg,#a855f7,#ec4899);color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.3);box-shadow:0 0 8px rgba(168,85,247,0.4)}
+  .badge.trial{background:linear-gradient(135deg,#a855f7,#6366f1);color:#fff;font-weight:700}
+  .badge.trial-warn{background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;animation:pulse 2s infinite}
+  .badge.expired{background:#475569;color:#fff;text-decoration:line-through}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}}
   .badge.large{font-size:13px;padding:4px 12px;border-radius:6px}
   tr.admin-row{background:rgba(168,85,247,0.04)}
   tr.admin-row:hover td{background:rgba(168,85,247,0.06) !important}
@@ -1314,6 +1318,10 @@ async function loadUsers() {
           ${u.is_admin
             ? '<span class="badge large admin">⚡ ADMIN</span><br><span class="small" style="margin-top:4px;display:inline-block">Plan: '+u.plan+' (revenue\\'a sayilmaz)</span>'
             : `<span class="badge large ${u.plan}">${u.plan.toUpperCase()}</span>
+               ${u.is_trial && u.trial_days_left !== null
+                  ? '<span class="badge ' + (u.trial_days_left <= 3 ? 'trial-warn' : 'trial') + '" style="margin-left:6px;font-size:10px;padding:3px 7px">🎁 TRIAL ' + u.trial_days_left + 'g</span>'
+                  : (u.trial_expired ? '<span class="badge expired" style="margin-left:6px;font-size:10px;padding:3px 7px">TRIAL BITTI</span>' : '')
+               }
                <br>
                <select onchange="changePlan(${u.id}, this.value, this)" style="margin-top:4px">
                  <option value="free" ${u.plan==='free'?'selected':''}>Free</option>
@@ -1328,6 +1336,7 @@ async function loadUsers() {
         <td class="small">${u.registered_at ? u.registered_at.slice(0,10) : '—'}</td>
         <td><div class="actions">
           <button class="ghost" onclick="proCloud(${u.id})" title="Pro + Cloud Aktif Et">⭐ Pro+Cloud</button>
+          ${!u.is_admin ? `<button class="ghost" onclick="extendTrial(${u.id})" title="Trial uzat (+7 gun)">🎁 +7g</button>` : ''}
           <button class="ghost" onclick="downloadInvoice(${u.id}, '${u.plan}')" title="Manuel Subscription Fatura PDF">📄 Fatura</button>
           <button class="danger" onclick="delUser(${u.id}, '${esc(u.email)}')">Sil</button>
         </div></td>
@@ -1366,6 +1375,13 @@ async function toggleKU(uid, val, el) {
 async function proCloud(uid) {
   if (!confirm("Bu kullaniciyi Pro plan + Cloud Add-on yapayim mi? (manuel odeme alindiginda)")) return;
   try { await patch(uid, {plan:"pro", has_cloud_addon:true}); await refreshAll(); }
+  catch(e){ alert("Hata: "+e.message); }
+}
+
+async function extendTrial(uid) {
+  const days = parseInt(prompt("Kac gun uzatmak istiyorsun?", "7") || "0", 10);
+  if (!days || days < 1 || days > 90) return;
+  try { await patch(uid, {extend_trial_days: days}); await refreshAll(); }
   catch(e){ alert("Hata: "+e.message); }
 }
 
@@ -1600,6 +1616,14 @@ def admin_users(
                 (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
             ).count()
             companies = db.query(UserCompany).filter(UserCompany.user_id == u.id).all()
+            trial_ends = getattr(u, "trial_ends_at", None)
+            now_utc = datetime.now(timezone.utc)
+            is_trial = bool(trial_ends and trial_ends > now_utc)
+            trial_expired = bool(trial_ends and trial_ends <= now_utc)
+            trial_days_left = None
+            if trial_ends:
+                delta = trial_ends - now_utc
+                trial_days_left = max(0, delta.days + (1 if delta.seconds > 0 else 0))
             out.append({
                 "id": u.id,
                 "email": u.email,
@@ -1609,6 +1633,10 @@ def admin_users(
                 "is_kleinunternehmer": getattr(u, "is_kleinunternehmer", False),
                 "is_admin": u.email in _admin_set,
                 "registered_at": u.registered_at.isoformat() if u.registered_at else "",
+                "trial_ends_at": trial_ends.isoformat() if trial_ends else None,
+                "is_trial": is_trial,
+                "trial_expired": trial_expired,
+                "trial_days_left": trial_days_left,
                 "invoice_count": inv_count,
                 "company_name": companies[0].company_name if companies else "",
             })
@@ -1639,10 +1667,27 @@ def admin_update_user(
             old = u.plan
             u.plan = new_plan
             changed.append(f"plan: {old} -> {new_plan}")
+            # Manuel odeme alindiysa (Pro'ya gecirildiyse) trial'i bitir
+            # -> trial_ends_at NULL (kalici Pro). Free'ye dusurulduyse de
+            # trial bitmis sayilir.
+            if new_plan == "pro" and getattr(u, "trial_ends_at", None):
+                u.trial_ends_at = None
+                changed.append("trial: cleared (manual payment)")
         if "has_cloud_addon" in body:
             old = bool(getattr(u, "has_cloud_addon", False))
             u.has_cloud_addon = bool(body["has_cloud_addon"])
             changed.append(f"cloud: {old} -> {u.has_cloud_addon}")
+        if "extend_trial_days" in body:
+            # Manuel trial uzatma — admin'in pilot musteriye 'birkac gun
+            # daha versek mi' icin
+            try:
+                days = int(body["extend_trial_days"])
+                base = getattr(u, "trial_ends_at", None) or datetime.now(timezone.utc)
+                u.trial_ends_at = base + timedelta(days=days)
+                u.plan = "pro"  # uzatma -> Pro deneme aktif
+                changed.append(f"trial extended +{days}d -> {u.trial_ends_at.isoformat()}")
+            except (ValueError, TypeError):
+                pass
         if "is_kleinunternehmer" in body:
             old = bool(getattr(u, "is_kleinunternehmer", False))
             u.is_kleinunternehmer = bool(body["is_kleinunternehmer"])
@@ -2278,8 +2323,20 @@ def register(request: Request, body: RegisterRequest):
     try:
         if db.query(User).filter(User.email == body.email).first():
             err(400, "Email already registered")
+        # Yeni kayit -> 15 gun Pro trial. Cron 15. gunde plan=free yapar
+        # ve Telegram alert atar. Manuel odeme alirsan admin panelden
+        # 'Pro+Cloud' butonuna basarsin -> trial_ends_at NULL olur (kalici).
+        trial_days = int(os.getenv("TRIAL_DAYS", "15"))
+        trial_end = datetime.now(timezone.utc) + timedelta(days=trial_days)
         try:
-            user = User(email=body.email, hashed_password=hash_password(body.password), full_name=body.full_name, plan="early", gdpr_consent_at=datetime.now())
+            user = User(
+                email=body.email,
+                hashed_password=hash_password(body.password),
+                full_name=body.full_name,
+                plan="pro",  # trial Pro
+                trial_ends_at=trial_end,
+                gdpr_consent_at=datetime.now(),
+            )
         except Exception:
             user = User(email=body.email, hashed_password=hash_password(body.password), full_name=body.full_name)
         db.add(user)
@@ -2914,6 +2971,14 @@ def get_account_me(user: dict = Depends(get_current_user)):
             err(404, "User not found")
         inv_count = db.query(Invoice).filter(Invoice.user_id == user["sub"], (Invoice.is_deleted == False) | (Invoice.is_deleted == None)).count()
         companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
+        # Trial info — frontend banner icin
+        trial_ends = getattr(u, 'trial_ends_at', None)
+        is_trial = bool(trial_ends and trial_ends > datetime.now(timezone.utc))
+        trial_expired = bool(trial_ends and trial_ends <= datetime.now(timezone.utc))
+        trial_days_left = None
+        if trial_ends:
+            delta = trial_ends - datetime.now(timezone.utc)
+            trial_days_left = max(0, delta.days + (1 if delta.seconds > 0 else 0))
         return {
             "id": u.id,
             "email": u.email,
@@ -2923,6 +2988,10 @@ def get_account_me(user: dict = Depends(get_current_user)):
             "registered_at": u.registered_at.isoformat() if u.registered_at else "",
             "is_kleinunternehmer": getattr(u, 'is_kleinunternehmer', False),
             "has_cloud_addon": getattr(u, 'has_cloud_addon', False),
+            "trial_ends_at": trial_ends.isoformat() if trial_ends else None,
+            "is_trial": is_trial,
+            "trial_expired": trial_expired,
+            "trial_days_left": trial_days_left,
             "invoice_count": inv_count,
             "company_name": companies[0].company_name if companies else "",
         }

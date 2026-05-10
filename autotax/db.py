@@ -54,6 +54,9 @@ def init_db():
             if "has_cloud_addon" not in user_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN has_cloud_addon BOOLEAN DEFAULT FALSE"))
                 logger.info("Added 'has_cloud_addon' column to users")
+            if "trial_ends_at" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN trial_ends_at TIMESTAMP"))
+                logger.info("Added 'trial_ends_at' column to users")
         # Invoice table — file storage columns
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:

@@ -18,6 +18,10 @@ class User(Base):
     gdpr_consent_at = Column(DateTime, nullable=True)  # Art. 7(1) DSGVO — proof of consent
     is_kleinunternehmer = Column(Boolean, default=False, nullable=False)
     has_cloud_addon = Column(Boolean, default=False, nullable=False)  # AutoTax-Cloud upsell unlock
+    # Trial sistemi — yeni kayitlar otomatik 15 gun Pro deneme
+    # NULL  = trial baslamadi VEYA manuel odeme aldik (kalici Pro)
+    # deger = trial bitis tarihi (cron expire eder)
+    trial_ends_at = Column(DateTime, nullable=True)
 
 
 class Invoice(Base):
