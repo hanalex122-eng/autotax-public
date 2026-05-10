@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM AutoTax Watcher — production build
+REM AutoTax Watcher - production build
 REM
 REM Adimlar:
 REM   1. version.txt'den surum oku
@@ -11,12 +11,11 @@ REM   5. Inno Setup ile release\AutoTaxWatcher-Setup-x.y.z.exe uret
 REM
 REM Gereksinim:
 REM   - Python 3.10+  (PATH'te)
-REM   - Inno Setup 6  (https://jrsoftware.org/isinfo.php)
-REM     ISCC.exe genelde "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+REM   - Inno Setup 6  (https://jrsoftware.org/isinfo.php)  [opsiyonel]
 REM
 REM Kullanim:    build.bat
 REM ============================================================
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo.
@@ -26,7 +25,9 @@ if not exist version.txt (
     exit /b 1
 )
 set /p APP_VERSION=<version.txt
-set APP_VERSION=%APP_VERSION: =%
+REM CR ve bosluklari temizle
+for /f "tokens=* delims= " %%a in ("%APP_VERSION%") do set APP_VERSION=%%a
+set APP_VERSION=%APP_VERSION:.0=.0%
 echo     Version: %APP_VERSION%
 
 echo.
@@ -41,12 +42,12 @@ echo.
 echo === [3/5] Icon uret ===
 python packaging\build_icon.py packaging\AutoTaxWatcher.ico
 if errorlevel 1 (
-    echo HATA: icon uretilemedi (Pillow eksik?).
+    echo HATA: icon uretilemedi.
     exit /b 1
 )
 
 echo.
-echo === [4/5] PyInstaller — EXE ===
+echo === [4/5] PyInstaller - EXE ===
 if exist dist rmdir /s /q dist
 if exist build rmdir /s /q build
 python -m PyInstaller --noconfirm AutoTaxWatcher.spec
@@ -57,11 +58,11 @@ if errorlevel 1 (
 echo     Cikti: dist\AutoTaxWatcher.exe
 
 echo.
-echo === [5/5] Inno Setup — Installer ===
+echo === [5/5] Inno Setup - Installer ===
 set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" (
-    echo UYARI: Inno Setup bulunamadi — installer atlandi.
+    echo UYARI: Inno Setup bulunamadi - installer atlandi.
     echo Indir: https://jrsoftware.org/isinfo.php
     echo EXE hala dist\AutoTaxWatcher.exe altinda kullanilabilir.
     goto :done
