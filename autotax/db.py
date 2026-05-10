@@ -135,6 +135,19 @@ def init_db():
             if "last_mahnung_at" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN last_mahnung_at TIMESTAMP"))
                 logger.info("Added 'last_mahnung_at' column to invoices")
+            if "is_recurring" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN is_recurring BOOLEAN NOT NULL DEFAULT FALSE"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_is_recurring ON invoices(is_recurring)"))
+                logger.info("Added 'is_recurring' column to invoices")
+            if "recurring_freq" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN recurring_freq VARCHAR(20)"))
+                logger.info("Added 'recurring_freq' column to invoices")
+            if "recurring_next_at" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN recurring_next_at VARCHAR(10)"))
+                logger.info("Added 'recurring_next_at' column to invoices")
+            if "recurring_parent_id" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN recurring_parent_id INTEGER"))
+                logger.info("Added 'recurring_parent_id' column to invoices")
         # --- Vendor identity fingerprint (USt-IdNr + HRB) ---
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:

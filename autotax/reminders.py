@@ -504,6 +504,11 @@ async def reminder_loop():
                 await process_monthly_summary()
             except Exception:
                 logger.exception("[SUMMARY] tick failed")
+            try:
+                from autotax.recurring import process_recurring_spawns
+                await process_recurring_spawns()
+            except Exception:
+                logger.exception("[RECURRING] tick failed")
         except Exception as e:
             logger.exception("[REMINDER] loop tick error: %s", e)
         # Sonraki 09:00'a kadar uyu (en az 60 sn, en cok 24 saat)

@@ -636,6 +636,11 @@ def invoice_to_dict(i):
         "due_date": safe_str(getattr(i, "due_date", None) or ""),
         "payment_status": safe_str(getattr(i, "payment_status", None) or "unpaid"),
         "paid_at": (i.paid_at.strftime("%Y-%m-%dT%H:%M:%S") if getattr(i, "paid_at", None) else ""),
+        # Recurring
+        "is_recurring": bool(getattr(i, "is_recurring", False)),
+        "recurring_freq": safe_str(getattr(i, "recurring_freq", None) or ""),
+        "recurring_next_at": safe_str(getattr(i, "recurring_next_at", None) or ""),
+        "recurring_parent_id": getattr(i, "recurring_parent_id", None),
     }
 
 
@@ -1936,6 +1941,68 @@ async def admin_run_mahnung_now(user: dict = Depends(get_current_user)):
     from autotax.mahnung import process_mahnungen
     stats = await process_mahnungen()
     return {"success": True, "stats": stats}
+
+
+@app.post("/admin/recurring/run-now")
+async def admin_run_recurring_now(user: dict = Depends(get_current_user)):
+    """Manuel recurring spawn cycle (test icin)."""
+    from autotax.recurring import process_recurring_spawns
+    stats = await process_recurring_spawns()
+    return {"success": True, "stats": stats}
+
+
+@app.patch("/invoices/{invoice_id}/recurring")
+def update_invoice_recurring(
+    invoice_id: int,
+    body: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Bir faturayi recurring template'e cevir veya recurring'i kapat.
+    body: {is_recurring: bool, recurring_freq?: 'monthly|quarterly|yearly',
+           recurring_next_at?: 'YYYY-MM-DD'}"""
+    db = SessionLocal()
+    try:
+        inv = db.query(Invoice).filter(
+            Invoice.id == invoice_id, Invoice.user_id == user["sub"],
+        ).first()
+        if not inv:
+            err(404, "Invoice not found")
+        if "is_recurring" in body:
+            inv.is_recurring = bool(body["is_recurring"])
+            if not inv.is_recurring:
+                inv.recurring_freq = None
+                inv.recurring_next_at = None
+        if "recurring_freq" in body:
+            f = (body["recurring_freq"] or "").lower()
+            if f and f not in ("monthly", "quarterly", "yearly"):
+                err(400, "recurring_freq must be monthly|quarterly|yearly")
+            inv.recurring_freq = f or None
+        if "recurring_next_at" in body:
+            n = (body["recurring_next_at"] or "").strip()
+            if n and not _re_global.match(r"^\d{4}-\d{2}-\d{2}$", n):
+                err(400, "recurring_next_at must be YYYY-MM-DD")
+            inv.recurring_next_at = n or None
+        # Default: monthly + next ay bugun
+        if inv.is_recurring:
+            if not inv.recurring_freq:
+                inv.recurring_freq = "monthly"
+            if not inv.recurring_next_at:
+                from autotax.recurring import compute_next_spawn
+                base = inv.date or datetime.now().strftime("%Y-%m-%d")
+                try:
+                    base_d = datetime.strptime(base[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    base_d = datetime.now().date()
+                inv.recurring_next_at = compute_next_spawn(base_d, inv.recurring_freq).isoformat()
+        db.commit()
+        return {
+            "id": inv.id,
+            "is_recurring": inv.is_recurring,
+            "recurring_freq": inv.recurring_freq,
+            "recurring_next_at": inv.recurring_next_at,
+        }
+    finally:
+        db.close()
 
 
 @app.post("/admin/monthly-summary/run-now")

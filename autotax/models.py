@@ -101,6 +101,13 @@ class Invoice(Base):
     mahnung_level = Column(Integer, default=0, nullable=False)
     # Son Mahnung gonderim tarihi — ardisik gonderimleri 14 gunde bir sinirlamak icin
     last_mahnung_at = Column(DateTime, nullable=True)
+    # Recurring invoice (abonelik tarzi tekrar eden fatura)
+    # is_recurring=True ise bu kayit bir 'template'. Cron her ay/yil bir kopya
+    # olusturur. Kopya kayitlarda recurring_parent_id = template.id.
+    is_recurring = Column(Boolean, default=False, nullable=False, index=True)
+    recurring_freq = Column(String(20), nullable=True)  # monthly|quarterly|yearly
+    recurring_next_at = Column(String(10), nullable=True)  # YYYY-MM-DD next spawn
+    recurring_parent_id = Column(Integer, ForeignKey("invoices.id"), nullable=True, index=True)
 
 
 class CashEntry(Base):
