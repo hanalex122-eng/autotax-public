@@ -412,6 +412,11 @@ async def reminder_loop():
                 await process_steuer_reminders()
             except Exception:
                 logger.exception("[STEUER] tick failed")
+            try:
+                from autotax.mahnung import process_mahnungen
+                await process_mahnungen()
+            except Exception:
+                logger.exception("[MAHNUNG] tick failed")
         except Exception as e:
             logger.exception("[REMINDER] loop tick error: %s", e)
         # Sonraki 09:00'a kadar uyu (en az 60 sn, en cok 24 saat)

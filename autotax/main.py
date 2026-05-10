@@ -1930,6 +1930,46 @@ async def admin_run_steuer_now(user: dict = Depends(get_current_user)):
     return {"success": True, "stats": stats}
 
 
+@app.post("/admin/mahnung/run-now")
+async def admin_run_mahnung_now(user: dict = Depends(get_current_user)):
+    """Manuel Mahnung cycle (test icin)."""
+    from autotax.mahnung import process_mahnungen
+    stats = await process_mahnungen()
+    return {"success": True, "stats": stats}
+
+
+@app.get("/invoices/{invoice_id}/mahnung-pdf")
+def get_mahnung_pdf(
+    invoice_id: int,
+    level: int = Query(1, ge=1, le=3),
+    user: dict = Depends(get_current_user),
+):
+    """Manuel Mahnung PDF olustur — kullanicinin kendisinin musterisine
+    kestigi income fatura icin. Cron beklemeden anlik PDF lazimsa."""
+    from autotax.mahnung import generate_mahnung_pdf
+    db = SessionLocal()
+    try:
+        inv = db.query(Invoice).filter(
+            Invoice.id == invoice_id, Invoice.user_id == user["sub"],
+        ).first()
+        if not inv:
+            err(404, "Invoice not found")
+        sender = db.query(User).filter(User.id == user["sub"]).first()
+        try:
+            pdf_bytes = generate_mahnung_pdf(inv, level, sender)
+        except Exception as e:
+            err(500, f"PDF generation failed: {e}")
+        from fastapi.responses import Response
+        fname = f"Mahnung-{inv.invoice_number or inv.id}-Stufe{level}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={fname}"},
+        )
+    finally:
+        db.close()
+
+
 @app.post("/admin/reminders/run-now")
 async def admin_run_reminders_now(user: dict = Depends(get_current_user)):
     """Manuel olarak reminder cycle'ini calistir (test icin). Sadece admin."""

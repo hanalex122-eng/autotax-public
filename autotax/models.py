@@ -96,6 +96,11 @@ class Invoice(Base):
     # JSON array string: hangi reminder'lar gonderildi — '["7d","1d","on_day","overdue"]'
     # Ayni reminder'in tekrar gonderilmesini onler.
     reminder_sent_codes = Column(String, nullable=True)
+    # Mahnung — kullanicinin musterilerine kestigi income faturalar icin
+    # gecikmis odeme uyarisi seviyesi (0|1|2|3). 0 = henuz Mahnung yok.
+    mahnung_level = Column(Integer, default=0, nullable=False)
+    # Son Mahnung gonderim tarihi — ardisik gonderimleri 14 gunde bir sinirlamak icin
+    last_mahnung_at = Column(DateTime, nullable=True)
 
 
 class CashEntry(Base):

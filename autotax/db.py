@@ -129,6 +129,12 @@ def init_db():
             if "reminder_sent_codes" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN reminder_sent_codes VARCHAR"))
                 logger.info("Added 'reminder_sent_codes' column to invoices")
+            if "mahnung_level" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN mahnung_level INTEGER NOT NULL DEFAULT 0"))
+                logger.info("Added 'mahnung_level' column to invoices")
+            if "last_mahnung_at" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN last_mahnung_at TIMESTAMP"))
+                logger.info("Added 'last_mahnung_at' column to invoices")
         # --- Vendor identity fingerprint (USt-IdNr + HRB) ---
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:
