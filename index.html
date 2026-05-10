@@ -1312,19 +1312,20 @@ function UploadView({triggerRefresh,onNav,showToast}){
     <details style={{background:"rgba(0,194,255,0.06)",border:"2px solid #00c2ff",borderRadius:12,padding:"10px 14px",cursor:"pointer"}}>
       <summary style={{fontSize:13,fontWeight:600,color:"#00c2ff",userSelect:"none"}}>🖨️ Scanner otomatik upload — Watcher Agent</summary>
       <div style={{marginTop:10,fontSize:12,color:theme.text,lineHeight:1.6}}>
-        <p style={{margin:"0 0 8px"}}>Scanner'ın <b>çıktı klasörünü</b> izleyen küçük bir Windows agent kur. Tarama biter bitmez fatura otomatik AutoTax-Cloud'a yüklenir — manuel upload'a gerek yok.</p>
+        <p style={{margin:"0 0 8px"}}>Scanner'ın <b>çıktı klasörünü</b> izleyen küçük bir Windows agent. Tarama biter bitmez fatura otomatik AutoTax-Cloud'a yüklenir — manuel upload'a gerek yok.</p>
         <ul style={{margin:"0 0 10px",paddingLeft:20,color:theme.textMuted,fontSize:11.5}}>
-          <li>Scanner'ı bir klasöre yazacak şekilde ayarla (örn. <code style={{background:theme.surfaceAlt,padding:"1px 6px",borderRadius:4}}>C:\Scans</code>)</li>
-          <li>Watcher agent'ı indir, <code style={{background:theme.surfaceAlt,padding:"1px 6px",borderRadius:4}}>config.json</code>'a token ve klasör yaz</li>
-          <li><code style={{background:theme.surfaceAlt,padding:"1px 6px",borderRadius:4}}>run_watcher.bat</code>'a çift tıkla — bilgisayar açıkken sürekli izler</li>
-          <li>Başarılı yüklemeler <code style={{background:theme.surfaceAlt,padding:"1px 6px",borderRadius:4}}>Uploaded/</code> alt klasörüne taşınır</li>
+          <li><b>AutoTaxWatcher.exe</b>'yi indir (Python kurulumu gerekmez)</li>
+          <li>"🔑 Token kopyala" butonuna bas</li>
+          <li>EXE'ye çift tıkla → açılan konsola token + klasör yapıştır (veya yanına <code style={{background:theme.surfaceAlt,padding:"1px 6px",borderRadius:4}}>config.json</code> koy)</li>
+          <li>Tarama yap → otomatik upload, dosya <code style={{background:theme.surfaceAlt,padding:"1px 6px",borderRadius:4}}>Uploaded/</code> alt klasörüne taşınır</li>
         </ul>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
-          <a href="https://github.com/hanalex122-eng/autotax-public/tree/main/tools/autotax_watcher" target="_blank" rel="noopener" style={{background:"#00c2ff",color:"#050a12",padding:"8px 14px",borderRadius:8,textDecoration:"none",fontSize:12,fontWeight:600}}>📥 Watcher indir (GitHub)</a>
-          <a href="https://github.com/hanalex122-eng/autotax-public/blob/main/tools/autotax_watcher/README.md" target="_blank" rel="noopener" style={{...css.btnOutline,padding:"8px 14px",fontSize:12,textDecoration:"none",display:"inline-block"}}>📖 Kurulum talimatı</a>
+          <a href="https://github.com/hanalex122-eng/autotax-public/raw/main/tools/autotax_watcher/release/AutoTaxWatcher.exe" target="_blank" rel="noopener" style={{background:"#00c2ff",color:"#050a12",padding:"8px 14px",borderRadius:8,textDecoration:"none",fontSize:12,fontWeight:700,boxShadow:"0 0 16px rgba(0,194,255,0.3)"}}>⬇️ AutoTaxWatcher.exe indir (13 MB)</a>
+          <a href="https://github.com/hanalex122-eng/autotax-public/raw/main/tools/autotax_watcher/config.example.json" target="_blank" rel="noopener" style={{...css.btnOutline,padding:"8px 14px",fontSize:12,textDecoration:"none",display:"inline-block"}}>📄 config.example.json</a>
           <button style={{...css.btnOutline,padding:"8px 14px",fontSize:12,borderColor:"rgba(0,194,255,0.4)",color:"#00c2ff"}} onClick={()=>{const tk=localStorage.getItem("atx_token")||"";if(!tk){alert("Önce giriş yap.");return;}navigator.clipboard.writeText(tk).then(()=>{if(showToast)showToast("Token panoya kopyalandı — config.json'daki api_token alanına yapıştır","success");}).catch(()=>{alert("Token: "+tk);});}}>🔑 Token kopyala</button>
+          <a href="https://github.com/hanalex122-eng/autotax-public/blob/main/tools/autotax_watcher/README.md" target="_blank" rel="noopener" style={{fontSize:11,color:theme.textDim,padding:"8px 4px",textDecoration:"underline"}}>Kurulum talimatı</a>
         </div>
-        <div style={{marginTop:8,fontSize:10,color:theme.textDim,fontStyle:"italic"}}>İlk kurulum: Python 3.8+ gerekli. Yoksa python.org'dan kur, "Add Python to PATH" işaretle.</div>
+        <div style={{marginTop:8,fontSize:10,color:theme.textDim,fontStyle:"italic"}}>Windows Defender şikayet ederse "Daha fazla bilgi → Yine de çalıştır" — code-signing henüz yok (false-positive normal).</div>
       </div>
     </details>
     {files.length>0&&<div style={css.card}>
