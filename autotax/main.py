@@ -895,6 +895,29 @@ def api_config():
     return FEATURES
 
 
+# --- AutoTax Watcher (desktop agent) update channel ---
+# tools/autotax_watcher/updater.py polls this every startup. Values come
+# from env so a release can be cut without redeploying the API.
+@app.get("/watcher/version.json")
+def watcher_version():
+    """Latest desktop watcher version + download URL.
+
+    Defaults are safe (current bundled version). To roll out a new build,
+    set the WATCHER_LATEST_VERSION / WATCHER_DOWNLOAD_URL env vars and
+    optionally WATCHER_MANDATORY=1 to force-upgrade.
+    """
+    return {
+        "version": os.environ.get("WATCHER_LATEST_VERSION", "2.0.0"),
+        "download_url": os.environ.get(
+            "WATCHER_DOWNLOAD_URL",
+            "https://github.com/hanalex122-eng/autotax-public/releases/latest",
+        ),
+        "mandatory": os.environ.get("WATCHER_MANDATORY", "0") == "1",
+        "notes": os.environ.get("WATCHER_RELEASE_NOTES", ""),
+        "sha256": os.environ.get("WATCHER_SHA256", ""),
+    }
+
+
 # --- ADDED START: Landing page ---
 @app.get("/landing", response_class=HTMLResponse)
 async def serve_landing_page():

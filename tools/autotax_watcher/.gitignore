@@ -1,7 +1,13 @@
 build/
 dist/
+release/
 *.spec
 !AutoTaxWatcher.spec
 __pycache__/
 *.pyc
 config.json
+queue.json
+*.log
+
+# build artifacts — packaging/build_icon.py üretir, repo'da binary tutmuyoruz
+packaging/AutoTaxWatcher.ico
