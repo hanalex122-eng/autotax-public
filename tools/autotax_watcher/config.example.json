@@ -1,8 +1,10 @@
 {
-  "api_url": "https://api.autotax.cloud",
-  "api_token": "BURAYA_TOKEN_YAPISTIR",
-  "watch_folder": "C:\\Scans",
-  "processed_folder": "C:\\Scans\\Uploaded",
-  "failed_folder": "C:\\Scans\\Failed",
-  "invoice_type": "expense"
+  "api_url": "https://autotax-public-production-3f2a.up.railway.app",
+  "folders": ["C:\\Scans"],
+  "invoice_type": "expense",
+  "delete_after_upload": false,
+  "processed_subfolder": "Uploaded",
+  "failed_subfolder": "Failed",
+  "retry_interval": 30,
+  "auto_start": false
 }

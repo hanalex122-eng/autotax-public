@@ -1,40 +1,124 @@
-# AutoTax Scanner Watcher
+# AutoTax Scanner Watcher v2
 
-Scanner'ın PDF/JPG çıktılarını otomatik olarak AutoTax-Cloud'a yükler.
+Tarayıcınızdan gelen PDF/JPG belgelerini otomatik AutoTax-Cloud'a yükleyen küçük bir Windows uygulaması. Tray'de çalışır, login penceresinden e-mail + şifreyle giriş yaparsınız, klasör seçersiniz, sonrası otomatik.
 
-## Nasıl çalışır
+## Hızlı kurulum (son kullanıcı)
 
-1. Scanner'ın çıktıyı verdiği klasörü (örn. `C:\Scans`) izler.
-2. Yeni dosya geldiğinde tarama bitsin diye birkaç saniye bekler.
-3. Otomatik olarak `/invoices/upload` endpoint'ine yükler.
-4. Başarılı dosyaları `Uploaded/` alt klasörüne taşır, başarısızları `Failed/`'e.
+1. **`AutoTaxWatcher.exe`** dosyasını indirin (`tools/autotax_watcher/release/`).
+2. Çift tıklayın.
+3. Açılan pencereye **e-mail + şifre** girin → "Anmelden".
+4. **Tarayıcınızın çıktı klasörünü** seçin (örn. `C:\Scans`).
+5. Tray'de yeşil "AT" ikonu belirir → Watcher arka planda çalışıyor.
+6. Tarayıcıdan kâğıdı tarayın → birkaç saniye sonra AutoTax dashboard'da belirir.
 
-## Kurulum (Windows)
+> **Windows Defender uyarısı çıkarsa:** "Daha fazla bilgi → Yine de çalıştır". Code-signing sertifikası henüz eklenmedi.
 
-1. **Python yükle** (yoksa): https://www.python.org/downloads/ — kurulumda **"Add Python to PATH"** kutusunu işaretle.
-2. Bu klasörü bilgisayarına indir (örn. `C:\AutoTaxWatcher`).
-3. `config.example.json` → `config.json` olarak kopyala, içini doldur:
-   - `api_token`: AutoTax-Cloud'a giriş yaptıktan sonra browser'da `F12` → Console → `localStorage.getItem("atx_token")` ile al.
-   - `watch_folder`: Scanner'ın çıktıyı verdiği klasör (örn. `C:\Scans`).
-4. `run_watcher.bat` dosyasına çift tıkla. Konsol açılır, "Yeni faturalar bekleniyor..." yazısı çıkar.
-5. Scanner'la tarama yap → otomatik upload olur.
+## Tray menüsü
 
-## Otomatik başlatma (opsiyonel)
+Sağ tıklayın:
 
-`run_watcher.bat` kısa yolunu `Win+R` → `shell:startup` klasörüne kopyala — bilgisayar açılınca otomatik başlar.
+| Menü | Açıklama |
+|---|---|
+| Durum | "ÇALIŞIYOR / DURDU — Kuyruk: N" |
+| Ordner öffnen | İzlenen klasörü Explorer'da aç |
+| Pausieren / Fortsetzen | Watcher'ı geçici durdur/sürdür |
+| Failed-Uploads erneut versuchen | Kuyruktaki başarısızları hemen yeniden dene |
+| Beenden | Çıkış |
 
-## Tek başına çalıştırma (config'siz)
+## Sıfır-disk modu (önerilen müşteri ayarı)
+
+Tarayıcıdan gelen belgenin PC'de **dosya olarak gözükmemesini** istiyorsanız:
+
+```json
+{
+  "delete_after_upload": true
+}
+```
+
+Bu ayar açıldığında: belge yüklenir → sunucuda güvenli → yerel kopya **silinir**. Kullanıcı `C:\Scans` klasörünü açtığında her zaman boş görür. Yedek backend'de saklı (`Invoice.file_data`).
+
+Başarısız upload'lar `Failed/` alt klasörüne taşınır (silinmez — veri kaybolmasın).
+
+## Config dosyası
+
+Konum (otomatik oluşturulur):
+- Windows: `%LOCALAPPDATA%\AutoTax\Watcher\config.json`
+- Linux/Mac: `~/.autotax/watcher/config.json`
+
+Tüm alanlar:
+
+```json
+{
+  "api_url": "https://autotax-public-production-3f2a.up.railway.app",
+  "api_token": "...",
+  "refresh_token": "...",
+  "email": "kullanici@firma.de",
+  "folders": ["C:\\Scans", "D:\\Belege"],
+  "invoice_type": "expense",
+  "delete_after_upload": false,
+  "processed_subfolder": "Uploaded",
+  "failed_subfolder": "Failed",
+  "retry_interval": 30,
+  "auto_start": false
+}
+```
+
+`api_token` ve `refresh_token` login sonrası otomatik dolar — elle dokunmayın.
+
+## Komut satırı
 
 ```bat
-python autotax_watcher.py --url https://api.autotax.cloud --token YOUR_TOKEN --folder "C:\Scans"
+AutoTaxWatcher.exe --reset           Mevcut girişi sıfırla, tekrar login iste
+AutoTaxWatcher.exe --no-tray         Tray olmadan, terminal modunda çalış (debug)
+AutoTaxWatcher.exe --config X.json   Özel config dosyası
 ```
+
+## Geliştirici modu
+
+```bat
+git clone https://github.com/hanalex122-eng/autotax-public
+cd autotax-public\tools\autotax_watcher
+pip install -r requirements.txt
+python autotax_watcher.py
+```
+
+EXE üretmek için:
+
+```bat
+pyinstaller AutoTaxWatcher.spec
+```
+
+Çıktı: `dist\AutoTaxWatcher.exe`
+
+## Özellikler
+
+- **Login GUI** (Tkinter, built-in) — token kopyalama yok
+- **Auto refresh token** — 401 alınca arka planda yeni token al
+- **429 Retry-After backoff** — server quota'ya takılırsa otomatik bekler
+- **Offline JSON queue** — internet kesintisinde dosyalar kuyruğa alınır, 30s'de bir retry
+- **Multi-folder** — `folders` listesinde birden fazla klasör
+- **Pause/Resume** tray'den
+- **Duplicate koruma** — backend zaten yüklenmiş dosyayı atlar (kayıt kopyası eklenmez)
+- **File stability check** — tarayıcı dosyayı yazarken upload yapmaz, boyut sabitleşmesini bekler
+- **Logging** — `%LOCALAPPDATA%\AutoTax\Watcher\logs\watcher.log` (5MB × 3 rotation)
+
+## Tarayıcı yapılandırması
+
+| Marka | "Tara" hedefi nasıl ayarlanır |
+|---|---|
+| HP | HP Smart → "PDF olarak kaydet" → klasör: `C:\Scans` |
+| Brother | ControlCenter4 → "Dosyaya Tara" → hedef klasör |
+| Canon | IJ Scan Utility → "Auto" tarayıcı butonu → kayıt yeri |
+| Epson | Epson ScanSmart → tarama profili → kayıt klasörü |
+| Network/SMB scanner | Tarayıcı SMB'yi `\\PC-ADI\Scans` paylaşımına yapılandır |
 
 ## Sorun giderme
 
-- **`pip install` çalışmıyor**: `python -m pip install requests` dene.
-- **HTTP 401**: Token yanlış veya süresi dolmuş — tekrar al.
-- **HTTP 413**: Dosya çok büyük (max 25 MB).
-- **Hiç dosya alınmıyor**: `watch_folder` doğru mu? Scanner aynı klasöre mi yazıyor?
+- **Tray ikonu görünmez:** Saat'in yanındaki "^" ile gizli ikonları aç → AutoTaxWatcher sürükleyip görünür yap.
+- **HTTP 401 sürekli:** `--reset` ile çalıştır → tekrar login ol.
+- **HTTP 413:** Dosya çok büyük (max 25 MB). Tarayıcı çözünürlüğünü düşür (300 dpi yeterli).
+- **Hiç dosya alınmıyor:** Tray menü → "Ordner öffnen" — klasör doğru mu? Tarayıcı oraya mı yazıyor?
+- **Scanner PDF'i parça parça yazıyor:** Watcher `STABILITY_WAIT=3s` kontrolüyle yazma bitsin diye bekler — sorun olmamalı, sürekli oluşuyorsa logda "Bekleniyor..." görünür.
 
 ## Desteklenen formatlar
 

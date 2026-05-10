@@ -1,11 +1,11 @@
 @echo off
-REM AutoTax Watcher - tek tikla baslatici
-REM Bu dosyayi config.json ile ayni klasorde tut
+REM AutoTax Watcher v2 — geliştirici/test modu (Python ile direkt çalıştır)
+REM Son kullanıcı: AutoTaxWatcher.exe'yi kullansın, .bat değil.
 
 cd /d "%~dp0"
 echo.
 echo  ============================================
-echo   AutoTax Scanner Watcher
+echo   AutoTax Scanner Watcher v2
 echo  ============================================
 echo.
 
@@ -18,13 +18,5 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if not exist config.json (
-    echo [HATA] config.json bulunamadi.
-    echo config.example.json'i kopyala -^> config.json yap, icini doldur.
-    pause
-    exit /b 1
-)
-
-python -m pip install --quiet --upgrade requests
-python autotax_watcher.py --config config.json
-pause
+python -m pip install --quiet --upgrade -r requirements.txt
+python autotax_watcher.py %*

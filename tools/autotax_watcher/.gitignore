@@ -1,6 +1,7 @@
 build/
 dist/
 *.spec
+!AutoTaxWatcher.spec
 __pycache__/
 *.pyc
 config.json
