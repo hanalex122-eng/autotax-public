@@ -2566,9 +2566,50 @@ def refresh_token_endpoint(body: dict = Body(...)):
         data = decode_token(refresh, expected_type="refresh")
     except HTTPException:
         raise
+    # "Alle Geraete abmelden" — eski refresh tokenlar da reddedilsin
+    iat = data.get("iat")
+    if iat:
+        db_chk = SessionLocal()
+        try:
+            u_chk = db_chk.query(User).filter(User.id == data["sub"]).first()
+            if u_chk and u_chk.jwt_invalidate_before:
+                cutoff_ts = u_chk.jwt_invalidate_before.replace(tzinfo=timezone.utc).timestamp() \
+                    if u_chk.jwt_invalidate_before.tzinfo is None \
+                    else u_chk.jwt_invalidate_before.timestamp()
+                if iat < cutoff_ts:
+                    err(401, "Session beendet — bitte erneut anmelden")
+        finally:
+            db_chk.close()
     new_access = create_access_token(data["sub"], data["email"])
     new_refresh = create_refresh_token(data["sub"], data["email"])
     return {"success": True, "token": new_access, "refresh_token": new_refresh}
+
+
+@app.post("/auth/logout-all")
+def logout_all_devices(user: dict = Depends(get_current_user)):
+    """Tum cihazlardan cikis. User.jwt_invalidate_before = now() yazar,
+    boylece bu zaman damgasindan eski iat'li tum tokenlar 401 alir.
+    Cagiran cihaz hemen yeni token alip devam edebilir cunku login flow'u
+    bu kontrolden sonra yeni iat ile token uretir."""
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u:
+            err(404, "User not found")
+        u.jwt_invalidate_before = datetime.now(timezone.utc)
+        db.commit()
+        logger.info("LOGOUT-ALL: user_id=%s, cutoff=%s", u.id, u.jwt_invalidate_before)
+        # Yeni token uret — caller hala session'i kullanabilsin
+        new_access = create_access_token(u.id, u.email)
+        new_refresh = create_refresh_token(u.id, u.email)
+        return {
+            "success": True,
+            "message": "Alle anderen Sitzungen wurden beendet",
+            "token": new_access,
+            "refresh_token": new_refresh,
+        }
+    finally:
+        db.close()
 
 
 # Debug endpoints removed — security risk in production

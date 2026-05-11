@@ -31,14 +31,18 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: int, email: str) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": user_id, "email": email, "exp": exp, "type": "access"}
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # iat (issued-at) — "Alle Geraete abmelden" sonrasi tokenlari
+    # gecersiz kilmak icin User.jwt_invalidate_before ile karsilastirilir.
+    payload = {"sub": user_id, "email": email, "iat": now, "exp": exp, "type": "access"}
     return jwt.encode(payload, SECRET, algorithm=ALGORITHM)
 
 
 def create_refresh_token(user_id: int, email: str) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    payload = {"sub": user_id, "email": email, "exp": exp, "type": "refresh"}
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    payload = {"sub": user_id, "email": email, "iat": now, "exp": exp, "type": "refresh"}
     return jwt.encode(payload, SECRET, algorithm=ALGORITHM)
 
 
@@ -59,10 +63,42 @@ def decode_token(token: str, expected_type: str = "access") -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
+def _check_global_invalidate(payload: dict) -> None:
+    """Reject token if user.jwt_invalidate_before > token.iat.
+
+    Triggered by POST /auth/logout-all. Adds one DB lookup per authenticated
+    request — acceptable for an MVP; can be moved to Redis later.
+    """
+    iat = payload.get("iat")
+    sub = payload.get("sub")
+    if not iat or not sub:
+        return  # legacy tokens without iat — let them through
+    try:
+        from autotax.db import SessionLocal
+        from autotax.models import User
+    except Exception:
+        return
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == sub).first()
+        if not u or not u.jwt_invalidate_before:
+            return
+        # iat is unix seconds; jwt_invalidate_before is timezone-aware datetime
+        cutoff_ts = u.jwt_invalidate_before.replace(tzinfo=timezone.utc).timestamp() \
+            if u.jwt_invalidate_before.tzinfo is None \
+            else u.jwt_invalidate_before.timestamp()
+        if iat < cutoff_ts:
+            raise HTTPException(status_code=401, detail="Session beendet — bitte erneut anmelden")
+    finally:
+        db.close()
+
+
 def get_current_user(authorization: str = Header(None)) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid token")
-    return decode_token(authorization[7:], expected_type="access")
+    payload = decode_token(authorization[7:], expected_type="access")
+    _check_global_invalidate(payload)
+    return payload
 
 
 # --- ADDED START: Auth debugging helpers ---

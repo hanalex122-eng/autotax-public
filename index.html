@@ -2647,8 +2647,29 @@ function App(){
         <input style={{...css.input,width:"100%",marginBottom:8}} type="password" placeholder={_t("new_password")} value={pwForm.new_password} onChange={e=>setPwForm({...pwForm,new_password:e.target.value})}/>
         <input style={{...css.input,width:"100%",marginBottom:16}} type="password" placeholder={_t("confirm_password")} value={pwForm.confirm} onChange={e=>setPwForm({...pwForm,confirm:e.target.value})}/>
         <div style={{display:"flex",gap:8}}>
-          <button style={{...css.btn(),flex:1}} onClick={async()=>{if(pwForm.new_password!==pwForm.confirm){alert("Passwords don't match");return;}try{const r=await fetch(API+"/auth/change-password",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+localStorage.getItem("atx_token")},body:JSON.stringify({old_password:pwForm.old_password,new_password:pwForm.new_password})});const d=await r.json();if(r.ok){alert("Password changed!");setShowPwChange(false);setPwForm({old_password:"",new_password:"",confirm:""});}else{alert(d.detail?.error||d.detail||"Error");}}catch(e){alert("Error: "+e.message);}}}>Ändern</button>
+          <button style={{...css.btn(),flex:1}} onClick={async()=>{if(pwForm.new_password!==pwForm.confirm){alert("Passwords don't match");return;}try{const r=await fetch(API+"/auth/change-password",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+localStorage.getItem("atx_token")},body:JSON.stringify({old_password:pwForm.old_password,new_password:pwForm.new_password})});const d=await r.json();if(r.ok){alert("Password changed!");setShowPwChange(false);setPwForm({old_password:"",new_password:"",confirm:""});}else{alert(_extractErr(d));}}catch(e){alert("Error: "+e.message);}}}>Ändern</button>
           <button style={{...css.btnOutline,flex:1}} onClick={()=>setShowPwChange(false)}>{_t("cancel")}</button>
+        </div>
+        <div style={{marginTop:24,paddingTop:16,borderTop:"1px solid "+theme.border}}>
+          <h4 style={{color:theme.danger,margin:"0 0 6px",fontSize:14}}>🚪 Alle Geräte abmelden</h4>
+          <p style={{color:theme.textMuted,fontSize:12,margin:"0 0 12px",lineHeight:1.4}}>
+            Beendet sofort alle Sitzungen auf allen anderen Geräten (Browser, Watcher, Mobile). Aktueller Browser bleibt aktiv.
+          </p>
+          <button style={{...css.btnOutline,width:"100%",borderColor:theme.danger,color:theme.danger}} onClick={async()=>{
+            if(!confirm("Wirklich alle anderen Sitzungen beenden? Alle anderen Geräte müssen sich neu anmelden."))return;
+            try{
+              const r=await fetch(API+"/auth/logout-all",{method:"POST",headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")}});
+              const d=await r.json();
+              if(r.ok&&d.token){
+                localStorage.setItem("atx_token",d.token);
+                if(d.refresh_token)localStorage.setItem("atx_refresh",d.refresh_token);
+                if(showToast)showToast("Alle anderen Sitzungen beendet","success");
+                setShowPwChange(false);
+              }else{
+                alert(_extractErr(d));
+              }
+            }catch(e){alert("Error: "+e.message);}
+          }}>Alle anderen Geräte abmelden</button>
         </div>
       </div>
     </div>}

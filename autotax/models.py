@@ -27,6 +27,10 @@ class User(Base):
     # NULL = hepsi default. Kullanici muteyi ayarlayabilir.
     # ornek: '["ust","est"]' (sadece USt + ESt, GewSt'siz)
     steuer_subscriptions = Column(String, nullable=True)
+    # "Alle Geraete abmelden" / Logout all sessions.
+    # Bu zaman damgasindan ESKI iat'li tum JWT'ler 401 dondurur.
+    # Sifre degisikligi / panik logout / cihaz kaybedilirse kullanilir.
+    jwt_invalidate_before = Column(DateTime, nullable=True)
 
 
 class SteuerReminderLog(Base):
