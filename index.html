@@ -2263,6 +2263,33 @@ function HelpView(){
   const[openFaq,setOpenFaq]=useState(null);
   const[openGuide,setOpenGuide]=useState(null);
   const features=[
+    {icon:"🆕",title:getLang()==="de"?"Neu im Mai 2026":"What's New — May 2026",desc:getLang()==="de"?"Die wichtigsten Funktionen der letzten Woche":"The biggest features added this past week",
+      details:[
+        getLang()==="de"
+          ?"📡 Scanner Watcher Agent (v2) — kleine Windows-App, die einen Ordner überwacht und gescannte Belege automatisch hochlädt. Login per E-Mail+Passwort, läuft im Tray, mit Offline-Queue + Auto-Retry."
+          :"📡 Scanner Watcher Agent (v2) — small Windows app that watches a folder and auto-uploads scanned receipts. Email+password login, runs in tray, offline queue + auto-retry.",
+        getLang()==="de"
+          ?"🧾 Mahnung 3-Stufen — Zahlungserinnerung + 1./2. Mahnung + Inkasso-Hinweis. Automatische Reminder per E-Mail an Kunden."
+          :"🧾 3-stage dunning — payment reminder + 1st/2nd dunning + collection notice. Automatic email reminders to your customers.",
+        getLang()==="de"
+          ?"🔁 Wiederkehrende Rechnungen (Abo) — monatliche/quartalsweise/jährliche Rechnungen automatisch erzeugen. Stripe-Abo-ähnlich, aber für klassische Buchhaltung."
+          :"🔁 Recurring invoices (subscriptions) — auto-create monthly/quarterly/yearly invoices. Stripe-style subscriptions but for classic bookkeeping.",
+        getLang()==="de"
+          ?"⚡ Async OCR Upload — große Dateien werden im Hintergrund verarbeitet, Browser blockiert nicht. Toleriert Tarif-Limits (429) automatisch mit Wartezeit."
+          :"⚡ Async OCR upload — large files processed in the background, browser doesn't block. Tolerates rate limits (429) automatically with smart backoff.",
+        getLang()==="de"
+          ?"🚪 Alle Geräte abmelden — ein Klick im Passwort-Dialog beendet sofort alle anderen Sitzungen (Browser, Watcher, Mobile). Nützlich wenn ein Gerät verloren geht."
+          :"🚪 Logout from all devices — one click in the password dialog ends every other session (browser, watcher, mobile). Useful when a device is lost.",
+        getLang()==="de"
+          ?"📅 Steuerberichte (Monats- + Jahres-Zusammenfassung) — automatisch am 1. jedes Monats per Telegram + E-Mail."
+          :"📅 Tax summaries (monthly + yearly) — automatically delivered on the 1st of each month via Telegram + email.",
+        getLang()==="de"
+          ?"🔍 Hard-Duplicate-Schutz für Async-Upload — Watcher kann dieselbe Datei nicht zweimal versehentlich einreichen."
+          :"🔍 Hard-duplicate protection for async uploads — Watcher can no longer accidentally submit the same file twice.",
+        getLang()==="de"
+          ?"📜 Auto-Scroll bei Massen-Upload — Result-Liste und Aktions-Buttons werden automatisch sichtbar, kein manuelles Scrollen mehr."
+          :"📜 Auto-scroll for bulk uploads — result list and action buttons become visible automatically, no more manual scrolling.",
+      ]},
     {icon:"📤",title:getLang()==="de"?"Upload & OCR":"Upload & OCR",desc:getLang()==="de"?"Intelligente Belegerkennung mit OCR":"Intelligent receipt recognition with OCR",
       details:[
         "Supported formats: PDF, PNG, JPEG, TIFF, WEBP (max 5 MB)",
