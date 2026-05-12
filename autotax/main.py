@@ -2589,6 +2589,275 @@ def refresh_token_endpoint(body: dict = Body(...)):
     return {"success": True, "token": new_access, "refresh_token": new_refresh}
 
 
+# ---------------------------------------------------------------------------
+# Steuerberater / Advisor access — Kunde lädt Steuerberater per Token-Link ein.
+# Berater bekommt nach Accept read-only Zugriff auf Kundendaten (+ optional
+# DATEV-Export wenn scope = "read_export"). Beide Seiten können widerrufen.
+# Aktuelle Iteration: Backend foundation; Frontend folgt im nächsten Schritt.
+# ---------------------------------------------------------------------------
+class AdvisorInviteRequest(BaseModel):
+    advisor_email: str
+    scope: str = "read"            # "read" oder "read_export"
+    note: str | None = None
+
+
+def _advisor_invite_link(token: str) -> str:
+    base = os.getenv("PUBLIC_APP_URL", "").rstrip("/")
+    if not base:
+        base = "https://autotax-public-production-3f2a.up.railway.app"
+    return f"{base}/app#advisor-invite/{token}"
+
+
+@app.post("/advisor/invite")
+def advisor_invite(request: Request, body: AdvisorInviteRequest, user: dict = Depends(get_current_user)):
+    """Kunde lädt einen Steuerberater ein. Wir erzeugen einen Token, senden
+    den Link per E-Mail (falls SMTP konfiguriert ist) und geben den Link
+    auch zurück, damit der Kunde ihn manuell kopieren kann."""
+    import secrets as _secrets
+    from autotax.models import AdvisorInvite, AdvisorRelationship
+    email = (body.advisor_email or "").strip().lower()
+    if not email or "@" not in email:
+        err(400, "Ungültige E-Mail-Adresse")
+    scope = body.scope if body.scope in ("read", "read_export") else "read"
+    db = SessionLocal()
+    try:
+        # Schon eine aktive Beziehung mit dieser E-Mail?
+        existing_user = db.query(User).filter(User.email == email).first()
+        if existing_user:
+            rel = db.query(AdvisorRelationship).filter(
+                AdvisorRelationship.client_user_id == user["sub"],
+                AdvisorRelationship.advisor_user_id == existing_user.id,
+                AdvisorRelationship.revoked_at.is_(None),
+            ).first()
+            if rel:
+                err(409, "Dieser Steuerberater hat bereits Zugriff")
+            if existing_user.id == user["sub"]:
+                err(400, "Eigene E-Mail-Adresse nicht erlaubt")
+        # Aktiver Pending-Invite für dieselbe E-Mail? — re-use statt duplizieren
+        prev = db.query(AdvisorInvite).filter(
+            AdvisorInvite.inviter_user_id == user["sub"],
+            AdvisorInvite.advisor_email == email,
+            AdvisorInvite.status == "pending",
+        ).first()
+        token = prev.token if prev else _secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        if prev:
+            prev.scope = scope
+            prev.note = body.note
+            prev.expires_at = now + timedelta(days=14)
+        else:
+            inv = AdvisorInvite(
+                inviter_user_id=user["sub"],
+                advisor_email=email,
+                token=token,
+                scope=scope,
+                note=body.note,
+                expires_at=now + timedelta(days=14),
+            )
+            db.add(inv)
+        db.commit()
+        link = _advisor_invite_link(token)
+        # E-Mail senden (best effort)
+        try:
+            from autotax.reminders import send_email
+            client_label = user.get("email", "Ein AutoTax-Nutzer")
+            subject = "Einladung zum Steuerberater-Zugang — AutoTax-Cloud"
+            body_html = (
+                f"<p>Hallo,</p>"
+                f"<p>{client_label} hat Sie als Steuerberater zu seinem AutoTax-Cloud-"
+                f"Konto eingeladen. Sie erhalten dadurch <b>Lese-Zugriff</b> auf die "
+                f"Belege und Auswertungen des Mandanten"
+                f"{' (inkl. DATEV-Export)' if scope=='read_export' else ''}.</p>"
+                f"<p><a href='{link}' style='background:#10b981;color:#fff;padding:10px 18px;"
+                f"text-decoration:none;border-radius:8px;font-weight:600'>Einladung annehmen</a></p>"
+                f"<p style='color:#64748b;font-size:12px'>Link gültig 14 Tage. Falls Sie noch "
+                f"kein AutoTax-Cloud-Konto haben, können Sie eines mit dieser E-Mail-Adresse "
+                f"anlegen und die Einladung danach annehmen.</p>"
+            )
+            send_email(email, subject, body_html)
+        except Exception:
+            logger.exception("Advisor invite email send failed")
+        audit("advisor.invite_create", user_id=user["sub"], resource_type="advisor_invite",
+              resource_id=None, payload={"advisor_email": email, "scope": scope}, request=request)
+        return {"success": True, "token": token, "link": link, "expires_in_days": 14}
+    finally:
+        db.close()
+
+
+@app.get("/advisor/invite/{token}")
+def advisor_invite_lookup(token: str):
+    """Public — Berater klickt den E-Mail-Link, Frontend zeigt vor dem
+    Accept Eckdaten (Wer hat eingeladen? Welche Rechte?)."""
+    from autotax.models import AdvisorInvite
+    db = SessionLocal()
+    try:
+        inv = db.query(AdvisorInvite).filter(AdvisorInvite.token == token).first()
+        if not inv:
+            err(404, "Einladung nicht gefunden")
+        if inv.status == "accepted":
+            return {"status": "accepted"}
+        if inv.status in ("revoked", "expired"):
+            return {"status": inv.status}
+        if inv.expires_at and inv.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+            inv.status = "expired"
+            db.commit()
+            return {"status": "expired"}
+        inviter = db.query(User).filter(User.id == inv.inviter_user_id).first()
+        return {
+            "status": "pending",
+            "inviter_email": (inviter.email if inviter else ""),
+            "advisor_email": inv.advisor_email,
+            "scope": inv.scope,
+            "note": inv.note,
+            "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
+        }
+    finally:
+        db.close()
+
+
+@app.post("/advisor/invite/accept")
+def advisor_invite_accept(request: Request, body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Berater muss eingeloggt sein. Token wird validiert, die Beratungs-
+    beziehung wird angelegt. Die E-Mail des eingeloggten Users MUSS mit
+    der Invite-E-Mail übereinstimmen (DSGVO/Anti-Phishing)."""
+    from autotax.models import AdvisorInvite, AdvisorRelationship
+    token = (body.get("token") or "").strip()
+    if not token:
+        err(400, "Token fehlt")
+    db = SessionLocal()
+    try:
+        inv = db.query(AdvisorInvite).filter(AdvisorInvite.token == token).first()
+        if not inv:
+            err(404, "Einladung nicht gefunden")
+        if inv.status != "pending":
+            err(409, f"Einladung bereits {inv.status}")
+        if inv.expires_at and inv.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+            inv.status = "expired"
+            db.commit()
+            err(410, "Einladung abgelaufen")
+        advisor = db.query(User).filter(User.id == user["sub"]).first()
+        if not advisor:
+            err(404, "User not found")
+        if advisor.email.strip().lower() != inv.advisor_email.strip().lower():
+            err(403, "Diese Einladung ist für eine andere E-Mail-Adresse")
+        if advisor.id == inv.inviter_user_id:
+            err(400, "Selbst-Beziehung nicht erlaubt")
+        # Beziehung schon vorhanden? — idempotent
+        existing = db.query(AdvisorRelationship).filter(
+            AdvisorRelationship.client_user_id == inv.inviter_user_id,
+            AdvisorRelationship.advisor_user_id == advisor.id,
+        ).first()
+        if existing and not existing.revoked_at:
+            inv.status = "accepted"
+            inv.accepted_at = datetime.now(timezone.utc)
+            inv.accepted_user_id = advisor.id
+            db.commit()
+            return {"success": True, "relationship_id": existing.id, "already_active": True}
+        if existing and existing.revoked_at:
+            existing.revoked_at = None
+            existing.revoked_by = None
+            existing.scope = inv.scope
+            rel = existing
+        else:
+            rel = AdvisorRelationship(
+                client_user_id=inv.inviter_user_id,
+                advisor_user_id=advisor.id,
+                scope=inv.scope,
+                note=inv.note,
+            )
+            db.add(rel)
+        inv.status = "accepted"
+        inv.accepted_at = datetime.now(timezone.utc)
+        inv.accepted_user_id = advisor.id
+        db.commit()
+        audit("advisor.invite_accept", user_id=advisor.id, resource_type="advisor_relationship",
+              resource_id=rel.id, payload={"client_user_id": inv.inviter_user_id, "scope": inv.scope},
+              request=request)
+        return {"success": True, "relationship_id": rel.id}
+    finally:
+        db.close()
+
+
+@app.get("/advisor/relationships")
+def advisor_relationships(user: dict = Depends(get_current_user)):
+    """Kunden-Sicht: welche Steuerberater haben Zugriff auf MEINE Daten?"""
+    from autotax.models import AdvisorRelationship
+    db = SessionLocal()
+    try:
+        rels = db.query(AdvisorRelationship).filter(
+            AdvisorRelationship.client_user_id == user["sub"],
+            AdvisorRelationship.revoked_at.is_(None),
+        ).order_by(AdvisorRelationship.created_at.desc()).all()
+        out = []
+        for r in rels:
+            adv = db.query(User).filter(User.id == r.advisor_user_id).first()
+            out.append({
+                "id": r.id,
+                "advisor_email": adv.email if adv else "",
+                "advisor_name": (adv.full_name if adv else "") or "",
+                "scope": r.scope,
+                "note": r.note,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            })
+        return {"success": True, "items": out, "total": len(out)}
+    finally:
+        db.close()
+
+
+@app.get("/advisor/clients")
+def advisor_clients(user: dict = Depends(get_current_user)):
+    """Berater-Sicht: welche Mandanten haben mir Zugriff gegeben?"""
+    from autotax.models import AdvisorRelationship
+    db = SessionLocal()
+    try:
+        rels = db.query(AdvisorRelationship).filter(
+            AdvisorRelationship.advisor_user_id == user["sub"],
+            AdvisorRelationship.revoked_at.is_(None),
+        ).order_by(AdvisorRelationship.created_at.desc()).all()
+        out = []
+        for r in rels:
+            cli = db.query(User).filter(User.id == r.client_user_id).first()
+            out.append({
+                "id": r.id,
+                "client_user_id": r.client_user_id,
+                "client_email": cli.email if cli else "",
+                "client_name": (cli.full_name if cli else "") or "",
+                "scope": r.scope,
+                "note": r.note,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            })
+        return {"success": True, "items": out, "total": len(out)}
+    finally:
+        db.close()
+
+
+@app.delete("/advisor/relationship/{relationship_id}")
+def advisor_revoke(relationship_id: int, request: Request, user: dict = Depends(get_current_user)):
+    """Beide Seiten dürfen kündigen. Soft delete via revoked_at."""
+    from autotax.models import AdvisorRelationship
+    db = SessionLocal()
+    try:
+        rel = db.query(AdvisorRelationship).filter(AdvisorRelationship.id == relationship_id).first()
+        if not rel:
+            err(404, "Beziehung nicht gefunden")
+        if rel.revoked_at:
+            return {"success": True, "already_revoked": True}
+        if user["sub"] == rel.client_user_id:
+            rel.revoked_by = "client"
+        elif user["sub"] == rel.advisor_user_id:
+            rel.revoked_by = "advisor"
+        else:
+            err(403, "Keine Berechtigung")
+        rel.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+        audit("advisor.relationship_revoke", user_id=user["sub"],
+              resource_type="advisor_relationship", resource_id=rel.id,
+              payload={"revoked_by": rel.revoked_by}, request=request)
+        return {"success": True}
+    finally:
+        db.close()
+
+
 @app.get("/audit/recent")
 def audit_recent(
     user: dict = Depends(get_current_user),

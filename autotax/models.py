@@ -33,6 +33,46 @@ class User(Base):
     jwt_invalidate_before = Column(DateTime, nullable=True)
 
 
+class AdvisorInvite(Base):
+    """Steuerberater-Einladung — Token-basiert.
+
+    Kunde erstellt einen Invite, der Berater bekommt einen Link per E-Mail.
+    Klick → /advisor/invite/accept → wenn Berater eingeloggt ist, wird
+    sofort eine AdvisorRelationship erzeugt; wenn nicht, muss er sich erst
+    registrieren (selbe E-Mail), dann accept erneut aufrufen.
+    """
+    __tablename__ = "advisor_invites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    inviter_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    advisor_email = Column(String, nullable=False, index=True)
+    token = Column(String(64), nullable=False, unique=True, index=True)
+    scope = Column(String(30), default="read", nullable=False)   # read | read_export
+    status = Column(String(20), default="pending", nullable=False, index=True)  # pending|accepted|revoked|expired
+    note = Column(String, nullable=True)  # Müşterinin not'u (örn. "Steuerberater Müller")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    expires_at = Column(DateTime, nullable=False)  # 14 gün
+    accepted_at = Column(DateTime, nullable=True)
+    accepted_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
+class AdvisorRelationship(Base):
+    """Aktive Berater-Kunde-Beziehung. Berater darf Kunden-Daten read-only
+    sehen + (optional) DATEV-Export ziehen. Beziehung kann von beiden
+    Seiten gekündigt werden — soft delete via revoked_at."""
+    __tablename__ = "advisor_relationships"
+    __table_args__ = (UniqueConstraint("client_user_id", "advisor_user_id", name="uq_client_advisor"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    client_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    advisor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    scope = Column(String(30), default="read", nullable=False)
+    note = Column(String, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    revoked_by = Column(String(20), nullable=True)  # 'client' veya 'advisor'
+
+
 class AuditLog(Base):
     """Audit trail — wer hat wann was getan?
 
