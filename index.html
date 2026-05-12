@@ -2667,8 +2667,8 @@ function App(){
   const View=views[_resolvedPage]||DashboardView;
   return(<div style={{display:"flex",minHeight:"100vh",background:theme.bg,fontFamily:font,color:theme.text}}>
     <CookieConsent/>
-    {showPwChange&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setShowPwChange(false)}>
-      <div style={{background:theme.surface,borderRadius:16,padding:32,width:400,maxWidth:"90vw"}} onClick={e=>e.stopPropagation()}>
+    {showPwChange&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowPwChange(false)}>
+      <div style={{background:theme.surface,borderRadius:16,padding:32,width:400,maxWidth:"90vw",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
         <h3 style={{color:theme.text,margin:"0 0 16px",fontSize:18}}>🔑 {_t("change_password")}</h3>
         <input style={{...css.input,width:"100%",marginBottom:8}} type="password" placeholder={_t("old_password")} value={pwForm.old_password} onChange={e=>setPwForm({...pwForm,old_password:e.target.value})}/>
         <input style={{...css.input,width:"100%",marginBottom:8}} type="password" placeholder={_t("new_password")} value={pwForm.new_password} onChange={e=>setPwForm({...pwForm,new_password:e.target.value})}/>
@@ -2751,6 +2751,23 @@ function App(){
               <span style={{fontSize:16}}>🏢</span><span style={{fontSize:13}}>{_t("my_companies")}</span>
             </div>
             <div style={{height:1,background:theme.border,margin:"4px 0"}}/>
+            <div onClick={async()=>{
+              setProfileOpen(false);
+              if(!confirm("Wirklich alle anderen Sitzungen beenden? Alle anderen Geräte (Watcher, Mobile, andere Browser) müssen sich neu anmelden."))return;
+              try{
+                const r=await fetch(API+"/auth/logout-all",{method:"POST",headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")}});
+                const d=await r.json();
+                if(r.ok&&d.token){
+                  localStorage.setItem("atx_token",d.token);
+                  if(d.refresh_token)localStorage.setItem("atx_refresh",d.refresh_token);
+                  if(showToast)showToast("✓ Alle anderen Sitzungen beendet","success");
+                }else{
+                  alert(_extractErr(d));
+                }
+              }catch(e){alert("Error: "+e.message);}
+            }} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:"#f59e0b",transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(245,158,11,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:16}}>🚪</span><span style={{fontSize:13,fontWeight:500}}>Alle Geräte abmelden</span>
+            </div>
             <div onClick={()=>{logout();setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.danger,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.dangerSoft} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <Icon d={I.logout} size={16} color={theme.danger}/><span style={{fontSize:13,fontWeight:600}}>Abmelden</span>
             </div>
