@@ -2259,6 +2259,71 @@ function CookieConsent(){
   </div>);
 }
 
+function AuditView(){
+  const[items,setItems]=useState([]);
+  const[total,setTotal]=useState(0);
+  const[loading,setLoading]=useState(true);
+  const[offset,setOffset]=useState(0);
+  const[action,setAction]=useState("");
+  const limit=50;
+  const labels={
+    "auth.login_success":{icon:"🔓",text:getLang()==="de"?"Anmeldung":"Login",color:theme.accent},
+    "auth.login_failed":{icon:"🚫",text:getLang()==="de"?"Fehlgeschlagene Anmeldung":"Failed login",color:theme.danger},
+    "auth.logout_all":{icon:"🚪",text:getLang()==="de"?"Alle Geräte abgemeldet":"Logout all devices",color:"#f59e0b"},
+    "auth.password_change":{icon:"🔑",text:getLang()==="de"?"Passwort geändert":"Password changed",color:theme.blue},
+    "invoice.update":{icon:"✏️",text:getLang()==="de"?"Rechnung bearbeitet":"Invoice edited",color:theme.blue},
+    "invoice.delete":{icon:"🗑️",text:getLang()==="de"?"Rechnung gelöscht":"Invoice deleted",color:theme.danger},
+    "invoice.delete_permanent":{icon:"💀",text:getLang()==="de"?"Rechnung dauerhaft gelöscht":"Invoice permanently deleted",color:theme.danger},
+    "invoice.restore":{icon:"♻️",text:getLang()==="de"?"Rechnung wiederhergestellt":"Invoice restored",color:theme.accent},
+  };
+  const load=async(off=0,act=action)=>{
+    setLoading(true);
+    try{
+      const q=new URLSearchParams({limit,offset:off});
+      if(act)q.set("action",act);
+      const r=await fetch(API+"/audit/recent?"+q.toString(),{headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")}});
+      const d=await r.json();
+      if(r.ok){setItems(d.items||[]);setTotal(d.total||0);setOffset(off);}
+    }catch(e){}
+    setLoading(false);
+  };
+  useEffect(()=>{load(0,action);},[action]);
+  const fmtTime=(iso)=>{if(!iso)return"—";const d=new Date(iso);return d.toLocaleString(getLang()==="de"?"de-DE":"en-GB");};
+  const fmtPayload=(p)=>{if(!p)return"";try{const o=JSON.parse(p);return Object.entries(o).slice(0,3).map(([k,v])=>k+": "+String(v).slice(0,40)).join(" · ");}catch(e){return String(p).slice(0,120);}};
+  return(<div style={{display:"flex",flexDirection:"column",gap:24}}>
+    <div>
+      <h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>📋 {getLang()==="de"?"Aktivitäten":"Activity Log"}</h2>
+      <p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{getLang()==="de"?"Alle Änderungen an deinem Konto — chronologisch, unveränderlich. Für DSGVO Art. 15 und deinen Steuerberater.":"All changes to your account — chronological, immutable. For GDPR Art. 15 and your tax advisor."}</p>
+    </div>
+    <div style={{...css.card,padding:0,overflow:"hidden"}}>
+      <div style={{padding:"12px 18px",borderBottom:"1px solid "+theme.border,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+        <select value={action} onChange={e=>setAction(e.target.value)} style={{...css.input,width:"auto",padding:"8px 12px",fontSize:13}}>
+          <option value="">{getLang()==="de"?"Alle Aktionen":"All actions"}</option>
+          {Object.entries(labels).map(([k,v])=>(<option key={k} value={k}>{v.icon} {v.text}</option>))}
+        </select>
+        <div style={{flex:1,textAlign:"right",fontSize:12,color:theme.textDim}}>{loading?"⏳":total+" "+(getLang()==="de"?"Einträge":"entries")}</div>
+      </div>
+      {items.length===0&&!loading&&<div style={{padding:32,textAlign:"center",color:theme.textDim,fontSize:13}}>{getLang()==="de"?"Keine Aktivität gefunden.":"No activity found."}</div>}
+      {items.map((r,i)=>{
+        const L=labels[r.action]||{icon:"📌",text:r.action,color:theme.textMuted};
+        return(<div key={r.id} style={{padding:"12px 18px",borderBottom:i<items.length-1?"1px solid "+theme.border:"none",display:"flex",gap:12,alignItems:"flex-start"}}>
+          <span style={{fontSize:18,minWidth:24}}>{L.icon}</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{color:L.color,fontWeight:600,fontSize:13}}>{L.text} {r.resource_id?<span style={{color:theme.textDim,fontWeight:400}}>#{r.resource_id}</span>:null}</div>
+            <div style={{color:theme.textDim,fontSize:11,fontFamily:mono,marginTop:2}}>{fmtTime(r.created_at)} {r.ip?" · "+r.ip:""}</div>
+            {r.payload&&<div style={{color:theme.textMuted,fontSize:11,marginTop:4,fontFamily:mono}}>{fmtPayload(r.payload)}</div>}
+          </div>
+        </div>);
+      })}
+      {total>limit&&<div style={{padding:"12px 18px",borderTop:"1px solid "+theme.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <button style={{...css.btnOutline,opacity:offset===0?0.4:1}} disabled={offset===0} onClick={()=>load(Math.max(0,offset-limit))}>← {getLang()==="de"?"Zurück":"Previous"}</button>
+        <span style={{fontSize:12,color:theme.textDim}}>{offset+1}–{Math.min(offset+limit,total)} / {total}</span>
+        <button style={{...css.btnOutline,opacity:offset+limit>=total?0.4:1}} disabled={offset+limit>=total} onClick={()=>load(offset+limit)}>{getLang()==="de"?"Weiter":"Next"} →</button>
+      </div>}
+    </div>
+  </div>);
+}
+
 function HelpView(){
   const[openFaq,setOpenFaq]=useState(null);
   const[openGuide,setOpenGuide]=useState(null);
@@ -2657,7 +2722,7 @@ function App(){
   const loadCompanies=async()=>{try{const r=await fetch(API+"/companies",{headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")}});setCompanies(await r.json());}catch(e){}};
   const[pwForm,setPwForm]=useState({old_password:"",new_password:"",confirm:""});
   if(!authed)return<Fragment><AuthScreen onLogin={()=>setAuthed(true)}/><CookieConsent/></Fragment>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView};
+  const views={dashboard:DashboardView,invoices:InvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView};
   const _t=typeof t==="function"?t:k=>k;
   const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.
@@ -2749,6 +2814,9 @@ function App(){
             </div>
             <div onClick={()=>{loadCompanies();setShowCompanies(true);setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:16}}>🏢</span><span style={{fontSize:13}}>{_t("my_companies")}</span>
+            </div>
+            <div onClick={()=>{setPage("audit");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:16}}>📋</span><span style={{fontSize:13}}>{getLang()==="de"?"Aktivitäten":"Activity"}</span>
             </div>
             <div style={{height:1,background:theme.border,margin:"4px 0"}}/>
             <div onClick={async()=>{

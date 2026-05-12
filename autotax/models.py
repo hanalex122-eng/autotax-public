@@ -33,6 +33,28 @@ class User(Base):
     jwt_invalidate_before = Column(DateTime, nullable=True)
 
 
+class AuditLog(Base):
+    """Audit trail — wer hat wann was getan?
+
+    DSGVO Art. 30 (Verzeichnis von Verarbeitungstätigkeiten) +
+    Steuerberater-Anforderung: jede schreibende Aktion mit Zeitstempel
+    nachvollziehbar. user_id NULL = anonyme Aktion (z.B. fehlgeschlagener
+    Login mit unbekannter E-Mail). payload = JSON-Snapshot der Änderung,
+    nie das ganze Objekt — nur die geänderten Felder + alte Werte.
+    """
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    action = Column(String(50), nullable=False, index=True)        # invoice.create, auth.login, ...
+    resource_type = Column(String(30), nullable=True)              # invoice, user, cash_entry, ...
+    resource_id = Column(Integer, nullable=True)
+    payload = Column(Text, nullable=True)                          # JSON string
+    ip = Column(String(50), nullable=True)                         # anonymized (last octet masked)
+    user_agent = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+
 class SteuerReminderLog(Base):
     """Steuer deadline reminder dedup tablosu — ayni reminder ikinci kez
     gonderilmesin diye. (user_id, deadline_type, deadline_date, code)

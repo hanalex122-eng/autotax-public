@@ -18,6 +18,7 @@ from autotax.db import init_db, save_invoice, SessionLocal
 from autotax.models import Invoice, User, CashEntry, UserCompany, LlmUsage
 from autotax.duplicate_service import generate_file_hash, find_hard_duplicate, check_soft_duplicate
 from autotax.auth import hash_password, verify_password, create_token, create_access_token, create_refresh_token, decode_token, get_current_user
+from autotax.audit import audit
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("autotax")
@@ -2543,10 +2544,13 @@ def login(request: Request, body: AuthRequest):
         user = db.query(User).filter(User.email == body.email).first()
         if not user or not verify_password(body.password, user.hashed_password):
             logger.warning("Failed login: %s", _mask_email(body.email))
+            audit("auth.login_failed", user_id=(user.id if user else None),
+                  payload={"email": _mask_email(body.email)}, request=request)
             err(401, "Invalid email or password")
         logger.info("User logged in: %s", _mask_email(body.email))
         token = create_access_token(user.id, user.email)
         refresh = create_refresh_token(user.id, user.email)
+        audit("auth.login_success", user_id=user.id, request=request)
         return {"success": True, "token": token, "refresh_token": refresh, "email": user.email}
     except HTTPException:
         raise
@@ -2585,8 +2589,45 @@ def refresh_token_endpoint(body: dict = Body(...)):
     return {"success": True, "token": new_access, "refresh_token": new_refresh}
 
 
+@app.get("/audit/recent")
+def audit_recent(
+    user: dict = Depends(get_current_user),
+    limit: int = 100,
+    offset: int = 0,
+    action: str | None = None,
+):
+    """Aktivitäten-Listing für den aktuellen User — DSGVO Art. 15.
+
+    Liefert die jüngsten audit_log-Einträge. User sehen NUR ihre eigenen.
+    (Steuerberater-Sicht mit user_id-Filter folgt im Advisor-Patch.)
+    """
+    from autotax.models import AuditLog
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+    db = SessionLocal()
+    try:
+        q = db.query(AuditLog).filter(AuditLog.user_id == user["sub"])
+        if action:
+            q = q.filter(AuditLog.action == action)
+        total = q.count()
+        rows = q.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset).all()
+        items = [{
+            "id": r.id,
+            "action": r.action,
+            "resource_type": r.resource_type,
+            "resource_id": r.resource_id,
+            "payload": r.payload,
+            "ip": r.ip,
+            "user_agent": (r.user_agent or "")[:120],
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        } for r in rows]
+        return {"success": True, "items": items, "total": total, "limit": limit, "offset": offset}
+    finally:
+        db.close()
+
+
 @app.post("/auth/logout-all")
-def logout_all_devices(user: dict = Depends(get_current_user)):
+def logout_all_devices(request: Request, user: dict = Depends(get_current_user)):
     """Tum cihazlardan cikis. User.jwt_invalidate_before = now() yazar,
     boylece bu zaman damgasindan eski iat'li tum tokenlar 401 alir.
     Cagiran cihaz hemen yeni token alip devam edebilir cunku login flow'u
@@ -2599,6 +2640,7 @@ def logout_all_devices(user: dict = Depends(get_current_user)):
         u.jwt_invalidate_before = datetime.now(timezone.utc)
         db.commit()
         logger.info("LOGOUT-ALL: user_id=%s, cutoff=%s", u.id, u.jwt_invalidate_before)
+        audit("auth.logout_all", user_id=u.id, request=request)
         # Yeni token uret — caller hala session'i kullanabilsin
         new_access = create_access_token(u.id, u.email)
         new_refresh = create_refresh_token(u.id, u.email)
@@ -2621,7 +2663,7 @@ class ChangePasswordRequest(BaseModel):
 
 
 @app.post("/auth/change-password")
-def change_password(body: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+def change_password(request: Request, body: ChangePasswordRequest, user: dict = Depends(get_current_user)):
     if len(body.new_password) < 8:
         err(400, "Neues Passwort muss mindestens 8 Zeichen haben")
     if not any(c.isupper() for c in body.new_password):
@@ -2635,6 +2677,7 @@ def change_password(body: ChangePasswordRequest, user: dict = Depends(get_curren
             err(401, "Altes Passwort ist falsch")
         u.hashed_password = hash_password(body.new_password)
         db.commit()
+        audit("auth.password_change", user_id=u.id, request=request)
         return {"success": True, "message": "Passwort erfolgreich geändert"}
     except HTTPException:
         raise
@@ -4232,13 +4275,23 @@ def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
 
 
 @app.patch("/invoices/{invoice_id}")
-def patch_invoice(invoice_id: int, body: InvoiceUpdate, user: dict = Depends(get_current_user)):
-    return _do_update_invoice(invoice_id, body, user)
+def patch_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: dict = Depends(get_current_user)):
+    result = _do_update_invoice(invoice_id, body, user)
+    audit("invoice.update", user_id=user["sub"], resource_type="invoice",
+          resource_id=invoice_id,
+          payload={k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None},
+          request=request)
+    return result
 
 
 @app.put("/invoices/{invoice_id}")
-def put_invoice(invoice_id: int, body: InvoiceUpdate, user: dict = Depends(get_current_user)):
-    return _do_update_invoice(invoice_id, body, user)
+def put_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: dict = Depends(get_current_user)):
+    result = _do_update_invoice(invoice_id, body, user)
+    audit("invoice.update", user_id=user["sub"], resource_type="invoice",
+          resource_id=invoice_id,
+          payload={k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None},
+          request=request)
+    return result
 
 
 # --- ADDED START: Single invoice detail with full OCR text ---
@@ -4441,12 +4494,14 @@ def invoice_status(invoice_id: int, user: dict = Depends(get_current_user)):
 # ============================================================
 
 @app.delete("/invoices/{invoice_id}")
-def delete_invoice(invoice_id: int, permanent: bool = False, user: dict = Depends(get_current_user)):
+def delete_invoice(invoice_id: int, request: Request, permanent: bool = False, user: dict = Depends(get_current_user)):
     db = SessionLocal()
     try:
         inv = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.user_id == user["sub"]).first()
         if not inv:
             err(404, "Invoice not found")
+        snapshot = {"vendor": inv.vendor, "amount": safe_float(inv.total_amount),
+                    "date": inv.date, "invoice_number": inv.invoice_number}
         # --- ADDED: soft delete ---
         if permanent:
             db.delete(inv)
@@ -4462,6 +4517,9 @@ def delete_invoice(invoice_id: int, permanent: bool = False, user: dict = Depend
                 linked.deleted_at = datetime.now()
         # --- END ---
         db.commit()
+        audit("invoice.delete_permanent" if permanent else "invoice.delete",
+              user_id=user["sub"], resource_type="invoice", resource_id=invoice_id,
+              payload=snapshot, request=request)
         return {"success": True, "deleted": invoice_id}
     except HTTPException:
         raise
@@ -7527,7 +7585,7 @@ def list_deleted_invoices(user: dict = Depends(get_current_user)):
 
 
 @app.post("/invoices/{invoice_id}/restore")
-def restore_invoice(invoice_id: int, user: dict = Depends(get_current_user)):
+def restore_invoice(invoice_id: int, request: Request, user: dict = Depends(get_current_user)):
     """Restore a soft-deleted invoice."""
     db = SessionLocal()
     try:
@@ -7544,6 +7602,8 @@ def restore_invoice(invoice_id: int, user: dict = Depends(get_current_user)):
             linked.deleted_at = None
             logger.info("Restored linked cash entry for invoice %d", invoice_id)
         db.commit()
+        audit("invoice.restore", user_id=user["sub"], resource_type="invoice",
+              resource_id=invoice_id, request=request)
         return {"success": True, "restored": invoice_id}
     except HTTPException:
         raise
