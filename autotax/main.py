@@ -5021,13 +5021,32 @@ def _create_bookkeeping(body: CashEntryCreate, user: dict):
 
 
 @app.post("/bookkeeping")
-def create_bookkeeping(body: CashEntryCreate, user: dict = Depends(get_current_user)):
-    return _create_bookkeeping(body, user)
+def create_bookkeeping(request: Request, body: CashEntryCreate, user: dict = Depends(get_current_user)):
+    result = _create_bookkeeping(body, user)
+    try:
+        audit("cash_entry.create", user_id=user["sub"], resource_type="cash_entry",
+              resource_id=(result.get("id") if isinstance(result, dict) else None),
+              payload={"description": getattr(body, "description", None),
+                       "amount": getattr(body, "gross_amount", None),
+                       "type": getattr(body, "entry_type", None)},
+              request=request)
+    except Exception:
+        pass
+    return result
 
 
 @app.post("/kassenbuch")
-def create_kassenbuch(body: CashEntryCreate, user: dict = Depends(get_current_user)):
-    return _create_bookkeeping(body, user)
+def create_kassenbuch(request: Request, body: CashEntryCreate, user: dict = Depends(get_current_user)):
+    result = _create_bookkeeping(body, user)
+    try:
+        audit("cash_entry.create", user_id=user["sub"], resource_type="cash_entry",
+              resource_id=(result.get("id") if isinstance(result, dict) else None),
+              payload={"description": getattr(body, "description", None),
+                       "amount": getattr(body, "gross_amount", None)},
+              request=request)
+    except Exception:
+        pass
+    return result
 
 
 # ============================================================
@@ -5175,13 +5194,25 @@ def bulk_delete_bookkeeping(body: BulkDeleteRequest, user: dict = Depends(get_cu
 
 
 @app.delete("/bookkeeping/{entry_id}")
-def delete_bookkeeping(entry_id: int, user: dict = Depends(get_current_user)):
-    return _delete_bookkeeping(entry_id, user)
+def delete_bookkeeping(entry_id: int, request: Request, user: dict = Depends(get_current_user)):
+    result = _delete_bookkeeping(entry_id, user)
+    try:
+        audit("cash_entry.delete", user_id=user["sub"], resource_type="cash_entry",
+              resource_id=entry_id, request=request)
+    except Exception:
+        pass
+    return result
 
 
 @app.delete("/kassenbuch/{entry_id}")
-def delete_kassenbuch(entry_id: int, user: dict = Depends(get_current_user)):
-    return _delete_bookkeeping(entry_id, user)
+def delete_kassenbuch(entry_id: int, request: Request, user: dict = Depends(get_current_user)):
+    result = _delete_bookkeeping(entry_id, user)
+    try:
+        audit("cash_entry.delete", user_id=user["sub"], resource_type="cash_entry",
+              resource_id=entry_id, request=request)
+    except Exception:
+        pass
+    return result
 
 
 # ============================================================
@@ -7047,7 +7078,7 @@ def list_companies(user: dict = Depends(get_current_user)):
 
 
 @app.post("/companies")
-def add_company(body: dict = Body(...), user: dict = Depends(get_current_user)):
+def add_company(request: Request, body: dict = Body(...), user: dict = Depends(get_current_user)):
     company_name = body.get("company_name", "").strip()
     if not company_name:
         err(400, "Firmenname ist erforderlich")
@@ -7075,6 +7106,8 @@ def add_company(body: dict = Body(...), user: dict = Depends(get_current_user)):
         db.add(c)
         db.commit()
         db.refresh(c)
+        audit("company.create", user_id=user["sub"], resource_type="company",
+              resource_id=c.id, payload={"name": c.company_name}, request=request)
         return {"success": True, "id": c.id, "company_name": c.company_name}
     except HTTPException:
         raise
@@ -7086,14 +7119,17 @@ def add_company(body: dict = Body(...), user: dict = Depends(get_current_user)):
 
 
 @app.delete("/companies/{company_id}")
-def delete_company(company_id: int, user: dict = Depends(get_current_user)):
+def delete_company(company_id: int, request: Request, user: dict = Depends(get_current_user)):
     db = SessionLocal()
     try:
         c = db.query(UserCompany).filter(UserCompany.id == company_id, UserCompany.user_id == user["sub"]).first()
         if not c:
             err(404, "Firma nicht gefunden")
+        snapshot = {"name": c.company_name}
         db.delete(c)
         db.commit()
+        audit("company.delete", user_id=user["sub"], resource_type="company",
+              resource_id=company_id, payload=snapshot, request=request)
         return {"success": True}
     finally:
         db.close()
