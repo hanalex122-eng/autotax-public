@@ -154,6 +154,10 @@ async function _authFetch(url, opts){
   const headers = Object.assign({}, opts.headers || {});
   const tk = localStorage.getItem("atx_token");
   if(tk) headers["Authorization"] = "Bearer " + tk;
+  // Advisor mode — view another user's data via X-Acting-Client-Id.
+  // Stored in localStorage so a hard refresh keeps the active mandate.
+  const acting = localStorage.getItem("atx_acting_client_id");
+  if(acting && !headers["X-Acting-Client-Id"]) headers["X-Acting-Client-Id"] = acting;
   let res = await fetch(url, Object.assign({}, opts, {headers}));
   if(res.status !== 401) return res;
   // Try refresh
@@ -2419,7 +2423,7 @@ function AdvisorView(){
         {tr("Mandate (als Berater)","Mandates (as advisor)")} <span style={{color:theme.textDim,fontWeight:400,fontSize:13}}>({clients.length})</span>
       </h3>
       <p style={{color:theme.textMuted,fontSize:12,margin:"0 0 12px"}}>
-        {tr("Mandanten, die Ihnen Zugriff gewährt haben. (Mandanten-Wechsel-UI folgt im nächsten Update.)","Clients who granted you access. (Client switcher UI lands in the next update.)")}
+        {tr("Mandanten, die Ihnen Zugriff gewährt haben. Klicken Sie auf „Daten ansehen", um in den Lese-Modus zu wechseln.","Clients who granted you access. Click 'View data' to enter read-only mode.")}
       </p>
       {clients.map(c=>(<div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:"1px solid "+theme.border}}>
         <span style={{fontSize:20}}>🏢</span>
@@ -2430,6 +2434,11 @@ function AdvisorView(){
             {c.note?" · "+c.note:""}
           </div>
         </div>
+        <button style={{...css.btn(),fontSize:12,padding:"8px 14px"}} onClick={()=>{
+          localStorage.setItem("atx_acting_client_id",String(c.client_user_id));
+          localStorage.setItem("atx_acting_client_label",c.client_email);
+          window.location.reload();
+        }}>👁️ {tr("Daten ansehen","View data")}</button>
         <button style={{...css.btnOutline,color:theme.danger,borderColor:theme.danger+"55",fontSize:12}} onClick={()=>revoke(c.id,c.client_email)}>
           {tr("Verbindung beenden","Disconnect")}
         </button>
@@ -2926,8 +2935,38 @@ function App(){
   const View=views[_resolvedPage]||DashboardView;
   const _lang=getLang();
   const _tr=(de,en)=>_lang==="de"?de:en;
+  // Advisor "viewing as client" banner state
+  const[actingClient,setActingClient]=useState(null);
+  useEffect(()=>{
+    const checkActing=async()=>{
+      const id=localStorage.getItem("atx_acting_client_id");
+      if(!id){setActingClient(null);return;}
+      const label=localStorage.getItem("atx_acting_client_label")||("ID "+id);
+      setActingClient({id,label});
+    };
+    checkActing();
+    window.addEventListener("storage",checkActing);
+    return()=>window.removeEventListener("storage",checkActing);
+  },[refreshKey]);
+  const exitActingMode=()=>{
+    localStorage.removeItem("atx_acting_client_id");
+    localStorage.removeItem("atx_acting_client_label");
+    setActingClient(null);
+    triggerRefresh();
+    setTimeout(()=>window.location.reload(),50);
+  };
+  useEffect(()=>{
+    document.body.style.paddingTop = actingClient ? "40px" : "0";
+    return ()=>{ document.body.style.paddingTop = "0"; };
+  },[actingClient]);
   return(<div style={{display:"flex",minHeight:"100vh",background:theme.bg,fontFamily:font,color:theme.text}}>
     <CookieConsent/>
+    {/* Acting-as-client banner — advisor is viewing another user's data */}
+    {actingClient&&<div style={{position:"fixed",top:0,left:0,right:0,zIndex:9997,background:"linear-gradient(90deg,#f59e0b,#fb923c)",color:"#0f172a",padding:"8px 16px",display:"flex",alignItems:"center",gap:12,fontSize:13,fontWeight:600,boxShadow:"0 2px 8px rgba(0,0,0,0.2)"}}>
+      <span style={{fontSize:18}}>👔</span>
+      <span style={{flex:1}}>{_tr("Sie sehen Daten von","You are viewing data of")} <span style={{textDecoration:"underline"}}>{actingClient.label}</span> — {_tr("Lese-Modus (Steuerberater-Zugriff)","Read-only (advisor mode)")}</span>
+      <button style={{padding:"6px 14px",background:"#0f172a",color:"#f59e0b",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={exitActingMode}>{_tr("Zurück zu meinem Konto","Back to my account")}</button>
+    </div>}
     {/* Advisor invite accept modal — fired by #advisor-invite/<token> in URL */}
     {inviteAccept&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>{window.location.hash="";setInviteAccept(null);}}>
       <div style={{background:theme.surface,borderRadius:16,padding:32,width:480,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>

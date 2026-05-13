@@ -101,6 +101,77 @@ def get_current_user(authorization: str = Header(None)) -> dict:
     return payload
 
 
+def get_acting_context(
+    authorization: str = Header(None),
+    x_acting_client_id: str = Header(None),
+) -> dict:
+    """Returns the *effective* user context.
+
+    If the caller passes the X-Acting-Client-Id header AND has an active
+    AdvisorRelationship with that client, returns:
+        { "sub": <client_id>, "email": <client_email>, "is_acting": True,
+          "advisor_id": <real_user_id>, "scope": "read"|"read_export" }
+
+    Otherwise behaves like get_current_user and adds is_acting=False so
+    every endpoint can use a single dependency.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+    payload = decode_token(authorization[7:], expected_type="access")
+    _check_global_invalidate(payload)
+    payload = dict(payload)
+    payload["is_acting"] = False
+    payload["scope"] = "owner"
+    if not x_acting_client_id:
+        return payload
+    try:
+        target_id = int(x_acting_client_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid X-Acting-Client-Id")
+    if target_id == payload.get("sub"):
+        return payload  # acting as self is a no-op
+    try:
+        from autotax.db import SessionLocal
+        from autotax.models import User, AdvisorRelationship
+    except Exception:
+        raise HTTPException(status_code=500, detail="acting context unavailable")
+    db = SessionLocal()
+    try:
+        rel = db.query(AdvisorRelationship).filter(
+            AdvisorRelationship.advisor_user_id == payload["sub"],
+            AdvisorRelationship.client_user_id == target_id,
+            AdvisorRelationship.revoked_at.is_(None),
+        ).first()
+        if not rel:
+            raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Mandanten")
+        client = db.query(User).filter(User.id == target_id).first()
+        if not client:
+            raise HTTPException(status_code=404, detail="Mandant nicht gefunden")
+        return {
+            "sub": target_id,
+            "email": client.email,
+            "is_acting": True,
+            "advisor_id": payload["sub"],
+            "advisor_email": payload.get("email"),
+            "scope": rel.scope,
+        }
+    finally:
+        db.close()
+
+
+def require_owner_or_export(ctx: dict, action: str = "write") -> None:
+    """Guard for write endpoints. action='export' allows scope=read_export."""
+    if not ctx.get("is_acting"):
+        return  # real owner — anything goes
+    scope = ctx.get("scope", "read")
+    if action == "export" and scope == "read_export":
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Read-only Zugriff — als Steuerberater dürfen Sie keine Daten verändern."
+    )
+
+
 # --- ADDED START: Auth debugging helpers ---
 logger.info("JWT_SECRET startup check: configured=%s, length=%d", bool(SECRET), len(SECRET))
 

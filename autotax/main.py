@@ -17,7 +17,7 @@ from autotax.parser import parse_invoice
 from autotax.db import init_db, save_invoice, SessionLocal
 from autotax.models import Invoice, User, CashEntry, UserCompany, LlmUsage
 from autotax.duplicate_service import generate_file_hash, find_hard_duplicate, check_soft_duplicate
-from autotax.auth import hash_password, verify_password, create_token, create_access_token, create_refresh_token, decode_token, get_current_user
+from autotax.auth import hash_password, verify_password, create_token, create_access_token, create_refresh_token, decode_token, get_current_user, get_acting_context, require_owner_or_export
 from autotax.audit import audit
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -2860,7 +2860,7 @@ def advisor_revoke(relationship_id: int, request: Request, user: dict = Depends(
 
 @app.get("/audit/recent")
 def audit_recent(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_acting_context),
     limit: int = 100,
     offset: int = 0,
     action: str | None = None,
@@ -4265,8 +4265,9 @@ def list_invoices(
     category: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    user: dict = Depends(get_current_user),
+    _acting: dict = Depends(get_acting_context),
 ):
+    user = _acting  # advisor with X-Acting-Client-Id sees client's data
     db = SessionLocal()
     try:
         from sqlalchemy.orm import defer as _sa_defer
@@ -4336,7 +4337,7 @@ def list_invoices(
 # ============================================================
 
 @app.get("/invoices/dashboard")
-def invoice_dashboard(country: str = Query("DE"), user: dict = Depends(get_current_user)):
+def invoice_dashboard(country: str = Query("DE"), user: dict = Depends(get_acting_context)):
     try:
         m = calculate_dashboard_metrics(user["sub"])
         net_profit = m["profit"]
@@ -4544,7 +4545,8 @@ def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
 
 
 @app.patch("/invoices/{invoice_id}")
-def patch_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: dict = Depends(get_current_user)):
+def patch_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: dict = Depends(get_acting_context)):
+    require_owner_or_export(user, "write")
     result = _do_update_invoice(invoice_id, body, user)
     audit("invoice.update", user_id=user["sub"], resource_type="invoice",
           resource_id=invoice_id,
@@ -4554,7 +4556,8 @@ def patch_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: 
 
 
 @app.put("/invoices/{invoice_id}")
-def put_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: dict = Depends(get_current_user)):
+def put_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: dict = Depends(get_acting_context)):
+    require_owner_or_export(user, "write")
     result = _do_update_invoice(invoice_id, body, user)
     audit("invoice.update", user_id=user["sub"], resource_type="invoice",
           resource_id=invoice_id,
@@ -4763,7 +4766,8 @@ def invoice_status(invoice_id: int, user: dict = Depends(get_current_user)):
 # ============================================================
 
 @app.delete("/invoices/{invoice_id}")
-def delete_invoice(invoice_id: int, request: Request, permanent: bool = False, user: dict = Depends(get_current_user)):
+def delete_invoice(invoice_id: int, request: Request, permanent: bool = False, user: dict = Depends(get_acting_context)):
+    require_owner_or_export(user, "write")
     db = SessionLocal()
     try:
         inv = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.user_id == user["sub"]).first()
@@ -4922,7 +4926,7 @@ def _list_bookkeeping(skip, limit, user):
 
 
 @app.get("/bookkeeping")
-def list_bookkeeping(skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=10000), user: dict = Depends(get_current_user)):
+def list_bookkeeping(skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=10000), user: dict = Depends(get_acting_context)):
     return _list_bookkeeping(skip, limit, user)
 
 
@@ -5021,7 +5025,8 @@ def _create_bookkeeping(body: CashEntryCreate, user: dict):
 
 
 @app.post("/bookkeeping")
-def create_bookkeeping(request: Request, body: CashEntryCreate, user: dict = Depends(get_current_user)):
+def create_bookkeeping(request: Request, body: CashEntryCreate, user: dict = Depends(get_acting_context)):
+    require_owner_or_export(user, "write")
     result = _create_bookkeeping(body, user)
     try:
         audit("cash_entry.create", user_id=user["sub"], resource_type="cash_entry",
@@ -5194,7 +5199,8 @@ def bulk_delete_bookkeeping(body: BulkDeleteRequest, user: dict = Depends(get_cu
 
 
 @app.delete("/bookkeeping/{entry_id}")
-def delete_bookkeeping(entry_id: int, request: Request, user: dict = Depends(get_current_user)):
+def delete_bookkeeping(entry_id: int, request: Request, user: dict = Depends(get_acting_context)):
+    require_owner_or_export(user, "write")
     result = _delete_bookkeeping(entry_id, user)
     try:
         audit("cash_entry.delete", user_id=user["sub"], resource_type="cash_entry",
@@ -7068,7 +7074,7 @@ def upgrade_plan(body: dict = Body(...), user: dict = Depends(get_current_user))
 # ============================================================
 
 @app.get("/companies")
-def list_companies(user: dict = Depends(get_current_user)):
+def list_companies(user: dict = Depends(get_acting_context)):
     db = SessionLocal()
     try:
         companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
@@ -7078,7 +7084,8 @@ def list_companies(user: dict = Depends(get_current_user)):
 
 
 @app.post("/companies")
-def add_company(request: Request, body: dict = Body(...), user: dict = Depends(get_current_user)):
+def add_company(request: Request, body: dict = Body(...), user: dict = Depends(get_acting_context)):
+    require_owner_or_export(user, "write")
     company_name = body.get("company_name", "").strip()
     if not company_name:
         err(400, "Firmenname ist erforderlich")
@@ -7119,7 +7126,8 @@ def add_company(request: Request, body: dict = Body(...), user: dict = Depends(g
 
 
 @app.delete("/companies/{company_id}")
-def delete_company(company_id: int, request: Request, user: dict = Depends(get_current_user)):
+def delete_company(company_id: int, request: Request, user: dict = Depends(get_acting_context)):
+    require_owner_or_export(user, "write")
     db = SessionLocal()
     try:
         c = db.query(UserCompany).filter(UserCompany.id == company_id, UserCompany.user_id == user["sub"]).first()
