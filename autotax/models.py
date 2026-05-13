@@ -40,6 +40,27 @@ class User(Base):
     plan_ends_at = Column(DateTime, nullable=True)
 
 
+class BackgroundJob(Base):
+    """Hintergrund-Job-Tracking — fuer Email-Sync, Reminder, Mahnung,
+    Recurring, async OCR und alle anderen async Loops. Eine Zeile pro
+    Job-Lauf; spaeter koennen wir Admin-Dashboard zeigen ('Letzter
+    Email-Sync vor 2 Min, Dauer 4s, OK') und failing Jobs alarmieren.
+
+    status: running | success | failed
+    """
+    __tablename__ = "background_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_type = Column(String(50), nullable=False, index=True)   # email_sync, reminder, mahnung, ocr_async, ...
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    status = Column(String(20), nullable=False, default="running")
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    finished_at = Column(DateTime, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    error = Column(Text, nullable=True)
+    payload = Column(Text, nullable=True)  # JSON — work item info
+
+
 class AdvisorInvite(Base):
     """Steuerberater-Einladung — Token-basiert.
 

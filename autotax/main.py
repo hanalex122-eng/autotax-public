@@ -19,6 +19,7 @@ from autotax.models import Invoice, User, CashEntry, UserCompany, LlmUsage
 from autotax.duplicate_service import generate_file_hash, find_hard_duplicate, check_soft_duplicate
 from autotax.auth import hash_password, verify_password, create_token, create_access_token, create_refresh_token, decode_token, get_current_user, get_acting_context, require_owner_or_export
 from autotax.audit import audit
+from autotax.jobs import track_job
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("autotax")
@@ -1985,7 +1986,8 @@ def steuer_upcoming(user: dict = Depends(get_current_user)):
 async def admin_run_steuer_now(user: dict = Depends(get_current_user)):
     """Manuel steuer reminder cycle (test icin)."""
     from autotax.steuer import process_steuer_reminders
-    stats = await process_steuer_reminders()
+    with track_job("steuer_reminders", user_id=user["sub"], payload={"trigger": "admin"}):
+        stats = await process_steuer_reminders()
     return {"success": True, "stats": stats}
 
 
@@ -1993,7 +1995,8 @@ async def admin_run_steuer_now(user: dict = Depends(get_current_user)):
 async def admin_run_mahnung_now(user: dict = Depends(get_current_user)):
     """Manuel Mahnung cycle (test icin)."""
     from autotax.mahnung import process_mahnungen
-    stats = await process_mahnungen()
+    with track_job("mahnung", user_id=user["sub"], payload={"trigger": "admin"}):
+        stats = await process_mahnungen()
     return {"success": True, "stats": stats}
 
 
@@ -2001,7 +2004,8 @@ async def admin_run_mahnung_now(user: dict = Depends(get_current_user)):
 async def admin_run_recurring_now(user: dict = Depends(get_current_user)):
     """Manuel recurring spawn cycle (test icin)."""
     from autotax.recurring import process_recurring_spawns
-    stats = await process_recurring_spawns()
+    with track_job("recurring_spawn", user_id=user["sub"], payload={"trigger": "admin"}):
+        stats = await process_recurring_spawns()
     return {"success": True, "stats": stats}
 
 
@@ -2063,7 +2067,8 @@ def update_invoice_recurring(
 async def admin_run_monthly_summary_now(user: dict = Depends(get_current_user)):
     """Manuel monthly summary (ay 1'i degil de test edebilmek icin force=True)."""
     from autotax.reminders import process_monthly_summary
-    stats = await process_monthly_summary(force=True)
+    with track_job("monthly_summary", user_id=user["sub"], payload={"trigger": "admin", "force": True}):
+        stats = await process_monthly_summary(force=True)
     return {"success": True, "stats": stats}
 
 
@@ -2103,7 +2108,8 @@ def get_mahnung_pdf(
 async def admin_run_reminders_now(user: dict = Depends(get_current_user)):
     """Manuel olarak reminder cycle'ini calistir (test icin). Sadece admin."""
     from autotax.reminders import process_reminders
-    stats = await process_reminders()
+    with track_job("reminders", user_id=user["sub"], payload={"trigger": "admin"}):
+        stats = await process_reminders()
     return {"success": True, "stats": stats}
 
 
@@ -2871,6 +2877,85 @@ def advisor_revoke(relationship_id: int, request: Request, user: dict = Depends(
               resource_type="advisor_relationship", resource_id=rel.id,
               payload={"revoked_by": rel.revoked_by}, request=request)
         return {"success": True}
+    finally:
+        db.close()
+
+
+@app.get("/jobs/recent")
+def jobs_recent(user: dict = Depends(get_acting_context), limit: int = 50):
+    """Kullanıcı kendi background jobs'larını görür (mahnung, recurring,
+    monthly summary vs. — admin manuel trigger ile başlatınca user_id
+    bağlanır). Acting modda mandantın jobs'ları görünür."""
+    from autotax.models import BackgroundJob
+    limit = max(1, min(int(limit), 200))
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(BackgroundJob)
+            .filter(BackgroundJob.user_id == user["sub"])
+            .order_by(BackgroundJob.started_at.desc())
+            .limit(limit)
+            .all()
+        )
+        items = [{
+            "id": r.id,
+            "job_type": r.job_type,
+            "status": r.status,
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+            "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            "duration_ms": r.duration_ms,
+            "error": (r.error or "")[:300],
+            "payload": r.payload,
+        } for r in rows]
+        return {"success": True, "items": items, "total": len(items)}
+    finally:
+        db.close()
+
+
+@app.get("/admin/jobs/health")
+def admin_jobs_health(user: dict = Depends(get_current_user), hours: int = 24):
+    """Admin sağlık dashboard'u — son N saatte job_type başına başarı
+    sayısı, son çalışma, ortalama süre. Hata oranı yüksekse alarm
+    göstermek için."""
+    from autotax.models import BackgroundJob
+    from sqlalchemy import func
+    hours = max(1, min(int(hours), 24 * 7))
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(
+                BackgroundJob.job_type,
+                BackgroundJob.status,
+                func.count(BackgroundJob.id),
+                func.avg(BackgroundJob.duration_ms),
+                func.max(BackgroundJob.started_at),
+            )
+            .filter(BackgroundJob.started_at >= cutoff)
+            .group_by(BackgroundJob.job_type, BackgroundJob.status)
+            .all()
+        )
+        out: dict[str, dict] = {}
+        for job_type, status, count, avg_ms, last_at in rows:
+            slot = out.setdefault(job_type, {
+                "job_type": job_type,
+                "success": 0, "failed": 0, "running": 0,
+                "avg_ms": None, "last_at": None,
+            })
+            slot[status] = (slot.get(status) or 0) + int(count)
+            if avg_ms is not None:
+                slot["avg_ms"] = int(avg_ms)
+            if last_at:
+                if slot["last_at"] is None or last_at > slot["last_at"]:
+                    slot["last_at"] = last_at
+        items = []
+        for v in out.values():
+            v["last_at"] = v["last_at"].isoformat() if v["last_at"] else None
+            v["total"] = v["success"] + v["failed"] + v["running"]
+            v["failure_rate"] = round(v["failed"] / v["total"], 3) if v["total"] else 0.0
+            items.append(v)
+        items.sort(key=lambda x: x["last_at"] or "", reverse=True)
+        return {"success": True, "window_hours": hours, "items": items}
     finally:
         db.close()
 
