@@ -921,16 +921,18 @@ def api_config():
 def watcher_version():
     """Latest desktop watcher version + download URL.
 
-    Defaults are safe (current bundled version). To roll out a new build,
-    set the WATCHER_LATEST_VERSION / WATCHER_DOWNLOAD_URL env vars and
-    optionally WATCHER_MANDATORY=1 to force-upgrade.
+    Defaults derive a working direct-download URL from WATCHER_LATEST_VERSION,
+    so even if WATCHER_DOWNLOAD_URL is forgotten the link still resolves to
+    the EXE asset. Override WATCHER_DOWNLOAD_URL for a CDN or custom mirror.
     """
+    version = os.environ.get("WATCHER_LATEST_VERSION", "2.0.0").strip()
+    default_dl = (
+        "https://github.com/hanalex122-eng/autotax-public/releases/download/"
+        f"watcher-v{version}/AutoTaxWatcher.exe"
+    )
     return {
-        "version": os.environ.get("WATCHER_LATEST_VERSION", "2.0.0"),
-        "download_url": os.environ.get(
-            "WATCHER_DOWNLOAD_URL",
-            "https://github.com/hanalex122-eng/autotax-public/releases/latest",
-        ),
+        "version": version,
+        "download_url": (os.environ.get("WATCHER_DOWNLOAD_URL") or default_dl).strip(),
         "mandatory": os.environ.get("WATCHER_MANDATORY", "0") == "1",
         "notes": os.environ.get("WATCHER_RELEASE_NOTES", ""),
         "sha256": os.environ.get("WATCHER_SHA256", ""),
