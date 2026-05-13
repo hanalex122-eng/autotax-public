@@ -194,6 +194,9 @@ async function _authFetch(url, opts){
 }
 window._authFetch = _authFetch;
 
+// Advisor read-only mode flag (read from localStorage on every check)
+window._isActingMode = () => !!localStorage.getItem("atx_acting_client_id");
+
 const theme = {
   bg: "var(--bg)", surface: "var(--surface)", surfaceAlt: "var(--surface-alt)", card: "var(--card)",
   border: "var(--border)", accent: "#10b981", accentSoft: "rgba(16,185,129,0.12)",
@@ -2423,7 +2426,7 @@ function AdvisorView(){
         {tr("Mandate (als Berater)","Mandates (as advisor)")} <span style={{color:theme.textDim,fontWeight:400,fontSize:13}}>({clients.length})</span>
       </h3>
       <p style={{color:theme.textMuted,fontSize:12,margin:"0 0 12px"}}>
-        {tr("Mandanten, die Ihnen Zugriff gewährt haben. Klicken Sie auf „Daten ansehen", um in den Lese-Modus zu wechseln.","Clients who granted you access. Click 'View data' to enter read-only mode.")}
+        {tr("Mandanten, die Ihnen Zugriff gewährt haben. Klicken Sie auf 'Daten ansehen' um in den Lese-Modus zu wechseln.","Clients who granted you access. Click 'View data' to enter read-only mode.")}
       </p>
       {clients.map(c=>(<div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:"1px solid "+theme.border}}>
         <span style={{fontSize:20}}>🏢</span>

@@ -141,6 +141,23 @@ async def security_guard(request, call_next):
             logger.warning("SECURITY: Delete rate limit exceeded from %s on %s", client_ip, path)
             return JSONResponse(status_code=429, content={"detail": "Too many delete requests — try again in 1 minute"})
 
+    # Advisor read-only enforcement — if X-Acting-Client-Id is set, all
+    # write methods are blocked. Export endpoints have their own gate
+    # checked inside the endpoint when scope=read_export should pass.
+    # /auth/* and /advisor/* are about the advisor's own session, not
+    # the mandate, so they're exempt.
+    acting_id = request.headers.get("X-Acting-Client-Id") or request.headers.get("x-acting-client-id")
+    if acting_id and method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if not (path.startswith("/auth/") or path.startswith("/advisor/")):
+            # Export endpoints are GET — won't hit here. So any write
+            # under acting mode is rejected wholesale.
+            logger.warning("SECURITY: Advisor write blocked — path=%s method=%s acting=%s",
+                           path, method, acting_id)
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Read-only Zugriff — als Steuerberater dürfen Sie keine Daten verändern."},
+            )
+
     # Security event logging
     if path == "/auth/login" and method == "POST":
         logger.info("AUTH: Login attempt from %s", client_ip)
@@ -2991,8 +3008,9 @@ def reset_password(request: Request, body: dict = Body(...)):
 
 
 @app.post("/invoices/upload-erechnung")
-async def upload_erechnung(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+async def upload_erechnung(file: UploadFile = File(...), user: dict = Depends(get_acting_context)):
     """Import XRechnung / ZUGFeRD / Factur-X e-invoice (XML or ZUGFeRD-PDF)."""
+    require_owner_or_export(user, "write")
     _enforce_upload_quota(user["sub"])
     import xml.etree.ElementTree as ET
     content = await file.read()
@@ -3640,7 +3658,8 @@ async def upload_zip(request: Request, file: UploadFile = File(...), invoice_typ
 
 @app.post("/invoices/upload")
 @limiter.limit("20/minute")
-async def upload_invoice(request: Request, file: UploadFile = File(...), handwriting: bool = False, invoice_type: str = "expense", force_upload: bool = False, user: dict = Depends(get_current_user)):
+async def upload_invoice(request: Request, file: UploadFile = File(...), handwriting: bool = False, invoice_type: str = "expense", force_upload: bool = False, user: dict = Depends(get_acting_context)):
+    require_owner_or_export(user, "write")
     _enforce_upload_quota(user["sub"])
     if file.content_type not in ALLOWED_TYPES:
         err(400, "Ungültige Datei. Erlaubt: PDF, JPG, PNG, TIFF, WEBP, ZIP")
@@ -4586,9 +4605,10 @@ def get_invoice_detail(invoice_id: int, user: dict = Depends(get_current_user)):
 _bg_tasks: set = set()  # prevent GC of background tasks
 
 @app.post("/invoices/upload-async")
-async def upload_invoice_async(request: Request, file: UploadFile = File(...), handwriting: bool = False, invoice_type: str = "expense", force_upload: bool = False, user: dict = Depends(get_current_user)):
+async def upload_invoice_async(request: Request, file: UploadFile = File(...), handwriting: bool = False, invoice_type: str = "expense", force_upload: bool = False, user: dict = Depends(get_acting_context)):
     """Async upload: Tesseract first, if fails creates placeholder invoice + runs OCR.space in background.
     Mirrors the duplicate-check pattern from sync /upload so the same file can't be ingested twice."""
+    require_owner_or_export(user, "write")
     _enforce_upload_quota(user["sub"])
     import asyncio as _asyncio
     if file.content_type not in ALLOWED_TYPES:
@@ -7471,8 +7491,15 @@ def chat_endpoint(body: dict = Body(...), user: dict = Depends(get_current_user)
 # always match the dashboard exactly.
 # ============================================================
 
+def _export_scope_guard(user: dict) -> None:
+    """Acting modunda sadece scope=read_export izinli. Owner her zaman OK."""
+    if user.get("is_acting") and user.get("scope") != "read_export":
+        err(403, "Export erfordert 'Lesen + Export'-Berechtigung. Bitten Sie den Mandanten um Upgrade.")
+
+
 @app.get("/export/pdf")
-def export_pdf_report(year: int = Query(None), user: dict = Depends(get_current_user)):
+def export_pdf_report(year: int = Query(None), user: dict = Depends(get_acting_context)):
+    _export_scope_guard(user)
     """Full financial report PDF with dashboard metrics + transactions."""
     try:
         from reportlab.lib.pagesizes import A4
@@ -7680,7 +7707,8 @@ def export_pdf_report(year: int = Query(None), user: dict = Depends(get_current_
 
 
 @app.get("/export/csv")
-def export_csv(year: int = Query(None), user: dict = Depends(get_current_user)):
+def export_csv(year: int = Query(None), user: dict = Depends(get_acting_context)):
+    _export_scope_guard(user)
     m = calculate_dashboard_metrics(user["sub"], year)
     txns = m["transactions"]
     buf = io.StringIO()
@@ -7704,7 +7732,8 @@ def export_csv(year: int = Query(None), user: dict = Depends(get_current_user)):
 
 
 @app.get("/export/datev")
-def export_datev(year: int = Query(None), user: dict = Depends(get_current_user)):
+def export_datev(year: int = Query(None), user: dict = Depends(get_acting_context)):
+    _export_scope_guard(user)
     m = calculate_dashboard_metrics(user["sub"], year)
     txns = m["transactions"]
     buf = io.StringIO()
@@ -7726,7 +7755,8 @@ def export_datev(year: int = Query(None), user: dict = Depends(get_current_user)
 
 
 @app.get("/export/excel")
-def export_excel(year: int = Query(None), user: dict = Depends(get_current_user)):
+def export_excel(year: int = Query(None), user: dict = Depends(get_acting_context)):
+    _export_scope_guard(user)
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     m = calculate_dashboard_metrics(user["sub"], year)
@@ -7874,7 +7904,8 @@ def export_excel(year: int = Query(None), user: dict = Depends(get_current_user)
 
 
 @app.get("/export/json")
-def export_json(year: int = Query(None), user: dict = Depends(get_current_user)):
+def export_json(year: int = Query(None), user: dict = Depends(get_acting_context)):
+    _export_scope_guard(user)
     import json as json_lib
     m = calculate_dashboard_metrics(user["sub"], year)
     buf = io.StringIO()
