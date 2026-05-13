@@ -4281,6 +4281,16 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     elif result.get("vendor_source") == "guess":
         _ocr_warning = "Lieferantenname unsicher — bitte prüfen"
 
+    try:
+        audit("invoice.create", user_id=user["sub"], resource_type="invoice",
+              resource_id=invoice_id,
+              payload={"source": "upload_sync", "vendor": result.get("vendor"),
+                       "amount": safe_float(result.get("total_amount")),
+                       "filename": file.filename},
+              request=request)
+    except Exception:
+        pass
+
     return {
         "id": invoice_id,
         "total_amount": safe_float(result.get("total_amount")),
@@ -4741,6 +4751,15 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                     parsed["invoice_type"] = invoice_type
                 inv_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "")
                 auto_create_cash_entry(inv_id, user["sub"], parsed)
+                try:
+                    audit("invoice.create", user_id=user["sub"], resource_type="invoice",
+                          resource_id=inv_id,
+                          payload={"source": "upload_async_tesseract", "vendor": parsed.get("vendor"),
+                                   "amount": safe_float(parsed.get("total_amount")),
+                                   "filename": file.filename},
+                          request=request)
+                except Exception:
+                    pass
                 return {"status": "done", "id": inv_id, "total_amount": safe_float(parsed.get("total_amount")), "vendor": parsed.get("vendor", "")}
         except Exception as e:
             logger.warning("Tesseract sync failed: %s", e)
@@ -4769,6 +4788,15 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                         parsed["invoice_type"] = invoice_type
                     inv_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "application/pdf")
                     auto_create_cash_entry(inv_id, user["sub"], parsed)
+                    try:
+                        audit("invoice.create", user_id=user["sub"], resource_type="invoice",
+                              resource_id=inv_id,
+                              payload={"source": "upload_async_pdf_native", "vendor": parsed.get("vendor"),
+                                       "amount": safe_float(parsed.get("total_amount")),
+                                       "filename": file.filename},
+                              request=request)
+                    except Exception:
+                        pass
                     return {"status": "done", "id": inv_id, "total_amount": safe_float(parsed.get("total_amount")), "vendor": parsed.get("vendor", "")}
                 else:
                     logger.info("pdfplumber got text but no total — falling through to OCR path")

@@ -486,27 +486,42 @@ async def reminder_loop():
     logger.info("[REMINDER] background loop starting")
     # Startup'tan 60 sn sonra ilk check (uygulama tam aciksin)
     await asyncio.sleep(60)
+    # track_job lazy import — never fail the loop if monitoring is broken
+    def _wrap(name):
+        try:
+            from autotax.jobs import track_job
+            return track_job(name, payload={"trigger": "loop"})
+        except Exception:
+            from contextlib import nullcontext
+            return nullcontext()
+
     while True:
         try:
-            await process_reminders()
-            await process_trial_expiry()
+            with _wrap("reminders"):
+                await process_reminders()
+            with _wrap("trial_expiry"):
+                await process_trial_expiry()
             try:
                 from autotax.steuer import process_steuer_reminders
-                await process_steuer_reminders()
+                with _wrap("steuer_reminders"):
+                    await process_steuer_reminders()
             except Exception:
                 logger.exception("[STEUER] tick failed")
             try:
                 from autotax.mahnung import process_mahnungen
-                await process_mahnungen()
+                with _wrap("mahnung"):
+                    await process_mahnungen()
             except Exception:
                 logger.exception("[MAHNUNG] tick failed")
             try:
-                await process_monthly_summary()
+                with _wrap("monthly_summary"):
+                    await process_monthly_summary()
             except Exception:
                 logger.exception("[SUMMARY] tick failed")
             try:
                 from autotax.recurring import process_recurring_spawns
-                await process_recurring_spawns()
+                with _wrap("recurring_spawn"):
+                    await process_recurring_spawns()
             except Exception:
                 logger.exception("[RECURRING] tick failed")
         except Exception as e:

@@ -476,7 +476,12 @@ async def _auto_sync_loop():
 
     while True:
         try:
-            await _auto_sync_iteration()
+            try:
+                from autotax.jobs import track_job
+                with track_job("email_sync", payload={"interval_sec": AUTO_SYNC_INTERVAL_SEC}):
+                    await _auto_sync_iteration()
+            except ImportError:
+                await _auto_sync_iteration()
         except asyncio.CancelledError:
             logger.info("Email auto-sync loop cancelled")
             raise

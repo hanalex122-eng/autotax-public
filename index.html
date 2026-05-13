@@ -876,6 +876,8 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
    toplu silme (checkbox), fiş düzenleme geliştirildi
    ══════════════════════════════════════════ */
 function InvoicesView({refreshKey,triggerRefresh,showToast}){
+  const _isActing=typeof window!=="undefined" && !!localStorage.getItem("atx_acting_client_id");
+  const _readOnlyTip=getLang()==="de"?"Lese-Modus — als Steuerberater nicht möglich":"Read-only — not allowed as advisor";
   const[invoices,setInvoices]=useState([]);const[total,setTotal]=useState(0);const[loading,setLoading]=useState(true);
   const _now=new Date();const _today=_now.getFullYear()+"-"+String(_now.getMonth()+1).padStart(2,"0")+"-"+String(_now.getDate()).padStart(2,"0");const _jan1="2020-01-01";
   const[filter,setFilter]=useState("");const[filterCat,setFilterCat]=useState("");const[dateFrom,setDateFrom]=useState(_jan1);const[dateTo,setDateTo]=useState(_today);const[filterStatus,setFilterStatus]=useState("");
@@ -898,7 +900,11 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
   const[syncing,setSyncing]=useState(false);
   const syncAll=async()=>{setSyncing(true);try{const r=await api("/bookkeeping/sync-invoices",{method:"POST"});if(showToast)showToast((r.synced||0)+" sync, "+(r.reverse_synced||0)+" synced from cash book","success");doSearch();}catch(e){if(showToast)showToast(_t("sync_failed"),"error");}setSyncing(false);};
   useEffect(()=>{load(filter,filterCat,dateFrom,dateTo);},[refreshKey]);
-  const del=async(id)=>{if(!confirm(_t("delete_invoice")))return;try{await api("/invoices/"+id,{method:"DELETE"});doSearch();if(showToast)showToast(_t("invoice_deleted"),"info");}catch(e){alert(e.message);}};
+  const del=async(id)=>{
+    if(_isActing){if(showToast)showToast(_readOnlyTip,"info");return;}
+    if(!confirm(_t("delete_invoice")))return;
+    try{await api("/invoices/"+id,{method:"DELETE"});doSearch();if(showToast)showToast(_t("invoice_deleted"),"info");}catch(e){alert(e.message);}
+  };
 
   const deleteSelected=async()=>{
     if(selected.size===0)return;
@@ -914,7 +920,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
   const toggleAll=()=>{if(selected.size===filtered.length){setSelected(new Set());}else{setSelected(new Set(filtered.map(i=>i.id)));}};
 
   const[editPreview,setEditPreview]=useState(null);
-  const startEdit=(inv)=>{setEditId(inv.id);setEditPreview(null);setEditData({vendor:inv.vendor||"",category:inv.category||"",total_amount:inv.total_amount||0,vat_amount:inv.vat_amount||0,vat_rate:inv.vat_rate||"",date:inv.date||"",invoice_type:inv.invoice_type||"expense",invoice_number:inv.invoice_number||"",payment_method:inv.payment_method||"",vendor_iban:inv.vendor_iban||"",vendor_email:inv.vendor_email||"",vendor_phone:inv.vendor_phone||"",vendor_address:inv.vendor_address||"",due_date:inv.due_date||"",payment_status:inv.payment_status||"unpaid",is_recurring:inv.is_recurring||false,recurring_freq:inv.recurring_freq||"monthly",recurring_next_at:inv.recurring_next_at||""});
+  const startEdit=(inv)=>{if(_isActing){if(showToast)showToast(_readOnlyTip,"info");return;}setEditId(inv.id);setEditPreview(null);setEditData({vendor:inv.vendor||"",category:inv.category||"",total_amount:inv.total_amount||0,vat_amount:inv.vat_amount||0,vat_rate:inv.vat_rate||"",date:inv.date||"",invoice_type:inv.invoice_type||"expense",invoice_number:inv.invoice_number||"",payment_method:inv.payment_method||"",vendor_iban:inv.vendor_iban||"",vendor_email:inv.vendor_email||"",vendor_phone:inv.vendor_phone||"",vendor_address:inv.vendor_address||"",due_date:inv.due_date||"",payment_status:inv.payment_status||"unpaid",is_recurring:inv.is_recurring||false,recurring_freq:inv.recurring_freq||"monthly",recurring_next_at:inv.recurring_next_at||""});
     if(inv.has_original){fetch(API+"/vault/"+inv.id+"/download",{headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")}}).then(r=>{if(r.ok)return r.blob();throw 0;}).then(blob=>{setEditPreview({url:URL.createObjectURL(blob),type:blob.type});}).catch(()=>{});}};
   const saveEdit=async()=>{try{
     // due_date + payment_status + recurring ayri endpoint'lere
@@ -1172,7 +1178,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
               <div style={{cursor:"pointer",padding:"5px 10px",borderRadius:6,background:theme.accentSoft,color:theme.accent,fontSize:11,fontWeight:600,textAlign:"center",transition:"all 0.15s",border:`1px solid ${theme.accent}22`}} onClick={()=>window.open("/editor?id="+inv.id,"_blank")} onMouseEnter={e=>e.currentTarget.style.background=theme.accent+"22"} onMouseLeave={e=>e.currentTarget.style.background=theme.accentSoft} title="Split-View Editor">📋</div>
             </div></td>
             <td style={{padding:"12px 6px"}}><button style={{background:"transparent",border:"1px solid rgba(0,194,255,0.3)",color:"#00c2ff",padding:"4px 10px",borderRadius:6,cursor:"pointer",fontSize:12,fontFamily:"inherit"}} onClick={()=>downloadPDF(inv.id)}>🖨️ PDF</button></td>
-            <td style={{padding:"12px 8px"}}><div style={{cursor:"pointer",padding:5,borderRadius:6,transition:"background 0.15s"}} onClick={()=>del(inv.id)} onMouseEnter={e=>e.currentTarget.style.background=theme.dangerSoft} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><Icon d={I.x} size={14} color={theme.danger}/></div></td>
+            <td style={{padding:"12px 8px"}}><div title={_isActing?_readOnlyTip:""} style={{cursor:_isActing?"not-allowed":"pointer",padding:5,borderRadius:6,transition:"background 0.15s",opacity:_isActing?0.3:1}} onClick={()=>{if(_isActing){if(showToast)showToast(_readOnlyTip,"info");return;}del(inv.id);}} onMouseEnter={e=>{if(!_isActing)e.currentTarget.style.background=theme.dangerSoft;}} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><Icon d={I.x} size={14} color={theme.danger}/></div></td>
           </tr>);})}</tbody>
       </table>}
     </div>
