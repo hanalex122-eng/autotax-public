@@ -7051,9 +7051,11 @@ def export_personal_data(user: dict = Depends(get_current_user)):
 # ============================================================
 
 PRICING = {
-    "free": {"name": "Free", "price": 0, "max_invoices": 50, "max_companies": 2},
-    "early": {"name": "Early Adopter", "price": 10, "max_invoices": 500, "max_companies": 5},
-    "pro": {"name": "Pro", "price": 20, "max_invoices": -1, "max_companies": -1},
+    "free":    {"name": "Free",    "price":  0, "max_invoices":   30, "max_companies":  1},
+    "starter": {"name": "Starter", "price":  9, "max_invoices":  250, "max_companies":  3},
+    "pro":     {"name": "Pro",     "price": 29, "max_invoices": 1500, "max_companies": -1},
+    # Legacy alias — early adopters keep their original price.
+    "early":   {"name": "Early Adopter (Frühbucher)", "price": 10, "max_invoices": 500, "max_companies": 5},
 }
 
 
@@ -7087,8 +7089,137 @@ def get_user_plan(user: dict = Depends(get_current_user)):
 
 @app.post("/account/upgrade")
 def upgrade_plan(body: dict = Body(...), user: dict = Depends(get_current_user)):
-    # Disabled until payment integration (Stripe) is ready
-    err(403, "Plan-Upgrade ist derzeit deaktiviert. Stripe-Integration kommt bald.")
+    # Kept for backwards compat — new clients should call /billing/checkout-session.
+    return _create_checkout_session_for(body.get("plan", "starter"), user)
+
+
+# ============================================================
+# BILLING / SUBSCRIPTION — Stripe
+# ============================================================
+from autotax import billing as _billing
+
+
+def _create_checkout_session_for(plan: str, user: dict) -> dict:
+    if not _billing.is_configured():
+        err(503, "Bezahlung ist noch nicht eingerichtet. Bitte später erneut versuchen oder Support kontaktieren.")
+    if plan not in {"starter", "pro", "early"}:
+        err(400, f"Unbekannter Plan: {plan}")
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u:
+            err(404, "User not found")
+        try:
+            customer_id = _billing.get_or_create_customer(
+                user_id=u.id, email=u.email, existing_id=u.stripe_customer_id,
+            )
+            if customer_id != u.stripe_customer_id:
+                u.stripe_customer_id = customer_id
+                db.commit()
+            url = _billing.create_checkout_session(customer_id=customer_id, plan=plan, user_id=u.id)
+        except ValueError as e:
+            err(400, str(e))
+        except Exception:
+            logger.exception("Stripe checkout creation failed")
+            err(502, "Bezahlanbieter nicht erreichbar — bitte später erneut versuchen.")
+        return {"success": True, "checkout_url": url}
+    finally:
+        db.close()
+
+
+@app.post("/billing/checkout-session")
+def billing_checkout_session(request: Request, body: dict = Body(...), user: dict = Depends(get_current_user)):
+    plan = (body.get("plan") or "starter").strip().lower()
+    result = _create_checkout_session_for(plan, user)
+    audit("billing.checkout_started", user_id=user["sub"], payload={"plan": plan}, request=request)
+    return result
+
+
+@app.post("/billing/portal-session")
+def billing_portal_session(user: dict = Depends(get_current_user)):
+    """Customer Portal — change card, cancel, download invoices."""
+    if not _billing.is_configured():
+        err(503, "Bezahlung ist noch nicht eingerichtet.")
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u or not u.stripe_customer_id:
+            err(404, "Noch kein Abonnement vorhanden. Bitte zuerst einen Plan wählen.")
+        try:
+            url = _billing.create_portal_session(customer_id=u.stripe_customer_id)
+        except Exception:
+            logger.exception("Stripe portal creation failed")
+            err(502, "Bezahlanbieter nicht erreichbar.")
+        return {"success": True, "portal_url": url}
+    finally:
+        db.close()
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    """Stripe webhook — auth via signed payload. Updates User.plan +
+    subscription_status + plan_ends_at on the relevant events."""
+    if not _billing.is_configured():
+        return {"received": True, "ignored": "stripe not configured"}
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    try:
+        event = _billing.verify_webhook(payload, sig)
+    except Exception as e:
+        logger.warning("Stripe webhook signature verification failed: %s", e)
+        return JSONResponse(status_code=400, content={"error": "invalid signature"})
+
+    etype = event.get("type")
+    data = event.get("data", {}).get("object", {}) or {}
+    customer_id = data.get("customer") or ""
+    logger.info("STRIPE WEBHOOK: type=%s customer=%s", etype, customer_id)
+
+    if etype in ("customer.subscription.created", "customer.subscription.updated"):
+        sub_id = data.get("id")
+        status = data.get("status")
+        items = (data.get("items") or {}).get("data") or []
+        price_id = items[0].get("price", {}).get("id") if items else None
+        plan = _billing.price_to_plan(price_id) if price_id else None
+        period_end = data.get("current_period_end")
+        db = SessionLocal()
+        try:
+            u = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+            if u:
+                u.subscription_status = status
+                u.stripe_subscription_id = sub_id
+                if plan and status in ("active", "trialing"):
+                    u.plan = plan
+                if period_end:
+                    u.plan_ends_at = datetime.fromtimestamp(period_end, tz=timezone.utc)
+                db.commit()
+                audit("billing.subscription_updated", user_id=u.id,
+                      payload={"status": status, "plan": plan, "sub_id": sub_id})
+        finally:
+            db.close()
+    elif etype == "customer.subscription.deleted":
+        db = SessionLocal()
+        try:
+            u = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+            if u:
+                u.subscription_status = "canceled"
+                u.stripe_subscription_id = None
+                # Keep u.plan_ends_at — grace until period end
+                # u.plan downgrade'i period_end gectikten sonra cron yapacak
+                db.commit()
+                audit("billing.subscription_canceled", user_id=u.id)
+        finally:
+            db.close()
+    elif etype == "invoice.payment_failed":
+        db = SessionLocal()
+        try:
+            u = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+            if u:
+                u.subscription_status = "past_due"
+                db.commit()
+                audit("billing.payment_failed", user_id=u.id)
+        finally:
+            db.close()
+    return {"received": True}
 
 
 # ============================================================

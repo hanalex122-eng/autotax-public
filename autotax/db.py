@@ -63,6 +63,15 @@ def init_db():
             if "jwt_invalidate_before" not in user_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN jwt_invalidate_before TIMESTAMP"))
                 logger.info("Added 'jwt_invalidate_before' column to users")
+            if "subscription_status" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN subscription_status VARCHAR(20)"))
+                logger.info("Added 'subscription_status' column to users")
+            if "stripe_subscription_id" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN stripe_subscription_id VARCHAR"))
+                logger.info("Added 'stripe_subscription_id' column to users")
+            if "plan_ends_at" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN plan_ends_at TIMESTAMP"))
+                logger.info("Added 'plan_ends_at' column to users")
         # Invoice table — file storage columns
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:

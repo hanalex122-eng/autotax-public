@@ -31,6 +31,13 @@ class User(Base):
     # Bu zaman damgasindan ESKI iat'li tum JWT'ler 401 dondurur.
     # Sifre degisikligi / panik logout / cihaz kaybedilirse kullanilir.
     jwt_invalidate_before = Column(DateTime, nullable=True)
+    # Stripe subscription state. status:
+    #   active | trialing | past_due | unpaid | canceled | incomplete | None
+    # plan_ends_at = current period end (also used after cancellation for
+    # the grace window). stripe_subscription_id = active sub object.
+    subscription_status = Column(String(20), nullable=True)
+    stripe_subscription_id = Column(String, nullable=True)
+    plan_ends_at = Column(DateTime, nullable=True)
 
 
 class AdvisorInvite(Base):
