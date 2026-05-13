@@ -194,6 +194,14 @@ async function _authFetch(url, opts){
 }
 window._authFetch = _authFetch;
 
+// Advisor read-only mode flag — read live from localStorage so we don't
+// need to thread state through every component. Returns the scope
+// (read | read_export) when acting, or null when the user is the owner.
+window._actingScope = () => {
+  if (!localStorage.getItem("atx_acting_client_id")) return null;
+  return localStorage.getItem("atx_acting_scope") || "read";
+};
+
 // Advisor read-only mode flag (read from localStorage on every check)
 window._isActingMode = () => !!localStorage.getItem("atx_acting_client_id");
 
@@ -1429,6 +1437,24 @@ function UploadView({triggerRefresh,onNav,showToast}){
       ? results[results.length - 1]
       : null;
   // --- ADDED END ---
+  // Advisor read-only mode — block uploads at the UI layer too
+  const _isActing = typeof window!=="undefined" && !!localStorage.getItem("atx_acting_client_id");
+  if(_isActing){
+    return(<div style={{display:"flex",flexDirection:"column",gap:24}}>
+      <div><h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>{_t("upload_title")}</h2></div>
+      <div style={{...css.card,padding:32,textAlign:"center",border:"2px dashed "+theme.warn,background:theme.warnSoft}}>
+        <div style={{fontSize:48,marginBottom:12}}>👔</div>
+        <div style={{fontSize:16,fontWeight:600,color:theme.text,marginBottom:8}}>
+          {getLang()==="de"?"Upload im Lese-Modus deaktiviert":"Upload disabled in read-only mode"}
+        </div>
+        <div style={{color:theme.textMuted,fontSize:13,lineHeight:1.5,maxWidth:480,margin:"0 auto"}}>
+          {getLang()==="de"
+            ?"Sie sind als Steuerberater im Lese-Modus. Belege müssen vom Mandanten selbst hochgeladen werden — Ihr Zugriff erlaubt nur das Einsehen und (mit Berechtigung) den DATEV-Export."
+            :"You are in advisor read-only mode. Receipts must be uploaded by the client themselves — your access only allows viewing and (with permission) DATEV export."}
+        </div>
+      </div>
+    </div>);
+  }
   return(<div style={{display:"flex",flexDirection:"column",gap:24}}>
     <div><h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>{_t("upload_title")}</h2><p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{_t("upload_desc")}</p></div>
     <div style={{display:"flex",gap:8}}>
@@ -2440,6 +2466,7 @@ function AdvisorView(){
         <button style={{...css.btn(),fontSize:12,padding:"8px 14px"}} onClick={()=>{
           localStorage.setItem("atx_acting_client_id",String(c.client_user_id));
           localStorage.setItem("atx_acting_client_label",c.client_email);
+          localStorage.setItem("atx_acting_scope",c.scope||"read");
           window.location.reload();
         }}>👁️ {tr("Daten ansehen","View data")}</button>
         <button style={{...css.btnOutline,color:theme.danger,borderColor:theme.danger+"55",fontSize:12}} onClick={()=>revoke(c.id,c.client_email)}>
@@ -2954,10 +2981,15 @@ function App(){
   const exitActingMode=()=>{
     localStorage.removeItem("atx_acting_client_id");
     localStorage.removeItem("atx_acting_client_label");
+    localStorage.removeItem("atx_acting_scope");
     setActingClient(null);
     triggerRefresh();
     setTimeout(()=>window.location.reload(),50);
   };
+  // Reusable read-only badge for write actions while in advisor mode
+  const _actingScope = actingClient ? (localStorage.getItem("atx_acting_scope")||"read") : null;
+  const _readOnly = !!actingClient;
+  const _canExport = !actingClient || _actingScope === "read_export";
   useEffect(()=>{
     document.body.style.paddingTop = actingClient ? "40px" : "0";
     return ()=>{ document.body.style.paddingTop = "0"; };
