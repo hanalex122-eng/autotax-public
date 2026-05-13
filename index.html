@@ -1878,31 +1878,79 @@ function VaultView({onNav,triggerRefresh}){
 
 function PricingView(){
   const[plan,setPlan]=useState(null);
+  const[busy,setBusy]=useState("");
   useEffect(()=>{api("/account/plan").then(setPlan).catch(()=>{});},[]);
-  return(<div style={{maxWidth:700}}>
-    <h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:"0 0 8px"}}>Pricing & Plans</h2>
-    <p style={{color:theme.textMuted,fontSize:14,margin:"0 0 24px"}}>Wähle den passenden Plan für dein Business</p>
+  const _l=getLang();
+  const tr=(de,en)=>_l==="de"?de:en;
+  const startCheckout=async(planId)=>{
+    setBusy(planId);
+    try{
+      const r=await _authFetch(API+"/billing/checkout-session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan:planId})});
+      const d=await r.json();
+      if(r.ok&&d.checkout_url){
+        window.location.href=d.checkout_url;
+        return;
+      }
+      alert(_extractErr(d));
+    }catch(e){alert("Error: "+e.message);}
+    setBusy("");
+  };
+  const openPortal=async()=>{
+    setBusy("portal");
+    try{
+      const r=await _authFetch(API+"/billing/portal-session",{method:"POST"});
+      const d=await r.json();
+      if(r.ok&&d.portal_url){
+        window.location.href=d.portal_url;
+        return;
+      }
+      alert(_extractErr(d));
+    }catch(e){alert("Error: "+e.message);}
+    setBusy("");
+  };
+  const paidPlans={starter:true,pro:true,early:true};
+  return(<div style={{maxWidth:900}}>
+    <h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:"0 0 8px"}}>{tr("Preise & Pläne","Pricing & Plans")}</h2>
+    <p style={{color:theme.textMuted,fontSize:14,margin:"0 0 24px"}}>{tr("Wähle den passenden Plan — jederzeit kündbar","Pick the plan that fits — cancel anytime")}</p>
     {plan?.is_early&&<div style={{...css.card,background:"linear-gradient(135deg, rgba(16,185,129,0.1) 0%, rgba(245,158,11,0.1) 100%)",border:"1px solid rgba(245,158,11,0.3)",marginBottom:20}}>
-      <div style={{fontSize:14,fontWeight:700,color:"#f59e0b"}}>{_t("early_keep_price")}</div>
-      <div style={{fontSize:12,color:theme.textMuted,marginTop:4}}>{_t("early_adopter_msg")}</div>
+      <div style={{fontSize:14,fontWeight:700,color:"#f59e0b"}}>🎉 {tr("Frühbucher-Preis behalten","Early adopter price kept")}</div>
+      <div style={{fontSize:12,color:theme.textMuted,marginTop:4}}>{tr("Du behältst deinen aktuellen Tarif dauerhaft.","You keep your original price forever.")}</div>
     </div>}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:16}}>
+    {plan?.plan&&plan.plan!=="free"&&<div style={{...css.card,marginBottom:20,display:"flex",alignItems:"center",gap:12,background:theme.accentSoft}}>
+      <span style={{fontSize:20}}>✓</span>
+      <div style={{flex:1}}>
+        <div style={{fontSize:14,fontWeight:700,color:theme.text}}>{tr("Aktuelles Abonnement","Current subscription")}: {plan.plan_name||plan.plan}</div>
+        <div style={{fontSize:11,color:theme.textMuted}}>{tr("Karte ändern, Rechnungen herunterladen oder kündigen","Change card, download invoices or cancel")}</div>
+      </div>
+      <button style={{...css.btnOutline,opacity:busy==="portal"?0.6:1}} disabled={busy==="portal"} onClick={openPortal}>
+        {busy==="portal"?"⏳ ...":"💳 "+tr("Verwalten","Manage")}
+      </button>
+    </div>}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))",gap:16}}>
       {[
-        {id:"free",name:"Free",price:"0",features:["50 Belege / Monat","Max. 25 / Tag","2 Firmen","CSV Export","OCR Erkennung"],current:plan?.plan==="free"},
-        {id:"early",name:"Early Adopter",price:"10",features:["500 Belege / Monat","Max. 100 / Tag","5 Firmen","Alle Exporte","Priority OCR","DATEV Export"],current:plan?.plan==="early",badge:"Your Plan"},
-        {id:"pro",name:"Pro",price:"20",features:["Hoher Durchsatz (bis 1000/Tag)","Unbegrenzte Firmen","Alle Exporte","Priority Support","API Zugang"],current:plan?.plan==="pro"},
-      ].map(p=><div key={p.id} style={{...css.card,border:p.current?"2px solid "+theme.accent:"1px solid "+theme.border,position:"relative"}}>
-        {p.badge&&<div style={{position:"absolute",top:-10,right:16,background:"#f59e0b",color:"#000",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:12}}>{p.badge}</div>}
+        {id:"free",name:"Free",price:"0",features:[tr("30 Belege / Monat","30 receipts / month"),tr("1 Firma","1 company"),tr("OCR + QR-Reader","OCR + QR reader"),"CSV Export",tr("E-Mail-Import (1)","Email import (1)")],current:plan?.plan==="free"},
+        {id:"starter",name:"Starter",price:"9",features:[tr("250 Belege / Monat","250 receipts / month"),tr("3 Firmen","3 companies"),"DATEV + Excel Export",tr("ZIP-Upload","ZIP upload"),tr("Handschrift-OCR","Handwriting OCR"),tr("Mahnung & Reminder","Dunning & reminders"),tr("E-Mail-Import (3)","Email import (3)")],current:plan?.plan==="starter",popular:true},
+        {id:"pro",name:"Pro",price:"29",features:[tr("1.500 Belege / Monat","1,500 receipts / month"),tr("Unbegrenzte Firmen","Unlimited companies"),"Scanner Watcher Agent",tr("Steuerberater-Zugang","Tax advisor access"),tr("KI-Analyse (Claude AI)","AI analysis (Claude)"),tr("Wiederkehrende Rechnungen","Recurring invoices"),tr("E-Mail-Import unbegrenzt","Email import unlimited"),"Premium Support"],current:plan?.plan==="pro"},
+      ].map(p=><div key={p.id} style={{...css.card,border:p.current?"2px solid "+theme.accent:(p.popular?"2px solid #f59e0b":"1px solid "+theme.border),position:"relative"}}>
+        {p.popular&&!p.current&&<div style={{position:"absolute",top:-10,left:"50%",transform:"translateX(-50%)",background:"#f59e0b",color:"#000",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:12}}>{tr("Beliebt","Popular")}</div>}
+        {p.current&&<div style={{position:"absolute",top:-10,right:16,background:theme.accent,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:12}}>✓ {tr("Aktiv","Active")}</div>}
         <div style={{fontSize:18,fontWeight:700,color:theme.text}}>{p.name}</div>
-        <div style={{fontSize:28,fontWeight:800,color:theme.accent,margin:"8px 0"}}>€{p.price}<span style={{fontSize:13,fontWeight:400,color:theme.textMuted}}>/Monat</span></div>
-        <ul style={{listStyle:"none",padding:0,margin:"12px 0",display:"flex",flexDirection:"column",gap:6}}>
-          {p.features.map((f,i)=><li key={i} style={{fontSize:12,color:theme.textMuted,display:"flex",gap:6,alignItems:"center"}}><span style={{color:theme.accent}}>✓</span>{f}</li>)}
+        <div style={{fontSize:32,fontWeight:800,color:theme.accent,margin:"8px 0"}}>€{p.price}<span style={{fontSize:13,fontWeight:400,color:theme.textMuted}}>/Monat</span></div>
+        <ul style={{listStyle:"none",padding:0,margin:"12px 0 16px",display:"flex",flexDirection:"column",gap:6}}>
+          {p.features.map((f,i)=><li key={i} style={{fontSize:12,color:theme.textMuted,display:"flex",gap:6,alignItems:"flex-start"}}><span style={{color:theme.accent,flexShrink:0}}>✓</span>{f}</li>)}
         </ul>
-        {p.current?<div style={{textAlign:"center",fontSize:12,color:theme.accent,fontWeight:600,padding:"8px 0"}}>Current Plan</div>
-        :<button style={{...css.btn(),width:"100%",opacity:0.7}} disabled>Coming Soon</button>}
+        {p.current
+          ?<div style={{textAlign:"center",fontSize:12,color:theme.accent,fontWeight:600,padding:"8px 0"}}>{tr("Dein aktueller Plan","Your current plan")}</div>
+          :p.id==="free"
+            ?<div style={{textAlign:"center",fontSize:11,color:theme.textDim,padding:"8px 0"}}>{tr("Standard für neue Konten","Default for new accounts")}</div>
+            :<button style={{...css.btn(p.popular?"#f59e0b":undefined),width:"100%",opacity:busy===p.id?0.6:1}} disabled={!!busy} onClick={()=>startCheckout(p.id)}>
+              {busy===p.id?"⏳ "+tr("Weiterleitung","Redirecting"):"🚀 "+tr("Abonnement starten","Subscribe")}
+            </button>}
       </div>)}
     </div>
-    <div style={{fontSize:11,color:theme.textDim,marginTop:20,textAlign:"center"}}>Payment via Stripe. Cancel anytime. GDPR compliant.</div>
+    <div style={{fontSize:11,color:theme.textDim,marginTop:20,textAlign:"center"}}>
+      🔒 {tr("Sichere Zahlung über Stripe · SEPA & Kreditkarte · Jederzeit kündbar · DSGVO-konform","Secure payment via Stripe · SEPA & credit card · Cancel anytime · GDPR compliant")}
+    </div>
   </div>);
 }
 
@@ -2965,6 +3013,24 @@ function App(){
   const View=views[_resolvedPage]||DashboardView;
   const _lang=getLang();
   const _tr=(de,en)=>_lang==="de"?de:en;
+  // Subscription return from Stripe Checkout — show toast based on ?subscription= param
+  useEffect(()=>{
+    try{
+      const url=new URL(window.location.href);
+      const status=url.searchParams.get("subscription");
+      if(!status)return;
+      const planParam=url.searchParams.get("plan")||"";
+      const _l=getLang();
+      if(status==="success"){
+        if(showToast)showToast(_l==="de"?("✓ Abonnement aktiv"+(planParam?" — "+planParam:"")):("✓ Subscription active"+(planParam?" — "+planParam:"")),"success");
+      }else if(status==="cancelled"||status==="canceled"){
+        if(showToast)showToast(_l==="de"?"Bezahlvorgang abgebrochen":"Checkout cancelled","info");
+      }
+      url.searchParams.delete("subscription");
+      url.searchParams.delete("plan");
+      window.history.replaceState({}, "", url.toString());
+    }catch(e){}
+  },[]);
   // Advisor "viewing as client" banner state
   const[actingClient,setActingClient]=useState(null);
   useEffect(()=>{
@@ -3140,6 +3206,9 @@ function App(){
             </div>
             <div onClick={()=>{setPage("advisor");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:16}}>👔</span><span style={{fontSize:13}}>{getLang()==="de"?"Steuerberater":"Tax Advisor"}</span>
+            </div>
+            <div onClick={()=>{setPage("pricing");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:16}}>💳</span><span style={{fontSize:13}}>{getLang()==="de"?"Abonnement & Preise":"Subscription & Pricing"}</span>
             </div>
             <div style={{height:1,background:theme.border,margin:"4px 0"}}/>
             <div onClick={async()=>{
