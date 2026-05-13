@@ -146,6 +146,50 @@ async function _fetchWithBackoff(url, opts, onWait, maxRetries){
 }
 window._fetchWithBackoff=_fetchWithBackoff;
 
+/* Authed fetch — wraps fetch() with auto-refresh on 401. Returns Response.
+   If refresh fails, removes tokens and reloads (forces re-login). Use for
+   any endpoint that needs the Authorization header. */
+async function _authFetch(url, opts){
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers || {});
+  const tk = localStorage.getItem("atx_token");
+  if(tk) headers["Authorization"] = "Bearer " + tk;
+  let res = await fetch(url, Object.assign({}, opts, {headers}));
+  if(res.status !== 401) return res;
+  // Try refresh
+  const refresh = localStorage.getItem("atx_refresh");
+  if(!refresh){
+    localStorage.removeItem("atx_token");
+    return res;
+  }
+  try{
+    const rr = await fetch((url.startsWith("http")?new URL(url).origin:"") + "/auth/refresh", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({refresh_token: refresh}),
+    });
+    if(!rr.ok){
+      localStorage.removeItem("atx_token");
+      localStorage.removeItem("atx_refresh");
+      return res;
+    }
+    const rd = await rr.json();
+    if(!rd.token){
+      localStorage.removeItem("atx_token");
+      localStorage.removeItem("atx_refresh");
+      return res;
+    }
+    localStorage.setItem("atx_token", rd.token);
+    if(rd.refresh_token) localStorage.setItem("atx_refresh", rd.refresh_token);
+    // Retry the original request with the new token
+    headers["Authorization"] = "Bearer " + rd.token;
+    return await fetch(url, Object.assign({}, opts, {headers}));
+  }catch(e){
+    return res;
+  }
+}
+window._authFetch = _authFetch;
+
 const theme = {
   bg: "var(--bg)", surface: "var(--surface)", surfaceAlt: "var(--surface-alt)", card: "var(--card)",
   border: "var(--border)", accent: "#10b981", accentSoft: "rgba(16,185,129,0.12)",
@@ -2269,13 +2313,12 @@ function AdvisorView(){
   const[lastLink,setLastLink]=useState("");
   const _l=getLang();
   const tr=(de,en)=>_l==="de"?de:en;
-  const tk=()=>localStorage.getItem("atx_token");
   const loadAll=async()=>{
     try{
-      const r1=await fetch(API+"/advisor/relationships",{headers:{Authorization:"Bearer "+tk()}});
+      const r1=await _authFetch(API+"/advisor/relationships");
       const d1=await r1.json();
       if(r1.ok)setRelationships(d1.items||[]);
-      const r2=await fetch(API+"/advisor/clients",{headers:{Authorization:"Bearer "+tk()}});
+      const r2=await _authFetch(API+"/advisor/clients");
       const d2=await r2.json();
       if(r2.ok)setClients(d2.items||[]);
     }catch(e){}
@@ -2285,7 +2328,7 @@ function AdvisorView(){
     if(!email.trim()||!email.includes("@")){alert(tr("E-Mail-Adresse erforderlich","Email required"));return;}
     setInviting(true);setLastLink("");
     try{
-      const r=await fetch(API+"/advisor/invite",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+tk()},body:JSON.stringify({advisor_email:email.trim(),scope,note:note.trim()||null})});
+      const r=await _authFetch(API+"/advisor/invite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({advisor_email:email.trim(),scope,note:note.trim()||null})});
       const d=await r.json();
       if(r.ok){
         setLastLink(d.link||"");
@@ -2301,7 +2344,7 @@ function AdvisorView(){
   const revoke=async(id,who)=>{
     if(!confirm(tr(`Zugriff wirklich entziehen? ${who} muss neu eingeladen werden.`,`Really revoke access? ${who} will need a new invite.`)))return;
     try{
-      const r=await fetch(API+"/advisor/relationship/"+id,{method:"DELETE",headers:{Authorization:"Bearer "+tk()}});
+      const r=await _authFetch(API+"/advisor/relationship/"+id,{method:"DELETE"});
       if(r.ok)loadAll();
     }catch(e){}
   };
@@ -2417,7 +2460,7 @@ function AuditView(){
     try{
       const q=new URLSearchParams({limit,offset:off});
       if(act)q.set("action",act);
-      const r=await fetch(API+"/audit/recent?"+q.toString(),{headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")}});
+      const r=await _authFetch(API+"/audit/recent?"+q.toString());
       const d=await r.json();
       if(r.ok){setItems(d.items||[]);setTotal(d.total||0);setOffset(off);}
     }catch(e){}
@@ -2906,7 +2949,7 @@ function App(){
           <div style={{display:"flex",gap:8}}>
             <button style={{...css.btn(),flex:1}} onClick={async()=>{
               try{
-                const r=await fetch(API+"/advisor/invite/accept",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+localStorage.getItem("atx_token")},body:JSON.stringify({token:inviteAccept.token})});
+                const r=await _authFetch(API+"/advisor/invite/accept",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:inviteAccept.token})});
                 const d=await r.json();
                 if(r.ok){
                   if(showToast)showToast(_tr("✓ Einladung angenommen","✓ Invite accepted"),"success");
@@ -3029,7 +3072,7 @@ function App(){
               setProfileOpen(false);
               if(!confirm("Wirklich alle anderen Sitzungen beenden? Alle anderen Geräte (Watcher, Mobile, andere Browser) müssen sich neu anmelden."))return;
               try{
-                const r=await fetch(API+"/auth/logout-all",{method:"POST",headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")}});
+                const r=await _authFetch(API+"/auth/logout-all",{method:"POST"});
                 const d=await r.json();
                 if(r.ok&&d.token){
                   localStorage.setItem("atx_token",d.token);
