@@ -3,7 +3,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, Body, Request
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, Body, Request, Response
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -21,8 +21,87 @@ from autotax.auth import hash_password, verify_password, create_token, create_ac
 from autotax.audit import audit
 from autotax.jobs import track_job
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# ----------------------------------------------------------------------
+# Logging — JSON formatlı, Railway log search için aranabilir.
+# python-json-logger varsa kullan; yoksa düz formata düş.
+# Mevcut _SanitizeLogFilter (secret mask) korunur.
+# ----------------------------------------------------------------------
+import sys  # noqa: E402
+
+def _setup_logging():
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    # Mevcut handler'ları temizle (basicConfig çift handler bırakmasın)
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    handler = logging.StreamHandler(sys.stdout)
+    try:
+        from pythonjsonlogger import jsonlogger
+        fmt = jsonlogger.JsonFormatter(
+            "%(asctime)s %(name)s %(levelname)s %(message)s %(pathname)s %(lineno)d",
+            rename_fields={"asctime": "ts", "levelname": "level"},
+        )
+    except ImportError:
+        fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    handler.setFormatter(fmt)
+    root.addHandler(handler)
+
+
+_setup_logging()
 logger = logging.getLogger("autotax")
+
+# ----------------------------------------------------------------------
+# Sentry — env yoksa skip, dev/demo deploy etkilenmez.
+# Hassas alan (token, IBAN, password) before_send'de scrub edilir.
+# ----------------------------------------------------------------------
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.logging import LoggingIntegration
+
+    _SENSITIVE_KEYS = {"password", "old_password", "new_password", "token",
+                       "atx_token", "atx_refresh", "refresh_token",
+                       "api_token", "secret", "stripe_secret_key",
+                       "jwt_secret", "encrypted_password", "iban"}
+
+    def _scrub_event(event, hint):
+        try:
+            req = event.get("request", {}) or {}
+            # Header'lardan Authorization, Cookie scrub
+            headers = req.get("headers", {}) or {}
+            for k in list(headers.keys()):
+                if k.lower() in {"authorization", "cookie", "x-acting-client-id"}:
+                    headers[k] = "[Filtered]"
+            # Body data'da sensitive alanları temizle
+            data = req.get("data") or {}
+            if isinstance(data, dict):
+                for k in list(data.keys()):
+                    if k.lower() in _SENSITIVE_KEYS:
+                        data[k] = "[Filtered]"
+        except Exception:
+            pass
+        return event
+
+    _sentry_dsn = os.environ.get("SENTRY_DSN", "").strip()
+    if _sentry_dsn:
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            environment=os.environ.get("RAILWAY_ENVIRONMENT", "production"),
+            integrations=[
+                FastApiIntegration(),
+                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+            ],
+            traces_sample_rate=0.1,
+            profiles_sample_rate=0.0,  # CPU profili Railway free'de gereksiz
+            send_default_pii=False,
+            before_send=_scrub_event,
+            release=(os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:7] or "dev",
+        )
+        logger.info("Sentry initialized: env=%s release=%s",
+                    os.environ.get("RAILWAY_ENVIRONMENT", "production"),
+                    (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:7])
+except ImportError:
+    pass  # sentry-sdk yüklü değil — sessizce atla
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -2578,9 +2657,34 @@ def register(request: Request, body: RegisterRequest):
         db.close()
 
 
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str):
+    """Sprint 1: HttpOnly cookie dual mode (Aşama A).
+    Response body'de hala token döner — frontend backward compat.
+    Aşama B'de frontend cookie'ye geçer, body'den token kaldırılır."""
+    is_https = (os.environ.get("PUBLIC_APP_URL", "").startswith("https://")
+                or os.environ.get("RAILWAY_ENVIRONMENT") == "production")
+    response.set_cookie(
+        key="atx_token", value=access_token,
+        httponly=True, secure=is_https, samesite="strict",
+        max_age=3600,  # 1 saat (access token süresi)
+        path="/",
+    )
+    response.set_cookie(
+        key="atx_refresh", value=refresh_token,
+        httponly=True, secure=is_https, samesite="strict",
+        max_age=7 * 24 * 3600,  # 7 gün
+        path="/",
+    )
+
+
+def _clear_auth_cookies(response: Response):
+    response.delete_cookie("atx_token", path="/")
+    response.delete_cookie("atx_refresh", path="/")
+
+
 @app.post("/auth/login")
 @limiter.limit("5/minute")
-def login(request: Request, body: AuthRequest):
+def login(request: Request, body: AuthRequest, response: Response):
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.email == body.email).first()
@@ -2593,6 +2697,7 @@ def login(request: Request, body: AuthRequest):
         token = create_access_token(user.id, user.email)
         refresh = create_refresh_token(user.id, user.email)
         audit("auth.login_success", user_id=user.id, request=request)
+        _set_auth_cookies(response, token, refresh)
         return {"success": True, "token": token, "refresh_token": refresh, "email": user.email}
     except HTTPException:
         raise
@@ -2605,8 +2710,11 @@ def login(request: Request, body: AuthRequest):
 
 @app.post("/auth/refresh")
 @limiter.limit("10/minute")
-def refresh_token_endpoint(request: Request, body: dict = Body(...)):
-    refresh = body.get("refresh_token", "")
+def refresh_token_endpoint(request: Request, response: Response, body: dict = Body(default={})):
+    # Token sırası: body > cookie (frontend henüz Aşama A'da, body kullanır)
+    refresh = (body or {}).get("refresh_token", "") if isinstance(body, dict) else ""
+    if not refresh:
+        refresh = request.cookies.get("atx_refresh", "")
     if not refresh:
         err(400, "refresh_token required")
     try:
@@ -2629,6 +2737,7 @@ def refresh_token_endpoint(request: Request, body: dict = Body(...)):
             db_chk.close()
     new_access = create_access_token(data["sub"], data["email"])
     new_refresh = create_refresh_token(data["sub"], data["email"])
+    _set_auth_cookies(response, new_access, new_refresh)
     return {"success": True, "token": new_access, "refresh_token": new_refresh}
 
 
@@ -3603,6 +3712,105 @@ def toggle_kleinunternehmer(body: dict = Body(...), user: dict = Depends(get_cur
             u.full_name = (u.full_name or "").replace("[KU] ", "").replace("[KU]", "").strip()
         db.commit()
         return {"success": True, "kleinunternehmer": val}
+    finally:
+        db.close()
+
+
+@app.get("/account/export-all")
+def export_all_user_data(request: Request, user: dict = Depends(get_current_user)):
+    """DSGVO Art. 15 — Auskunftsrecht. Kullanıcı tüm verilerini ZIP olarak indirir.
+
+    Rate limit: 3/saat (büyük export DoS riski).
+    İçerik: user.json, invoices.json, cash_entries.json, audit_log.json,
+            companies.json, advisor_relationships.json, README.txt
+    """
+    if not _check_rate_limit(f"export:{user['sub']}", 3):
+        err(429, "Export limit erreicht. Bitte später erneut versuchen (max 3/Stunde).")
+
+    import io as _io
+    import json as _json
+    import zipfile as _zipfile
+    from fastapi.responses import Response as _Resp
+    from autotax.models import AuditLog as _Audit, AdvisorRelationship as _AR
+
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u:
+            err(404, "User not found")
+
+        def _u_dict(u):
+            return {
+                "id": u.id, "email": u.email, "full_name": u.full_name,
+                "plan": u.plan, "registered_at": str(u.registered_at) if u.registered_at else None,
+                "is_kleinunternehmer": u.is_kleinunternehmer,
+                "steuer_subscriptions": u.steuer_subscriptions,
+            }
+
+        invs = db.query(Invoice).filter(Invoice.user_id == u.id).all()
+        ces = db.query(CashEntry).filter(CashEntry.user_id == u.id).all()
+        audits = db.query(_Audit).filter(_Audit.user_id == u.id) \
+                                 .order_by(_Audit.created_at.desc()).limit(5000).all()
+        cos = db.query(UserCompany).filter(UserCompany.user_id == u.id).all()
+        ars = db.query(_AR).filter(
+            (_AR.client_user_id == u.id) | (_AR.advisor_user_id == u.id)
+        ).all()
+
+        buf = _io.BytesIO()
+        with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("user.json", _json.dumps(_u_dict(u), default=str, indent=2, ensure_ascii=False))
+            zf.writestr("invoices.json",
+                _json.dumps([invoice_to_dict(i) for i in invs], default=str, indent=2, ensure_ascii=False))
+            zf.writestr("cash_entries.json",
+                _json.dumps([{c: getattr(ce, c, None) for c in ("id","date","entry_type","description","vendor","gross_amount","vat_amount","vat_rate","category","is_deleted","created_at")} for ce in ces], default=str, indent=2, ensure_ascii=False))
+            zf.writestr("audit_log.json",
+                _json.dumps([{
+                    "id": a.id, "action": a.action, "resource_type": a.resource_type,
+                    "resource_id": a.resource_id, "ip": a.ip,
+                    "user_agent": a.user_agent, "created_at": str(a.created_at) if a.created_at else None,
+                    "payload": a.payload,
+                } for a in audits], default=str, indent=2, ensure_ascii=False))
+            zf.writestr("companies.json",
+                _json.dumps([{"id": c.id, "name": c.company_name, "iban": c.iban, "tax_id": c.tax_id,
+                              "address": c.address, "phone": c.phone, "email": c.email, "website": c.website,
+                              "is_default": c.is_default} for c in cos], default=str, indent=2, ensure_ascii=False))
+            zf.writestr("advisor_relationships.json",
+                _json.dumps([{"id": r.id, "client_user_id": r.client_user_id,
+                              "advisor_user_id": r.advisor_user_id, "scope": r.scope,
+                              "note": r.note, "created_at": str(r.created_at) if r.created_at else None,
+                              "revoked_at": str(r.revoked_at) if r.revoked_at else None,
+                              "revoked_by": r.revoked_by} for r in ars], default=str, indent=2, ensure_ascii=False))
+            readme = (
+                "AutoTax-Hub Datenexport (DSGVO Art. 15 — Auskunftsrecht)\n"
+                "=========================================================\n\n"
+                f"Account: {u.email}\n"
+                f"Export erstellt: {datetime.now(timezone.utc).isoformat()}\n\n"
+                "Inhalt:\n"
+                "  - user.json                   Profil + Plan + Einstellungen\n"
+                "  - invoices.json               Alle Rechnungen\n"
+                "  - cash_entries.json           Kassenbuch-Einträge\n"
+                "  - audit_log.json              Aktivitätsverlauf (max 5000 Einträge)\n"
+                "  - companies.json              Firmendaten\n"
+                "  - advisor_relationships.json  Steuerberater-Verbindungen\n\n"
+                "Audit-Log enthält IP-Adressen (maskiert auf /24 per DSGVO Art. 25).\n"
+                "Rechnungsdateien (PDFs) sind hier NICHT enthalten — bei Bedarf einzeln über die App.\n"
+            )
+            zf.writestr("README.txt", readme)
+        buf.seek(0)
+
+        audit("account.data_export", user_id=u.id,
+              payload={"counts": {"invoices": len(invs), "cash": len(ces),
+                                  "audit": len(audits), "companies": len(cos)}},
+              request=request)
+        fname = f"autotax-export-{u.id}-{datetime.now().strftime('%Y%m%d')}.zip"
+        return _Resp(
+            content=buf.read(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{fname}"',
+                "Cache-Control": "no-store",
+            },
+        )
     finally:
         db.close()
 

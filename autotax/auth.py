@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, Header
+from fastapi import Depends, HTTPException, Header, Cookie
 
 logger = logging.getLogger("autotax")
 
@@ -93,16 +93,29 @@ def _check_global_invalidate(payload: dict) -> None:
         db.close()
 
 
-def get_current_user(authorization: str = Header(None)) -> dict:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid token")
-    payload = decode_token(authorization[7:], expected_type="access")
+def _resolve_token(authorization: str | None, atx_token_cookie: str | None) -> str:
+    """Sprint 1: HttpOnly cookie dual mode. Authorization header öncelik
+    (mevcut frontend hala header gönderiyor), yoksa cookie'ye düş."""
+    if authorization and authorization.startswith("Bearer "):
+        return authorization[7:]
+    if atx_token_cookie:
+        return atx_token_cookie
+    raise HTTPException(status_code=401, detail="Missing or invalid token")
+
+
+def get_current_user(
+    authorization: str = Header(None),
+    atx_token: str = Cookie(None),
+) -> dict:
+    token = _resolve_token(authorization, atx_token)
+    payload = decode_token(token, expected_type="access")
     _check_global_invalidate(payload)
     return payload
 
 
 def get_acting_context(
     authorization: str = Header(None),
+    atx_token: str = Cookie(None),
     x_acting_client_id: str = Header(None),
 ) -> dict:
     """Returns the *effective* user context.
@@ -115,9 +128,8 @@ def get_acting_context(
     Otherwise behaves like get_current_user and adds is_acting=False so
     every endpoint can use a single dependency.
     """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid token")
-    payload = decode_token(authorization[7:], expected_type="access")
+    token = _resolve_token(authorization, atx_token)
+    payload = decode_token(token, expected_type="access")
     _check_global_invalidate(payload)
     payload = dict(payload)
     payload["is_acting"] = False

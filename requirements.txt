@@ -19,3 +19,5 @@ pytesseract==0.3.13
 opencv-python-headless==4.10.0.84
 alembic==1.13.3
 stripe==11.4.0
+sentry-sdk[fastapi]==2.18.0
+python-json-logger==2.0.7
