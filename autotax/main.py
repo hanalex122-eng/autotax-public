@@ -142,6 +142,19 @@ async def security_guard(request, call_next):
             logger.warning("SECURITY: Delete rate limit exceeded from %s on %s", client_ip, path)
             return JSONResponse(status_code=429, content={"detail": "Too many delete requests — try again in 1 minute"})
 
+    # Sprint 0 rate limits — slowapi @limiter.limit decorator'ları
+    # Railway proxy arkasında IP-detection güvenilmez olduğundan, manuel
+    # _check_rate_limit pattern'i ile aynı middleware'de uygulanır.
+    if path == "/auth/refresh" and method == "POST":
+        if not _check_rate_limit("refresh:" + client_ip, 10):
+            return JSONResponse(status_code=429, content={"detail": "Too many refresh attempts — try again in 1 minute"})
+    if method == "GET" and path in ("/reminders/upcoming", "/reminders/overdue", "/steuer/upcoming", "/jobs/recent"):
+        if not _check_rate_limit(f"read30:{path}:" + client_ip, 30):
+            return JSONResponse(status_code=429, content={"detail": "Too many requests — try again in 1 minute"})
+    if method == "GET" and path == "/audit/recent":
+        if not _check_rate_limit("audit:" + client_ip, 60):
+            return JSONResponse(status_code=429, content={"detail": "Too many requests — try again in 1 minute"})
+
     # Advisor read-only enforcement — if X-Acting-Client-Id is set, all
     # write methods are blocked. Export endpoints have their own gate
     # checked inside the endpoint when scope=read_export should pass.
