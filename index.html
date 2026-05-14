@@ -2628,6 +2628,17 @@ function NotificationsView(){
       if(r.ok)setStatus(prev=>({...prev,preferences:d.preferences}));
     }catch(e){}
   };
+  const[testing,setTesting]=useState(false);
+  const sendTest=async()=>{
+    setTesting(true);
+    try{
+      const r=await _authFetch(API+"/account/telegram/test",{method:"POST"});
+      const d=await r.json();
+      if(r.ok){if(showToast)showToast(tr("✓ Test-Nachricht gesendet — schauen Sie in Telegram","✓ Test sent — check Telegram"),"success");}
+      else alert(_extractErr(d));
+    }catch(e){alert(e.message);}
+    setTesting(false);
+  };
   const downloadExport=async()=>{
     try{
       const r=await _authFetch(API+"/account/export-all");
@@ -2683,6 +2694,7 @@ function NotificationsView(){
             <div style={{fontSize:13,fontWeight:600,color:theme.text}}>{tr("Verbunden","Connected")}{status.username?" — @"+status.username:""}</div>
             <div style={{fontSize:11,color:theme.textMuted}}>{tr("Sie erhalten Benachrichtigungen entsprechend Ihren Einstellungen unten.","You receive notifications based on your preferences below.")}</div>
           </div>
+          <button style={{...css.btnOutline,fontSize:12,marginRight:8}} onClick={sendTest} disabled={testing}>{testing?"⏳":"🧪"} {tr("Test","Test")}</button>
           <button style={{...css.btnOutline,color:theme.danger,borderColor:theme.danger+"55",fontSize:12}} onClick={disconnect}>{tr("Trennen","Disconnect")}</button>
         </div>
         <div style={{borderTop:"1px solid "+theme.border,paddingTop:12}}>

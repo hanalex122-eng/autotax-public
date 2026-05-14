@@ -3575,6 +3575,40 @@ def telegram_disconnect(request: Request, user: dict = Depends(get_current_user)
         db.close()
 
 
+@app.post("/account/telegram/test")
+async def telegram_test(request: Request, user: dict = Depends(get_current_user)):
+    """Manuel test — kullanıcının kendi chat'ine küçük bir doğrulama mesajı
+    gönderir. Tercih ayarlarına (mahnung/summary/...) bakmaz, çünkü bu user
+    tarafından bilinçli tetiklenen bir test. Rate limit middleware'de var.
+    """
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u:
+            err(404, "User not found")
+        if not u.telegram_chat_id:
+            err(400, "Telegram not connected")
+        from autotax.reminders import send_telegram
+        msg = (
+            "🧪 <b>AutoTax Test</b>\n\n"
+            "Telegram bağlantınız çalışıyor. Bu mesajı sadece sizin için "
+            "gönderdik — gerçek bildirimler tercihlerinize göre gelir.\n\n"
+            "<i>Test • " + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") + "</i>"
+        )
+        try:
+            ok = await send_telegram(msg, user_id=u.id, kind="test",
+                                     ref_type="manual", ref_id=0)
+        except Exception as e:
+            logger.exception("telegram test failed")
+            err(502, f"Telegram delivery failed: {e!s}")
+        audit("telegram.test_sent", user_id=u.id, payload={"ok": bool(ok)}, request=request)
+        if not ok:
+            err(502, "Telegram API did not accept the message — check bot token/chat id")
+        return {"success": True}
+    finally:
+        db.close()
+
+
 @app.get("/account/telegram/status")
 def telegram_status(user: dict = Depends(get_current_user)):
     """Frontend Account view için: bağlı mı, tercihler ne?"""
