@@ -3575,6 +3575,47 @@ def telegram_disconnect(request: Request, user: dict = Depends(get_current_user)
         db.close()
 
 
+@app.post("/account/telegram/install-webhook")
+async def telegram_install_webhook(user: dict = Depends(get_current_user)):
+    """Manuel webhook kayit — startup hook calismadiysa veya URL degisirse.
+    Telegram'a setWebhook yollar, sonucu doner. Tum login'li userlar
+    cagirabilir (env zaten admin tarafindan set edildi)."""
+    token = (os.environ.get("TELEGRAM_BOT_TOKEN") or
+             os.environ.get("TELEGRAM_TOKEN") or "").strip()
+    secret = (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    if not token:
+        err(503, "TELEGRAM_BOT_TOKEN not set")
+    if not secret:
+        err(503, "TELEGRAM_WEBHOOK_SECRET not set")
+    base = (os.environ.get("PUBLIC_APP_URL") or
+            "https://autotax-public-production-3f2a.up.railway.app").rstrip("/")
+    target_url = f"{base}/telegram/webhook"
+    import httpx
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.post(
+            f"https://api.telegram.org/bot{token}/setWebhook",
+            data={
+                "url": target_url,
+                "secret_token": secret,
+                "allowed_updates": '["message"]',
+                "drop_pending_updates": "false",
+            },
+        )
+        info = None
+        try:
+            info_r = await c.get(f"https://api.telegram.org/bot{token}/getWebhookInfo")
+            if info_r.status_code == 200:
+                info = info_r.json().get("result")
+        except Exception:
+            pass
+    return {
+        "set_status": r.status_code,
+        "set_response": r.json() if r.status_code == 200 else r.text[:300],
+        "target_url": target_url,
+        "info_after": info,
+    }
+
+
 @app.get("/account/telegram/diagnose")
 async def telegram_diagnose(user: dict = Depends(get_current_user)):
     """Debug — Telegram'in webhook durumunu, bot'un kim olarak gozuktugunu,
