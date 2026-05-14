@@ -289,7 +289,11 @@ class Invoice(Base):
     file_hash = Column(String(32), index=True, nullable=True)
     possible_duplicate = Column(Boolean, default=False, nullable=False)
     # Rechnung Reminder System — odeme takibi
-    due_date = Column(String, nullable=True, index=True)  # YYYY-MM-DD format
+    # NOT (Sprint 2C migration, 2026-05-14): due_date string format'tan
+    # native Date'e geçiliyor. due_date_v2 yeni native kolon — okuma için.
+    # due_date hala yazılıyor (dual write window, 2 hafta sonra drop).
+    due_date = Column(String, nullable=True, index=True)  # YYYY-MM-DD (legacy)
+    due_date_v2 = Column(Date, nullable=True, index=True) # native Date — okuma için
     payment_status = Column(String(20), default="unpaid", nullable=False, index=True)  # unpaid|paid|overdue
     paid_at = Column(DateTime, nullable=True)
     # JSON array string: hangi reminder'lar gonderildi — '["7d","1d","on_day","overdue"]'

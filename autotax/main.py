@@ -2005,10 +2005,11 @@ def update_invoice_payment(
 
         changed = []
         if "due_date" in body:
+            from autotax.queries import set_invoice_due_date, parse_user_date
             d = (body["due_date"] or "").strip()
-            if d and not _re_global.match(r"^\d{4}-\d{2}-\d{2}$", d):
-                err(400, "due_date must be YYYY-MM-DD")
-            inv.due_date = d or None
+            if d and parse_user_date(d) is None:
+                err(400, "due_date must be YYYY-MM-DD or DD.MM.YYYY")
+            set_invoice_due_date(inv, d if d else None)
             # due_date degisince reminder kodlarini sifirla — yeni tarih
             # icin reminder'lar tekrar verilir.
             inv.reminder_sent_codes = None
@@ -5533,7 +5534,8 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                     inv.vendor_steuernr = parsed.get("vendor_steuernr") or None
                     # Reminder system: parser'dan otomatik due_date geldiyse yaz
                     if parsed.get("due_date"):
-                        inv.due_date = parsed["due_date"]
+                        from autotax.queries import set_invoice_due_date as _sidd
+                        _sidd(inv, parsed["due_date"])
                     db_bg.commit()
                     logger.info("Async OCR completed: invoice %d (%s, €%.2f, ust_id=%s)",
                                 inv_id, parsed.get("vendor"),

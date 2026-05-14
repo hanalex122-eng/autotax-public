@@ -140,6 +140,10 @@ def init_db():
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN due_date VARCHAR"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_due_date ON invoices(due_date)"))
                 logger.info("Added 'due_date' column to invoices")
+            if "due_date_v2" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN due_date_v2 DATE"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_due_date_v2 ON invoices(due_date_v2)"))
+                logger.info("Added 'due_date_v2' column to invoices (Sprint 2C migration)")
             if "payment_status" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid'"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_payment_status ON invoices(payment_status)"))
@@ -253,6 +257,48 @@ def init_db():
                 logger.info("Sprint-0 idx: ix_corrections_user_field_date OK")
             except Exception as e:
                 logger.warning("idx corrections_user_field_date skipped: %s", e)
+
+        # --- Sprint 2C: due_date_v2 backfill (idempotent, tek seferlik) ---
+        # ISO (YYYY-MM-DD) ve DE (DD.MM.YYYY) format'larından mevcut
+        # string due_date'leri parse edip Date kolonu doldur.
+        # Backfill yalnızca due_date_v2 NULL olan satırlar için çalışır;
+        # her startup'ta tekrar çalışsa da idempotent.
+        try:
+            with engine.begin() as conn:
+                # Postgres syntax — TO_DATE + regex
+                # ISO
+                conn.execute(text("""
+                    UPDATE invoices
+                       SET due_date_v2 = TO_DATE(due_date, 'YYYY-MM-DD')
+                     WHERE due_date_v2 IS NULL
+                       AND due_date IS NOT NULL
+                       AND due_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                """))
+                # DE (DD.MM.YYYY)
+                conn.execute(text("""
+                    UPDATE invoices
+                       SET due_date_v2 = TO_DATE(due_date, 'DD.MM.YYYY')
+                     WHERE due_date_v2 IS NULL
+                       AND due_date IS NOT NULL
+                       AND due_date ~ '^[0-9]{2}\\.[0-9]{2}\\.[0-9]{4}$'
+                """))
+                # Unparseable'ları audit_log'a düş — sadece bir kez
+                # (idempotent for audit_log: aynı row birden çok kez yazılabilir
+                # ama low-volume, kabul edilebilir)
+                conn.execute(text("""
+                    INSERT INTO audit_log (action, resource_type, resource_id, payload, created_at, user_id)
+                    SELECT 'invoice.due_date_unparseable', 'invoice', id,
+                           json_build_object('raw', due_date)::text,
+                           NOW(), user_id
+                      FROM invoices
+                     WHERE due_date_v2 IS NULL
+                       AND due_date IS NOT NULL
+                       AND due_date != ''
+                """))
+            logger.info("Sprint-2C: due_date_v2 backfill complete")
+        except Exception as e:
+            # SQLite local dev'de TO_DATE / regex desteklemez — sessiz skip
+            logger.info("Sprint-2C backfill skipped (%s)", e)
     except Exception as e:
         logger.warning("Column migration skipped: %s", e)
 
