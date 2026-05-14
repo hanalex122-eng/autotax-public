@@ -8,7 +8,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 import io
 
@@ -827,6 +827,46 @@ async def startup_reminders():
         logger.info("Reminder background loop scheduled")
     except Exception:
         logger.exception("Failed to start reminder loop")
+
+
+@app.on_event("startup")
+async def setup_telegram_webhook():
+    """Sprint 2B: Telegram webhook'u Telegram'a bizim URL'imize işaret etsin
+    diye otomatik kaydet. Idempotent: zaten doğru URL'e işaret ediyorsa
+    skip. Env yoksa pas geç (bot feature inaktif)."""
+    token = (os.environ.get("TELEGRAM_BOT_TOKEN") or
+             os.environ.get("TELEGRAM_TOKEN") or "").strip()
+    secret = (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    if not token or not secret:
+        return
+    base = (os.environ.get("PUBLIC_APP_URL") or
+            "https://autotax-public-production-3f2a.up.railway.app").rstrip("/")
+    target_url = f"{base}/telegram/webhook"
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            info = await client.get(f"https://api.telegram.org/bot{token}/getWebhookInfo")
+            if info.status_code == 200:
+                cur = (info.json().get("result") or {}).get("url", "")
+                if cur == target_url:
+                    logger.info("Telegram webhook already set: %s", target_url)
+                    return
+                logger.info("Telegram webhook current=%s — updating to %s", cur, target_url)
+            r = await client.post(
+                f"https://api.telegram.org/bot{token}/setWebhook",
+                data={
+                    "url": target_url,
+                    "secret_token": secret,
+                    "allowed_updates": '["message"]',
+                },
+            )
+            if r.status_code == 200 and r.json().get("ok"):
+                logger.info("Telegram webhook registered: %s", target_url)
+            else:
+                logger.warning("Telegram setWebhook failed: %s %s",
+                               r.status_code, r.text[:200])
+    except Exception:
+        logger.exception("Telegram webhook setup failed")
 
 
 @app.on_event("shutdown")
