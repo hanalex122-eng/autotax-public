@@ -3575,6 +3575,67 @@ def telegram_disconnect(request: Request, user: dict = Depends(get_current_user)
         db.close()
 
 
+@app.get("/account/telegram/diagnose")
+async def telegram_diagnose(user: dict = Depends(get_current_user)):
+    """Debug — Telegram'in webhook durumunu, bot'un kim olarak gozuktugunu,
+    user'in chat_id'sini doner. Sorun gidermek icin tek toklayis halinde
+    her seyi gosterir. Token gizli — sadece son 4 karakteri."""
+    token = (os.environ.get("TELEGRAM_BOT_TOKEN") or
+             os.environ.get("TELEGRAM_TOKEN") or "").strip()
+    secret = (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    base = (os.environ.get("PUBLIC_APP_URL") or
+            "https://autotax-public-production-3f2a.up.railway.app").rstrip("/")
+    expected_url = f"{base}/telegram/webhook"
+
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        user_chat = u.telegram_chat_id if u else None
+        user_username = u.telegram_username if u else None
+    finally:
+        db.close()
+
+    out = {
+        "env": {
+            "token_set": bool(token),
+            "token_tail": token[-4:] if token else None,
+            "webhook_secret_set": bool(secret),
+            "secret_tail": secret[-4:] if secret else None,
+            "public_app_url": base,
+            "expected_webhook_url": expected_url,
+        },
+        "user": {
+            "id": user["sub"],
+            "telegram_chat_id": user_chat,
+            "telegram_username": user_username,
+            "connected": bool(user_chat),
+        },
+    }
+    if not token:
+        out["error"] = "TELEGRAM_BOT_TOKEN env not set"
+        return out
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=8) as c:
+            me = await c.get(f"https://api.telegram.org/bot{token}/getMe")
+            if me.status_code == 200:
+                out["bot"] = me.json().get("result")
+            else:
+                out["bot_error"] = me.text[:200]
+            wh = await c.get(f"https://api.telegram.org/bot{token}/getWebhookInfo")
+            if wh.status_code == 200:
+                info = wh.json().get("result") or {}
+                out["webhook"] = info
+                out["url_matches"] = (info.get("url", "") == expected_url)
+            else:
+                out["webhook_error"] = wh.text[:200]
+    except Exception as e:
+        out["http_error"] = str(e)
+
+    return out
+
+
 @app.post("/account/telegram/test")
 async def telegram_test(request: Request, user: dict = Depends(get_current_user)):
     """Manuel test — kullanıcının kendi chat'ine küçük bir doğrulama mesajı
