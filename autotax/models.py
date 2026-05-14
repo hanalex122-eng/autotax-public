@@ -294,6 +294,13 @@ class Invoice(Base):
     # due_date hala yazılıyor (dual write window, 2 hafta sonra drop).
     due_date = Column(String, nullable=True, index=True)  # YYYY-MM-DD (legacy)
     due_date_v2 = Column(Date, nullable=True, index=True) # native Date — okuma için
+    # Sprint 4: external AI reviewer feedback. Async webhook'tan gelir.
+    # ai_status: None (henüz değerlendirilmedi) | ok | warning | error
+    # ai_notes: AI'ın insan-okunabilir notu (uyumsuzluk, eksik bilgi, vs.)
+    # ai_reviewed_at: en son AI değerlendirmesi zamanı
+    ai_status = Column(String(20), nullable=True, index=True)
+    ai_notes = Column(Text, nullable=True)
+    ai_reviewed_at = Column(DateTime, nullable=True)
     payment_status = Column(String(20), default="unpaid", nullable=False, index=True)  # unpaid|paid|overdue
     paid_at = Column(DateTime, nullable=True)
     # JSON array string: hangi reminder'lar gonderildi — '["7d","1d","on_day","overdue"]'

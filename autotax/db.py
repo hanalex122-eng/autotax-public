@@ -144,6 +144,16 @@ def init_db():
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN due_date_v2 DATE"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_due_date_v2 ON invoices(due_date_v2)"))
                 logger.info("Added 'due_date_v2' column to invoices (Sprint 2C migration)")
+            if "ai_status" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN ai_status VARCHAR(20)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_ai_status ON invoices(ai_status)"))
+                logger.info("Added 'ai_status' column to invoices (Sprint 4)")
+            if "ai_notes" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN ai_notes TEXT"))
+                logger.info("Added 'ai_notes' column to invoices (Sprint 4)")
+            if "ai_reviewed_at" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN ai_reviewed_at TIMESTAMP"))
+                logger.info("Added 'ai_reviewed_at' column to invoices (Sprint 4)")
             if "payment_status" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid'"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_payment_status ON invoices(payment_status)"))

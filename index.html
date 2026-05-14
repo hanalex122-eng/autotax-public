@@ -1189,6 +1189,27 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
           <div style={{cursor:"pointer",padding:4,borderRadius:6}} onClick={()=>setDetailInv(null)}><Icon d={I.x} size={18} color={theme.textMuted}/></div>
         </div>
         <div style={{padding:"20px 24px",display:"flex",flexDirection:"column",gap:16}}>
+          {/* Sprint 4: AI Reviewer banner */}
+          {detailInv.ai_status==="warning"&&<div style={{background:"rgba(245,158,11,0.15)",border:"1px solid #f59e0b",borderRadius:10,padding:"12px 14px"}}>
+            <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+              <span style={{fontSize:18}}>⚠️</span>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,color:"#f59e0b",fontSize:13}}>{getLang()==="de"?"AI Inceleme Önerisi":"AI Review Suggestion"}</div>
+                <div style={{fontSize:12,color:theme.text,marginTop:4,lineHeight:1.4}}>{detailInv.ai_notes||(getLang()==="de"?"Bu fatura için AI bir uyumsuzluk gördü.":"AI found a discrepancy.")}</div>
+                <div style={{fontSize:10,color:theme.textDim,marginTop:4,fontStyle:"italic"}}>{getLang()==="de"?"Bu sadece bir öneri — siz son kararı verirsiniz.":"Suggestion only — final decision is yours."}</div>
+              </div>
+            </div>
+          </div>}
+          {detailInv.ai_status==="error"&&<div style={{background:"rgba(239,68,68,0.15)",border:"1px solid "+theme.danger,borderRadius:10,padding:"12px 14px"}}>
+            <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+              <span style={{fontSize:18}}>❌</span>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,color:theme.danger,fontSize:13}}>{getLang()==="de"?"AI: Wichtiger Hinweis":"AI: Important Note"}</div>
+                <div style={{fontSize:12,color:theme.text,marginTop:4,lineHeight:1.4}}>{detailInv.ai_notes||"—"}</div>
+              </div>
+            </div>
+          </div>}
+          {detailInv.ai_status==="ok"&&detailInv.ai_reviewed_at&&<div style={{fontSize:11,color:theme.accent,padding:"6px 10px",background:theme.accentSoft,borderRadius:6,display:"inline-block"}}>✓ {getLang()==="de"?"AI geprüft":"AI verified"}</div>}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span style={css.badge(detailInv.invoice_type==="income"?theme.accentSoft:theme.dangerSoft,detailInv.invoice_type==="income"?theme.accent:theme.danger)}>{detailInv.invoice_type==="income"?_t("income"):_t("expense")}</span>
             <span style={{fontSize:12,color:theme.textMuted}}>{formatDateEU(detailInv.date)}</span>

@@ -3542,6 +3542,134 @@ def telegram_status(user: dict = Depends(get_current_user)):
         db.close()
 
 
+# ---------------------------------------------------------------------------
+# External AI Reviewer integration (Sprint 4)
+# AI dışarıda ayrı bir servis (autotax-ai-reviewer) çalışır. Bu modül
+# sadece tetiği gönderir ve sonucu kabul eder. Claude SDK burada YOK.
+#
+# Env:
+#   AI_REVIEWER_WEBHOOK_URL   = https://ai.autotax.cloud/review  (servisin URL'i)
+#   AI_REVIEWER_SECRET        = paylaşılan HMAC anahtarı (32+ byte)
+# ---------------------------------------------------------------------------
+
+def _ai_reviewer_sign(payload_bytes: bytes) -> str:
+    """HMAC-SHA256 imza — webhook spoofing önler."""
+    import hashlib
+    import hmac as _hmac
+    secret = (os.environ.get("AI_REVIEWER_SECRET") or "").strip().encode()
+    if not secret:
+        return ""
+    return _hmac.new(secret, payload_bytes, hashlib.sha256).hexdigest()
+
+
+async def _notify_ai_reviewer(invoice_id: int, user_id: int, ocr_text: str,
+                              parsed: dict, request: Request | None = None) -> None:
+    """Fire-and-forget: AI Reviewer servisine 'fatura geldi' webhook'u yolla.
+    Network hatası veya AI servisi down olması AutoTax'i hiç etkilemez —
+    asla raise etmez, sadece logger.warning yazar."""
+    import json
+    url = (os.environ.get("AI_REVIEWER_WEBHOOK_URL") or "").strip()
+    secret = (os.environ.get("AI_REVIEWER_SECRET") or "").strip()
+    if not url or not secret:
+        return  # AI feature inaktif — sessizce skip
+
+    base = _public_base_url() if "_public_base_url" in globals() else \
+        (os.environ.get("PUBLIC_APP_URL") or
+         "https://autotax-public-production-3f2a.up.railway.app").rstrip("/")
+    callback = f"{base}/webhooks/ai-review"
+
+    payload = {
+        "invoice_id": invoice_id,
+        "user_id": user_id,
+        "callback_url": callback,
+        "ocr_text": (ocr_text or "")[:4000],   # token bütçesi
+        "parsed": {k: v for k, v in (parsed or {}).items() if v not in (None, "")},
+    }
+    payload_bytes = json.dumps(payload).encode()
+    sig = _ai_reviewer_sign(payload_bytes)
+
+    async def _send():
+        try:
+            import httpx as _httpx
+            async with _httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, content=payload_bytes,
+                                       headers={"X-Sig": sig, "Content-Type": "application/json"})
+                if r.status_code >= 400:
+                    logger.warning("AI reviewer trigger %s: %s", r.status_code, r.text[:200])
+        except Exception:
+            logger.exception("AI reviewer trigger failed for invoice %s", invoice_id)
+
+    # Background task — caller'ı bekletme
+    try:
+        task = asyncio.create_task(_send())
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
+    except Exception:
+        logger.exception("Could not schedule AI reviewer trigger")
+
+
+@app.post("/webhooks/ai-review")
+async def ai_review_callback(request: Request):
+    """AI servisinden gelen callback. HMAC imza doğrulanır, invoice
+    güncellenir, warning/error ise user'a Telegram bildirim."""
+    import json
+    import hashlib
+    import hmac as _hmac
+
+    secret = (os.environ.get("AI_REVIEWER_SECRET") or "").strip()
+    if not secret:
+        return JSONResponse(status_code=503, content={"error": "ai reviewer not configured"})
+
+    body = await request.body()
+    sig_got = request.headers.get("X-Sig", "")
+    sig_exp = _hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not _hmac.compare_digest(sig_got, sig_exp):
+        logger.warning("AI callback signature mismatch")
+        return JSONResponse(status_code=403, content={"error": "bad signature"})
+
+    try:
+        data = json.loads(body)
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "bad json"})
+
+    invoice_id = data.get("invoice_id")
+    ai_status = (data.get("status") or "").lower()
+    ai_notes = (data.get("notes") or "")[:5000]
+    if ai_status not in ("ok", "warning", "error"):
+        return JSONResponse(status_code=400, content={"error": "invalid status"})
+    if not invoice_id:
+        return JSONResponse(status_code=400, content={"error": "invoice_id required"})
+
+    db = SessionLocal()
+    try:
+        inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if not inv:
+            return {"received": True, "ignored": "invoice not found"}
+        inv.ai_status = ai_status
+        inv.ai_notes = ai_notes
+        inv.ai_reviewed_at = datetime.now(timezone.utc)
+        db.commit()
+        audit("invoice.ai_reviewed", user_id=inv.user_id, resource_type="invoice",
+              resource_id=inv.id, payload={"status": ai_status, "notes_len": len(ai_notes)})
+        # Sadece warning/error'da kullanıcıya Telegram bildirim
+        if ai_status in ("warning", "error") and inv.user_id:
+            try:
+                from autotax.reminders import send_telegram
+                msg = (
+                    f"⚠️ <b>AI Inceleme Önerisi</b>\n\n"
+                    f"Fatura #{inv.id} ({inv.vendor or 'Unbekannt'})\n"
+                    f"<i>{ai_notes[:300]}</i>\n\n"
+                    f"Bu sadece bir öneri — siz son kararı verirsiniz."
+                )
+                await send_telegram(msg, user_id=inv.user_id, kind="advisor",
+                                    ref_type="invoice", ref_id=inv.id)
+            except Exception:
+                logger.exception("AI review Telegram notify failed")
+        return {"received": True, "invoice_id": invoice_id, "status": ai_status}
+    finally:
+        db.close()
+
+
 @app.get("/audit/recent")
 @limiter.limit("60/minute")
 def audit_recent(
@@ -5443,6 +5571,11 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                           request=request)
                 except Exception:
                     pass
+                # Sprint 4: AI reviewer tetikle (fire-and-forget)
+                try:
+                    await _notify_ai_reviewer(inv_id, user["sub"], _tess_text, parsed, request)
+                except Exception:
+                    pass
                 return {"status": "done", "id": inv_id, "total_amount": safe_float(parsed.get("total_amount")), "vendor": parsed.get("vendor", "")}
         except Exception as e:
             logger.warning("Tesseract sync failed: %s", e)
@@ -5478,6 +5611,11 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                                        "amount": safe_float(parsed.get("total_amount")),
                                        "filename": file.filename},
                               request=request)
+                    except Exception:
+                        pass
+                    # Sprint 4: AI reviewer tetikle (fire-and-forget)
+                    try:
+                        await _notify_ai_reviewer(inv_id, user["sub"], pdf_text, parsed, request)
                     except Exception:
                         pass
                     return {"status": "done", "id": inv_id, "total_amount": safe_float(parsed.get("total_amount")), "vendor": parsed.get("vendor", "")}
