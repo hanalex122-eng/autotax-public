@@ -2477,9 +2477,9 @@ def mahnung_queue(user: dict = Depends(get_current_user)):
 @app.post("/invoices/{invoice_id}/mahnung/send")
 async def mahnung_send_one(
     invoice_id: int,
+    request: Request,
     body: dict = Body(default={}),
     user: dict = Depends(get_current_user),
-    request: Request = None,
 ):
     """Tek bir fatura icin Mahnung gonder. body: {level?: 1|2|3, send_email?: bool}
     level verilmezse `determine_mahnung_level()` hesaplar. Telegram + PDF her
