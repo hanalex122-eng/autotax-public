@@ -105,6 +105,9 @@ except ImportError:
 
 limiter = Limiter(key_func=get_remote_address)
 
+import time as _time
+_BOOT_TIME = _time.time()
+
 app = FastAPI(
     title="AutoTax-HUB",
     version="5.5.0",
@@ -879,17 +882,74 @@ async def shutdown_reminders():
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     """Health check — UptimeRobot ve benzeri monitor'lar HEAD kullaniyor.
-    GET = JSON detay, HEAD = sadece 200 status (otomatik)."""
-    ocr_key = os.getenv("OCR_API_KEY", "")
+    GET = JSON detay, HEAD = sadece 200 status (otomatik).
+
+    Genisletilmis: alt-sistem detaylari (db, ocr, stripe, sentry, ai-reviewer,
+    telegram). Hicbiri request'i fail etmez — sadece raporlar. Degradation
+    durumunda status: "degraded" doner ama HTTP 200 kalir (monitor patlamasin).
+    """
+    import time
+    t0 = time.time()
+
+    # DB latency + connectivity
     db_ok = True
+    db_latency_ms = None
     try:
         from sqlalchemy import text
+        _t = time.time()
         db = SessionLocal()
         db.execute(text("SELECT 1"))
         db.close()
+        db_latency_ms = round((time.time() - _t) * 1000, 1)
     except Exception:
         db_ok = False
-    return {"status": "ok", "version": "5.5.5", "ocr_configured": bool(ocr_key), "db_connected": db_ok}
+
+    # Disk usage (uploads/data dir)
+    disk_ok = True
+    disk_free_gb = None
+    try:
+        import shutil
+        data_dir = os.getenv("DATA_DIR", os.path.dirname(__file__))
+        usage = shutil.disk_usage(data_dir)
+        disk_free_gb = round(usage.free / (1024**3), 2)
+        # 500 MB altinda warning
+        if usage.free < 500 * 1024 * 1024:
+            disk_ok = False
+    except Exception:
+        pass
+
+    # External service config flags (set/unset — actual reachability test
+    # etmiyoruz, cunku /health hizli olmali, network round-trip yok)
+    services = {
+        "db": db_ok,
+        "ocr_configured": bool(os.getenv("OCR_API_KEY")),
+        "stripe_configured": bool(os.getenv("STRIPE_SECRET_KEY")),
+        "stripe_webhook_configured": bool(os.getenv("STRIPE_WEBHOOK_SECRET")),
+        "sentry_configured": bool(os.getenv("SENTRY_DSN")),
+        "telegram_configured": bool(
+            os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
+        ),
+        "telegram_webhook_secret": bool(os.getenv("TELEGRAM_WEBHOOK_SECRET")),
+        "ai_reviewer_configured": bool(
+            os.getenv("AI_REVIEWER_WEBHOOK_URL") and os.getenv("AI_REVIEWER_SECRET")
+        ),
+        "anthropic_configured": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "disk_ok": disk_ok,
+    }
+
+    # Critical = db. Geri kalan opsiyonel.
+    status = "ok" if db_ok and disk_ok else ("degraded" if db_ok else "down")
+    total_ms = round((time.time() - t0) * 1000, 1)
+
+    return {
+        "status": status,
+        "version": "5.5.5",
+        "uptime_seconds": int(time.time() - _BOOT_TIME) if "_BOOT_TIME" in globals() else None,
+        "response_time_ms": total_ms,
+        "db": {"connected": db_ok, "latency_ms": db_latency_ms},
+        "disk": {"ok": disk_ok, "free_gb": disk_free_gb},
+        "services": services,
+    }
 
 
 @app.get("/manifest.json")

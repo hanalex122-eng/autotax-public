@@ -737,6 +737,40 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
       </div>
       <div style={{fontSize:13,fontWeight:600,color:"#ef4444"}}>Upgrade →</div>
     </div>}
+    {allInv.length === 0 && me && (() => {
+      const hasTelegram = !!me.telegram_chat_id;
+      const hasCompany = !!(me.company_name && me.company_name.trim());
+      const steps = [
+        {done: false, icon:"📤", title: getLang()==="de"?"Erste Rechnung hochladen":"Upload first invoice", desc: getLang()==="de"?"Drag & Drop PDF / Foto":"Drag & Drop PDF / photo", action: ()=>onNav&&onNav("upload")},
+        {done: hasCompany, icon:"🏢", title: getLang()==="de"?"Firmendaten ergänzen":"Add company info", desc: getLang()==="de"?"Name, USt-IdNr., Adresse":"Name, VAT ID, address", action: ()=>onNav&&onNav("companies")},
+        {done: hasTelegram, icon:"📲", title: getLang()==="de"?"Telegram verbinden":"Connect Telegram", desc: getLang()==="de"?"Benachrichtigungen erhalten":"Get notifications", action: ()=>onNav&&onNav("notifications")},
+        {done: false, icon:"🖥️", title: getLang()==="de"?"Watcher installieren":"Install Watcher", desc: getLang()==="de"?"Auto-Upload für Scanner":"Auto-upload from scanner", action: ()=>onNav&&onNav("help")},
+      ];
+      const doneCount = steps.filter(s=>s.done).length;
+      return (<div style={{...css.card,padding:"20px 22px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:22}}>🚀</span>
+            <div>
+              <div style={{fontSize:15,fontWeight:700,color:theme.text}}>{getLang()==="de"?"Schnellstart":"Quick Start"}</div>
+              <div style={{fontSize:12,color:theme.textMuted,marginTop:2}}>{getLang()==="de"?"In 4 Schritten einsatzbereit":"Ready in 4 steps"}</div>
+            </div>
+          </div>
+          <div style={{fontSize:12,color:theme.textDim,fontFamily:mono}}>{doneCount} / {steps.length}</div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:10}}>
+          {steps.map((s,i)=>(<div key={i} onClick={s.action} style={{cursor:"pointer",padding:"12px 14px",borderRadius:10,background:s.done?theme.accentSoft:theme.surfaceAlt,border:`1px solid ${s.done?theme.accent+"55":theme.border}`,transition:"all 0.15s",display:"flex",alignItems:"center",gap:10}}
+            onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor=theme.accent+"99";}}
+            onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor=s.done?theme.accent+"55":theme.border;}}>
+            <div style={{fontSize:22,opacity:s.done?0.6:1}}>{s.done?"✓":s.icon}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:s.done?theme.accent:theme.text,textDecoration:s.done?"line-through":"none"}}>{s.title}</div>
+              <div style={{fontSize:11,color:theme.textMuted,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.desc}</div>
+            </div>
+          </div>))}
+        </div>
+      </div>);
+    })()}
     {steuer.length > 0 && (() => {
       // Sadece sonraki 30 gun icindekileri goster
       const close = steuer.filter(s => s.days_until !== null && s.days_until <= 30 && s.days_until >= -1);
@@ -3555,29 +3589,16 @@ function App(){
               <div style={{fontSize:13,fontWeight:600,color:theme.text}}>{_t("my_account")}</div>
               <div style={{fontSize:11,color:theme.textDim,marginTop:2}}>AutoTax-HUB <span style={{background:"#f59e0b",color:"#000",fontSize:8,fontWeight:700,padding:"1px 4px",borderRadius:3}}>BETA</span></div>
             </div>
-            <div onClick={()=>{setPage("help");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <Icon d={I.help} size={16}/><span style={{fontSize:13}}>Hilfe & FAQ</span>
-            </div>
             <div onClick={()=>{setPage("dashboard");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <Icon d={I.dashboard} size={16}/><span style={{fontSize:13}}>Dashboard</span>
             </div>
+
+            <div style={{fontSize:10,fontWeight:700,color:theme.textDim,padding:"8px 14px 4px 14px",textTransform:"uppercase",letterSpacing:0.5}}>{getLang()==="de"?"Konto":"Account"}</div>
             <div onClick={()=>{setShowPwChange(true);setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <span style={{fontSize:16}}>🔑</span><span style={{fontSize:13}}>Change Password</span>
-            </div>
-            <div onClick={()=>{loadCompanies();setShowCompanies(true);setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <span style={{fontSize:16}}>🏢</span><span style={{fontSize:13}}>{_t("my_companies")}</span>
-            </div>
-            <div onClick={()=>{setPage("audit");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <span style={{fontSize:16}}>📋</span><span style={{fontSize:13}}>{getLang()==="de"?"Aktivitäten":"Activity"}</span>
-            </div>
-            <div onClick={()=>{setPage("jobs");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <span style={{fontSize:16}}>⚙️</span><span style={{fontSize:13}}>{getLang()==="de"?"Hintergrund-Jobs":"Background Jobs"}</span>
+              <span style={{fontSize:16}}>🔑</span><span style={{fontSize:13}}>{getLang()==="de"?"Passwort ändern":"Change Password"}</span>
             </div>
             <div onClick={()=>{setPage("advisor");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:16}}>👔</span><span style={{fontSize:13}}>{getLang()==="de"?"Steuerberater":"Tax Advisor"}</span>
-            </div>
-            <div onClick={()=>{setPage("steuer");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <span style={{fontSize:16}}>🧾</span><span style={{fontSize:13}}>{getLang()==="de"?"Steuer-Termine":"Tax Deadlines"}</span>
             </div>
             <div onClick={()=>{setPage("notifications");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:16}}>🔔</span><span style={{fontSize:13}}>{getLang()==="de"?"Benachrichtigungen":"Notifications"}</span>
@@ -3585,6 +3606,28 @@ function App(){
             <div onClick={()=>{setPage("pricing");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:16}}>💳</span><span style={{fontSize:13}}>{getLang()==="de"?"Abonnement & Preise":"Subscription & Pricing"}</span>
             </div>
+
+            <div style={{height:1,background:theme.border,margin:"4px 0"}}/>
+            <div style={{fontSize:10,fontWeight:700,color:theme.textDim,padding:"8px 14px 4px 14px",textTransform:"uppercase",letterSpacing:0.5}}>{getLang()==="de"?"Geschäft":"Business"}</div>
+            <div onClick={()=>{setPage("steuer");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:16}}>🧾</span><span style={{fontSize:13}}>{getLang()==="de"?"Steuer-Termine":"Tax Deadlines"}</span>
+            </div>
+            <div onClick={()=>{loadCompanies();setShowCompanies(true);setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:16}}>🏢</span><span style={{fontSize:13}}>{_t("my_companies")}</span>
+            </div>
+
+            <div style={{height:1,background:theme.border,margin:"4px 0"}}/>
+            <div style={{fontSize:10,fontWeight:700,color:theme.textDim,padding:"8px 14px 4px 14px",textTransform:"uppercase",letterSpacing:0.5}}>{getLang()==="de"?"Info & System":"Info & System"}</div>
+            <div onClick={()=>{setPage("audit");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:16}}>📋</span><span style={{fontSize:13}}>{getLang()==="de"?"Aktivitäten":"Activity"}</span>
+            </div>
+            <div onClick={()=>{setPage("jobs");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:16}}>⚙️</span><span style={{fontSize:13}}>{getLang()==="de"?"Hintergrund-Jobs":"Background Jobs"}</span>
+            </div>
+            <div onClick={()=>{setPage("help");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <Icon d={I.help} size={16}/><span style={{fontSize:13}}>Hilfe & FAQ</span>
+            </div>
+
             <div style={{height:1,background:theme.border,margin:"4px 0"}}/>
             <div onClick={async()=>{
               setProfileOpen(false);
