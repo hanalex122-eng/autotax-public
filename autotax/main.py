@@ -3247,6 +3247,260 @@ def admin_jobs_health(user: dict = Depends(get_current_user), hours: int = 24):
         db.close()
 
 
+# ---------------------------------------------------------------------------
+# Telegram bot — per-user notification binding (Sprint 2B)
+# Bot env: TELEGRAM_BOT_TOKEN (BotFather'dan), TELEGRAM_BOT_USERNAME
+#   ör. AutoTaxBot. TELEGRAM_WEBHOOK_SECRET = Telegram'ın
+#   X-Telegram-Bot-Api-Secret-Token header'ında göndereceği secret.
+# ---------------------------------------------------------------------------
+
+@app.post("/telegram/link/start")
+def telegram_link_start(user: dict = Depends(get_current_user)):
+    """One-time deeplink üret. Kullanıcı linki Telegram'da açar,
+    bot /start <token> mesajını /telegram/webhook'a yollar."""
+    import secrets as _secrets
+    from autotax.models import TelegramLinkToken
+    bot_username = (os.environ.get("TELEGRAM_BOT_USERNAME") or "").strip()
+    if not bot_username:
+        err(503, "Telegram-Bot ist nicht eingerichtet. Admin bitte TELEGRAM_BOT_USERNAME setzen.")
+    token = _secrets.token_urlsafe(32)
+    db = SessionLocal()
+    try:
+        # Eski token'ları temizle (15dk'dan eski)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+        db.query(TelegramLinkToken).filter(
+            TelegramLinkToken.user_id == user["sub"],
+            TelegramLinkToken.created_at < cutoff,
+        ).delete(synchronize_session=False)
+        row = TelegramLinkToken(
+            user_id=user["sub"],
+            token=token,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
+        )
+        db.add(row)
+        db.commit()
+        return {
+            "success": True,
+            "deeplink": f"https://t.me/{bot_username}?start={token}",
+            "token": token,
+            "expires_in_seconds": 900,
+        }
+    finally:
+        db.close()
+
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
+    """Bot'tan gelen mesajlar burada işlenir.
+    Telegram her POST'ta X-Telegram-Bot-Api-Secret-Token header'ı yollar
+    (webhook setWebhook ile bizim seçtiğimiz secret). Bu doğrulanmadan
+    işlem yapılmaz — webhook spoofing'i bu sayede önlenir."""
+    expected_secret = (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    got_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not expected_secret or got_secret != expected_secret:
+        logger.warning("TELEGRAM WEBHOOK: invalid secret")
+        return JSONResponse(status_code=403, content={"error": "forbidden"})
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "bad json"})
+
+    msg = body.get("message") or body.get("edited_message") or {}
+    text = (msg.get("text") or "").strip()
+    chat = msg.get("chat") or {}
+    chat_id = str(chat.get("id") or "")
+    from_user = msg.get("from") or {}
+    username = (from_user.get("username") or "").strip()
+
+    if not chat_id:
+        return {"ok": True, "ignored": "no chat"}
+
+    # /start <token> — link binding
+    if text.startswith("/start "):
+        token = text.split(" ", 1)[1].strip()
+        from autotax.models import TelegramLinkToken
+        db = SessionLocal()
+        try:
+            now = datetime.now(timezone.utc)
+            tk = db.query(TelegramLinkToken).filter(
+                TelegramLinkToken.token == token,
+                TelegramLinkToken.used_at.is_(None),
+            ).first()
+            if not tk:
+                await _send_telegram_raw(chat_id, "❌ Token nicht gefunden oder bereits verwendet.")
+                return {"ok": True}
+            if tk.expires_at.replace(tzinfo=timezone.utc) < now:
+                await _send_telegram_raw(chat_id, "⏱ Token abgelaufen. Bitte einen neuen Link generieren.")
+                return {"ok": True}
+            u = db.query(User).filter(User.id == tk.user_id).first()
+            if not u:
+                return {"ok": True}
+            u.telegram_chat_id = chat_id
+            u.telegram_username = username or None
+            tk.used_at = now
+            db.commit()
+            audit("telegram.linked", user_id=u.id, payload={"chat_id": chat_id, "username": username})
+            await _send_telegram_raw(
+                chat_id,
+                f"✅ Verbunden mit Konto <b>{u.email}</b>.\n\n"
+                f"Sie erhalten ab jetzt Benachrichtigungen für Mahnungen, Steuer-Termine, "
+                f"Trial-Erinnerungen und Monatszusammenfassungen.\n\n"
+                f"Einstellungen ändern: Account → Benachrichtigungen."
+            )
+            return {"ok": True, "linked": True}
+        finally:
+            db.close()
+
+    # /stop — disconnect
+    if text == "/stop":
+        db = SessionLocal()
+        try:
+            u = db.query(User).filter(User.telegram_chat_id == chat_id).first()
+            if u:
+                u.telegram_chat_id = None
+                u.telegram_username = None
+                db.commit()
+                audit("telegram.unlinked", user_id=u.id, payload={"via": "bot_command"})
+            await _send_telegram_raw(chat_id, "🚫 Verbindung getrennt. /start <token> mit einem neuen Link.")
+        finally:
+            db.close()
+        return {"ok": True}
+
+    # Help
+    if text == "/help" or text == "/start":
+        await _send_telegram_raw(
+            chat_id,
+            "🧾 <b>AutoTax-Cloud Notification Bot</b>\n\n"
+            "Befehle:\n"
+            "• /start &lt;token&gt; — Konto verbinden\n"
+            "• /stop — Verbindung trennen\n"
+            "• /status — Verbindungsstatus\n"
+            "• /help — diese Hilfe\n\n"
+            "Link erhalten: AutoTax-App → Account → Telegram verbinden",
+        )
+        return {"ok": True}
+
+    if text == "/status":
+        db = SessionLocal()
+        try:
+            u = db.query(User).filter(User.telegram_chat_id == chat_id).first()
+            if u:
+                await _send_telegram_raw(chat_id, f"✓ Verbunden: {u.email}")
+            else:
+                await _send_telegram_raw(chat_id, "❌ Nicht verbunden. /start <token>")
+        finally:
+            db.close()
+        return {"ok": True}
+
+    return {"ok": True, "ignored": "unrecognized command"}
+
+
+async def _send_telegram_raw(chat_id: str, text: str) -> bool:
+    """Doğrudan Telegram API'ye gönder — sadece webhook handler kullanır.
+    Genel notify path için reminders.py:send_telegram() kullanılır."""
+    bot_token = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    if not bot_token or not chat_id:
+        return False
+    import httpx
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(url, json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            })
+            return r.status_code == 200
+    except Exception:
+        logger.exception("telegram raw send failed for %s", chat_id)
+        return False
+
+
+class TelegramPrefUpdate(BaseModel):
+    mahnung: bool | None = None
+    summary: bool | None = None
+    steuer: bool | None = None
+    reminders: bool | None = None
+    advisor: bool | None = None
+
+
+@app.patch("/account/telegram/preferences")
+def telegram_prefs_update(request: Request, body: TelegramPrefUpdate, user: dict = Depends(get_current_user)):
+    """Hangi event tipinde Telegram bildirimi alınacağını kullanıcı seçer."""
+    import json as _json
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u:
+            err(404, "User not found")
+        # Mevcut tercihler
+        prefs = {"mahnung": True, "summary": True, "steuer": True, "reminders": True, "advisor": True}
+        if u.telegram_notify_pref:
+            try:
+                prefs.update(_json.loads(u.telegram_notify_pref))
+            except Exception:
+                pass
+        changes = {}
+        for k in ("mahnung", "summary", "steuer", "reminders", "advisor"):
+            v = getattr(body, k)
+            if v is not None:
+                prefs[k] = bool(v)
+                changes[k] = bool(v)
+        u.telegram_notify_pref = _json.dumps(prefs)
+        db.commit()
+        audit("telegram.preferences_update", user_id=u.id, payload=changes, request=request)
+        return {"success": True, "preferences": prefs}
+    finally:
+        db.close()
+
+
+@app.delete("/account/telegram/disconnect")
+def telegram_disconnect(request: Request, user: dict = Depends(get_current_user)):
+    """Account ayarlarından bağlantıyı kes."""
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u:
+            err(404, "User not found")
+        old_chat = u.telegram_chat_id
+        u.telegram_chat_id = None
+        u.telegram_username = None
+        db.commit()
+        audit("telegram.unlinked", user_id=u.id, payload={"via": "api"}, request=request)
+        return {"success": True, "was_connected": bool(old_chat)}
+    finally:
+        db.close()
+
+
+@app.get("/account/telegram/status")
+def telegram_status(user: dict = Depends(get_current_user)):
+    """Frontend Account view için: bağlı mı, tercihler ne?"""
+    import json as _json
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u:
+            err(404, "User not found")
+        prefs = {"mahnung": True, "summary": True, "steuer": True, "reminders": True, "advisor": True}
+        if u.telegram_notify_pref:
+            try:
+                prefs.update(_json.loads(u.telegram_notify_pref))
+            except Exception:
+                pass
+        bot_username = (os.environ.get("TELEGRAM_BOT_USERNAME") or "").strip()
+        return {
+            "connected": bool(u.telegram_chat_id),
+            "username": u.telegram_username,
+            "preferences": prefs,
+            "bot_available": bool(bot_username),
+            "bot_username": bot_username if bot_username else None,
+        }
+    finally:
+        db.close()
+
+
 @app.get("/audit/recent")
 @limiter.limit("60/minute")
 def audit_recent(

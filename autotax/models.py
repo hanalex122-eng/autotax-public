@@ -38,6 +38,61 @@ class User(Base):
     subscription_status = Column(String(20), nullable=True)
     stripe_subscription_id = Column(String, nullable=True)
     plan_ends_at = Column(DateTime, nullable=True)
+    # Per-user Telegram bot binding (Sprint 2B)
+    # NULL = bağlı değil (global admin chat fallback). Bot /start <token>
+    # ile bind edilir. Kullanıcı dilediği zaman disconnect edebilir.
+    telegram_chat_id = Column(String(50), nullable=True)
+    telegram_username = Column(String(50), nullable=True)
+    # JSON list: ["mahnung","summary","steuer","reminders","advisor"]
+    # NULL = hepsi açık (default). Kullanıcı PATCH ile kapatabilir.
+    telegram_notify_pref = Column(Text, nullable=True)
+
+
+class TelegramLinkToken(Base):
+    """One-time token Telegram bot binding'i için.
+
+    Flow:
+      1. User /telegram/link/start çağırır → token üretilir, deeplink döner
+         (https://t.me/<bot>?start=<token>)
+      2. User Telegram'da botu açar → bot /start <token> mesajı bizim
+         /telegram/webhook'a gelir
+      3. Token doğrulanır, User.telegram_chat_id set edilir, used_at yazılır
+      4. User'a "✓ Bağlandı" mesajı
+
+    15 dk geçerli, tek kullanımlık (used_at NULL olmayan token reddedilir)."""
+    __tablename__ = "telegram_link_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+
+
+class SentNotificationLog(Base):
+    """Tüm dış bildirim gönderimleri (Telegram, email, webhook) için
+    audit + dedup tablosu. Eski reminder_sent_codes JSON string'i bunu
+    kapsamlı şekilde yerine alır.
+
+    Dedup: aynı (user, kind, ref_type, ref_id) bir gün içinde tekrar
+    gönderilmesin diye filter kullanır."""
+    __tablename__ = "sent_notifications"
+    __table_args__ = (
+        Index("ix_sent_user_kind_ref", "user_id", "kind", "ref_type", "ref_id"),
+        Index("ix_sent_sent_at", "sent_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    channel = Column(String(20), nullable=False)   # telegram | email | webhook
+    kind = Column(String(50), nullable=False)      # mahnung_l1 | invoice_overdue_7d | ...
+    target = Column(String(200), nullable=True)    # chat_id veya email
+    ref_type = Column(String(30), nullable=True)   # invoice | steuer_reminder | ...
+    ref_id = Column(Integer, nullable=True)
+    status = Column(String(20), nullable=False, default="sent")  # sent | failed
+    error = Column(Text, nullable=True)
+    sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class StripeEventLog(Base):

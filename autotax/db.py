@@ -72,6 +72,15 @@ def init_db():
             if "plan_ends_at" not in user_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN plan_ends_at TIMESTAMP"))
                 logger.info("Added 'plan_ends_at' column to users")
+            if "telegram_chat_id" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(50)"))
+                logger.info("Added 'telegram_chat_id' column to users")
+            if "telegram_username" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN telegram_username VARCHAR(50)"))
+                logger.info("Added 'telegram_username' column to users")
+            if "telegram_notify_pref" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN telegram_notify_pref TEXT"))
+                logger.info("Added 'telegram_notify_pref' column to users")
         # Invoice table — file storage columns
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:

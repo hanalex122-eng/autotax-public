@@ -2531,6 +2531,133 @@ function AdvisorView(){
   </div>);
 }
 
+function NotificationsView(){
+  const[status,setStatus]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[deeplink,setDeeplink]=useState("");
+  const _l=getLang();
+  const tr=(de,en)=>_l==="de"?de:en;
+  const load=async()=>{
+    setLoading(true);
+    try{
+      const r=await _authFetch(API+"/account/telegram/status");
+      const d=await r.json();
+      if(r.ok)setStatus(d);
+    }catch(e){}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+  const startLink=async()=>{
+    try{
+      const r=await _authFetch(API+"/telegram/link/start",{method:"POST"});
+      const d=await r.json();
+      if(r.ok){
+        setDeeplink(d.deeplink);
+        window.open(d.deeplink,"_blank");
+      }else{
+        alert(_extractErr(d));
+      }
+    }catch(e){alert(e.message);}
+  };
+  const disconnect=async()=>{
+    if(!confirm(tr("Telegram-Verbindung trennen?","Disconnect Telegram?")))return;
+    try{
+      const r=await _authFetch(API+"/account/telegram/disconnect",{method:"DELETE"});
+      if(r.ok){if(showToast)showToast(tr("Verbindung getrennt","Disconnected"),"info");load();}
+    }catch(e){}
+  };
+  const togglePref=async(key,value)=>{
+    try{
+      const r=await _authFetch(API+"/account/telegram/preferences",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({[key]:value})});
+      const d=await r.json();
+      if(r.ok)setStatus(prev=>({...prev,preferences:d.preferences}));
+    }catch(e){}
+  };
+  const downloadExport=async()=>{
+    try{
+      const r=await _authFetch(API+"/account/export-all");
+      if(!r.ok){const d=await r.json();alert(_extractErr(d));return;}
+      const blob=await r.blob();
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;a.download="autotax-export.zip";
+      document.body.appendChild(a);a.click();a.remove();
+      URL.revokeObjectURL(url);
+      if(showToast)showToast(tr("Export heruntergeladen","Export downloaded"),"success");
+    }catch(e){alert(e.message);}
+  };
+  const prefLabels={
+    mahnung:{icon:"📨",text:tr("Mahnungen","Dunning notices")},
+    summary:{icon:"📊",text:tr("Monatszusammenfassung","Monthly summary")},
+    steuer:{icon:"🧾",text:tr("Steuer-Termine","Tax deadlines")},
+    reminders:{icon:"⏰",text:tr("Rechnung-Erinnerungen","Invoice reminders")},
+    advisor:{icon:"👔",text:tr("Steuerberater-Aktivität","Tax advisor activity")},
+  };
+  return(<div style={{display:"flex",flexDirection:"column",gap:24,maxWidth:720}}>
+    <div>
+      <h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>🔔 {tr("Benachrichtigungen & Daten","Notifications & Data")}</h2>
+      <p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{tr("Telegram-Bot, E-Mail-Einstellungen und DSGVO-Export.","Telegram bot, email settings, and GDPR export.")}</p>
+    </div>
+
+    {/* TELEGRAM */}
+    <div style={css.card}>
+      <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 4px"}}>📱 Telegram Bot</h3>
+      <p style={{color:theme.textMuted,fontSize:12,margin:"0 0 16px"}}>{tr("Benachrichtigungen direkt in Telegram — schnell, gratis, kein E-Mail-Spam.","Notifications straight in Telegram — fast, free, no email clutter.")}</p>
+      {loading&&<div style={{color:theme.textDim,fontSize:13}}>⏳ ...</div>}
+      {!loading&&status&&!status.bot_available&&<div style={{padding:12,background:theme.warnSoft,border:"1px solid "+theme.warn+"55",borderRadius:8,fontSize:12,color:theme.warn}}>
+        ⚠️ {tr("Telegram-Bot ist serverseitig noch nicht eingerichtet (TELEGRAM_BOT_USERNAME env fehlt).","Telegram bot is not configured on the server (TELEGRAM_BOT_USERNAME env missing).")}
+      </div>}
+      {!loading&&status&&status.bot_available&&!status.connected&&<div>
+        <div style={{padding:12,background:theme.surfaceAlt,borderRadius:8,fontSize:13,color:theme.textMuted,marginBottom:12}}>
+          {tr(
+            "Drücken Sie den Button — ein einmaliger Link öffnet Telegram. Im Bot wird automatisch der /start-Befehl mit Ihrem Token ausgeführt.",
+            "Press the button — a one-time link opens Telegram. The bot will automatically run /start with your token."
+          )}
+        </div>
+        <button style={{...css.btn(),width:"100%"}} onClick={startLink}>
+          🔗 {tr("Telegram-Bot verbinden","Connect Telegram Bot")}
+        </button>
+        {deeplink&&<div style={{marginTop:10,fontSize:11,color:theme.textDim}}>
+          {tr("Falls Telegram nicht automatisch öffnet:","If Telegram didn't open:")} <a href={deeplink} target="_blank" rel="noopener" style={{color:theme.accent}}>{deeplink}</a>
+        </div>}
+      </div>}
+      {!loading&&status&&status.connected&&<div>
+        <div style={{padding:12,background:theme.accentSoft,border:"1px solid "+theme.accent+"55",borderRadius:8,marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:20}}>✅</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:600,color:theme.text}}>{tr("Verbunden","Connected")}{status.username?" — @"+status.username:""}</div>
+            <div style={{fontSize:11,color:theme.textMuted}}>{tr("Sie erhalten Benachrichtigungen entsprechend Ihren Einstellungen unten.","You receive notifications based on your preferences below.")}</div>
+          </div>
+          <button style={{...css.btnOutline,color:theme.danger,borderColor:theme.danger+"55",fontSize:12}} onClick={disconnect}>{tr("Trennen","Disconnect")}</button>
+        </div>
+        <div style={{borderTop:"1px solid "+theme.border,paddingTop:12}}>
+          <div style={{fontSize:12,color:theme.textMuted,marginBottom:10}}>{tr("Welche Benachrichtigungen?","Which notifications?")}</div>
+          {Object.entries(prefLabels).map(([k,v])=>(<div key={k} style={{display:"flex",alignItems:"center",padding:"8px 0",borderBottom:"1px solid "+theme.border+"55"}}>
+            <span style={{fontSize:18,marginRight:10}}>{v.icon}</span>
+            <span style={{flex:1,fontSize:13,color:theme.text}}>{v.text}</span>
+            <label style={{cursor:"pointer",display:"inline-flex",alignItems:"center"}}>
+              <input type="checkbox" checked={status.preferences[k]!==false} onChange={e=>togglePref(k,e.target.checked)} style={{width:18,height:18,accentColor:theme.accent,cursor:"pointer"}}/>
+            </label>
+          </div>))}
+        </div>
+      </div>}
+    </div>
+
+    {/* DSGVO EXPORT */}
+    <div style={css.card}>
+      <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 4px"}}>📥 {tr("Datenexport (DSGVO Art. 15)","Data Export (GDPR Art. 15)")}</h3>
+      <p style={{color:theme.textMuted,fontSize:12,margin:"0 0 12px"}}>{tr(
+        "Alle Ihre Daten als ZIP herunterladen: Rechnungen, Kassenbuch, Aktivitäten, Firmen, Steuerberater-Beziehungen.",
+        "Download all your data as ZIP: invoices, cash book, activity log, companies, advisor relationships."
+      )}</p>
+      <button style={{...css.btn(),width:"100%"}} onClick={downloadExport}>
+        📦 {tr("Daten herunterladen","Download data")}
+      </button>
+      <div style={{fontSize:10,color:theme.textDim,marginTop:8,textAlign:"center"}}>{tr("Limit 3/Stunde — größere Anfragen bitte per Support.","Limit 3/hour — larger requests via support.")}</div>
+    </div>
+  </div>);
+}
+
 function SteuerView(){
   const[items,setItems]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -3221,7 +3348,7 @@ function App(){
     return()=>window.removeEventListener("hashchange",checkHash);
   },[]);
   if(!authed)return<Fragment><AuthScreen onLogin={()=>setAuthed(true)}/><CookieConsent/></Fragment>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView};
+  const views={dashboard:DashboardView,invoices:InvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView};
   const _t=typeof t==="function"?t:k=>k;
   const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.
@@ -3430,6 +3557,9 @@ function App(){
             </div>
             <div onClick={()=>{setPage("steuer");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:16}}>🧾</span><span style={{fontSize:13}}>{getLang()==="de"?"Steuer-Termine":"Tax Deadlines"}</span>
+            </div>
+            <div onClick={()=>{setPage("notifications");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:16}}>🔔</span><span style={{fontSize:13}}>{getLang()==="de"?"Benachrichtigungen":"Notifications"}</span>
             </div>
             <div onClick={()=>{setPage("pricing");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:16}}>💳</span><span style={{fontSize:13}}>{getLang()==="de"?"Abonnement & Preise":"Subscription & Pricing"}</span>

@@ -36,7 +36,7 @@ from datetime import timedelta as _td
 
 logger = logging.getLogger("autotax.reminders")
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 # Alternatif: uptime-bot webhook'una gondererek Telegram'a forward
 # (autotax-hub'a TELEGRAM_TOKEN duplicate etmemek icin temiz mimari).
@@ -106,44 +106,131 @@ def determine_reminder_code(due_date_str: Optional[str], today: Optional[date] =
 # Notification senders
 # ───────────────────────────────────────────────────────────────────
 
-async def send_telegram(text: str) -> bool:
-    """Telegram'a mesaj gonder. Iki yol:
-    1) NOTIFY_WEBHOOK_URL set ise -> uptime-bot'un webhook'una POST et
-       (uptime-bot Telegram'a forward eder; credentials orada saklanir).
-    2) TELEGRAM_TOKEN+CHAT_ID set ise -> direkt Telegram Bot API'ye gonder.
+def _user_telegram_target(user_id: Optional[int], kind: str) -> Optional[str]:
+    """User'ın kendi telegram_chat_id'sini bul + kind için tercihi açık mı kontrol.
+    Döndürür: chat_id veya None (fallback global'e düşmek için)."""
+    if not user_id:
+        return None
+    try:
+        from autotax.db import SessionLocal as _SL
+        from autotax.models import User as _U
+    except Exception:
+        return None
+    db = _SL()
+    try:
+        u = db.query(_U).filter(_U.id == user_id).first()
+        if not u or not u.telegram_chat_id:
+            return None
+        # Tercih kontrolü — None ise hepsi açık
+        if u.telegram_notify_pref:
+            try:
+                prefs = json.loads(u.telegram_notify_pref)
+                if isinstance(prefs, dict) and prefs.get(kind, True) is False:
+                    return None  # bu kind kapalı
+            except Exception:
+                pass
+        return u.telegram_chat_id
+    finally:
+        db.close()
+
+
+def _log_notification(*, user_id: Optional[int], channel: str, kind: str,
+                      target: Optional[str], ref_type: Optional[str],
+                      ref_id: Optional[int], status: str, error: Optional[str] = None) -> None:
+    try:
+        from autotax.db import SessionLocal as _SL
+        from autotax.models import SentNotificationLog as _SN
+    except Exception:
+        return
+    db = _SL()
+    try:
+        db.add(_SN(user_id=user_id, channel=channel, kind=kind,
+                   target=(target or "")[:200], ref_type=ref_type, ref_id=ref_id,
+                   status=status, error=(error or "")[:5000] if error else None))
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+async def send_telegram(text: str, *, user_id: Optional[int] = None,
+                       kind: str = "general", ref_type: Optional[str] = None,
+                       ref_id: Optional[int] = None) -> bool:
+    """Telegram'a mesaj gonder. Routing:
+    1) user_id verilirse + kullanıcı bot'u bind ettiyse + kind tercihi açıksa
+       → user'ın kendi chat_id'sine
+    2) NOTIFY_WEBHOOK_URL set ise → uptime-bot webhook (eski davranış)
+    3) Global TELEGRAM_TOKEN+CHAT_ID → admin chat (fallback)
+
+    SentNotificationLog'a her gönderim kaydedilir (audit + future dedup).
     """
-    # Yol 1: webhook (tercih edilen — credentials autotax-hub'da yok)
+    target_chat = _user_telegram_target(user_id, kind)
+    used_channel = None
+
+    # Yol 1: per-user chat
+    if target_chat and TELEGRAM_TOKEN:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, json={
+                    "chat_id": target_chat, "text": text,
+                    "parse_mode": "HTML", "disable_web_page_preview": True,
+                })
+                if r.status_code == 200:
+                    _log_notification(user_id=user_id, channel="telegram", kind=kind,
+                                      target=target_chat, ref_type=ref_type, ref_id=ref_id,
+                                      status="sent")
+                    return True
+                logger.warning("[NOTIFY] user telegram %s: %s", r.status_code, r.text[:200])
+        except Exception as e:
+            logger.warning("[NOTIFY] user telegram error: %s", e)
+        # Fall through — global'e düş
+
+    # Yol 2: webhook
     if NOTIFY_WEBHOOK_URL:
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.post(NOTIFY_WEBHOOK_URL, json={"text": text})
                 if r.status_code == 200:
+                    _log_notification(user_id=user_id, channel="webhook", kind=kind,
+                                      target=NOTIFY_WEBHOOK_URL[:100], ref_type=ref_type,
+                                      ref_id=ref_id, status="sent")
                     return True
-                logger.warning("[REMINDER] webhook failed %s: %s", r.status_code, r.text[:200])
+                logger.warning("[NOTIFY] webhook failed %s: %s", r.status_code, r.text[:200])
         except Exception as e:
-            logger.warning("[REMINDER] webhook error: %s", e)
-            # Fall through — direkt API'yi dene
+            logger.warning("[NOTIFY] webhook error: %s", e)
 
-    # Yol 2: direkt Telegram API
+    # Yol 3: global Telegram (admin chat)
     if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.post(url, json={
-                    "chat_id": TELEGRAM_CHAT_ID,
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
+                    "chat_id": TELEGRAM_CHAT_ID, "text": text,
+                    "parse_mode": "HTML", "disable_web_page_preview": True,
                 })
                 if r.status_code == 200:
+                    _log_notification(user_id=user_id, channel="telegram", kind=kind,
+                                      target=TELEGRAM_CHAT_ID, ref_type=ref_type,
+                                      ref_id=ref_id, status="sent")
                     return True
-                logger.warning("[REMINDER] telegram API failed %s: %s", r.status_code, r.text[:200])
+                logger.warning("[NOTIFY] global telegram %s: %s", r.status_code, r.text[:200])
+                _log_notification(user_id=user_id, channel="telegram", kind=kind,
+                                  target=TELEGRAM_CHAT_ID, ref_type=ref_type, ref_id=ref_id,
+                                  status="failed", error=f"HTTP {r.status_code}")
                 return False
         except Exception as e:
-            logger.warning("[REMINDER] telegram error: %s", e)
+            logger.warning("[NOTIFY] global telegram error: %s", e)
+            _log_notification(user_id=user_id, channel="telegram", kind=kind,
+                              target=TELEGRAM_CHAT_ID, ref_type=ref_type, ref_id=ref_id,
+                              status="failed", error=str(e))
             return False
 
-    logger.debug("[REMINDER] no telegram channel configured")
+    logger.debug("[NOTIFY] no telegram channel configured")
     return False
 
 
