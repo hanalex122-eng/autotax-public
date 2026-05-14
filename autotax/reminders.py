@@ -234,17 +234,39 @@ async def send_telegram(text: str, *, user_id: Optional[int] = None,
     return False
 
 
-def send_email(to_addr: str, subject: str, body_html: str) -> bool:
-    """SMTP ile email gonderir. Hicbir env yoksa skip."""
+def send_email(to_addr: str, subject: str, body_html: str,
+               attachments: Optional[list] = None) -> bool:
+    """SMTP ile email gonderir. Hicbir env yoksa skip.
+
+    attachments: opsiyonel liste, her oge (filename, bytes, mime_type) tuple.
+                 Mahnung PDF'i icin kullanilir.
+    """
     if not (SMTP_HOST and SMTP_USER and SMTP_PASS and to_addr):
         logger.debug("[REMINDER] email skipped — SMTP not configured or no recipient")
         return False
     try:
-        msg = MIMEMultipart("alternative")
+        # Eklenti varsa mixed multipart, yoksa alternative
+        if attachments:
+            from email.mime.base import MIMEBase
+            from email import encoders
+            msg = MIMEMultipart("mixed")
+            alt = MIMEMultipart("alternative")
+            alt.attach(MIMEText(body_html, "html", "utf-8"))
+            msg.attach(alt)
+            for att in attachments:
+                fname, data, mime = att if len(att) == 3 else (att[0], att[1], "application/octet-stream")
+                main, sub = (mime or "application/octet-stream").split("/", 1)
+                part = MIMEBase(main, sub)
+                part.set_payload(data)
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", f'attachment; filename="{fname}"')
+                msg.attach(part)
+        else:
+            msg = MIMEMultipart("alternative")
+            msg.attach(MIMEText(body_html, "html", "utf-8"))
         msg["Subject"] = subject
         msg["From"] = SMTP_FROM or SMTP_USER
         msg["To"] = to_addr
-        msg.attach(MIMEText(body_html, "html", "utf-8"))
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
             s.starttls()
             s.login(SMTP_USER, SMTP_PASS)

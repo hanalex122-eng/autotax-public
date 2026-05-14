@@ -2428,6 +2428,150 @@ async def admin_run_monthly_summary_now(user: dict = Depends(get_current_user)):
     return {"success": True, "stats": stats}
 
 
+@app.get("/invoices/mahnung/queue")
+def mahnung_queue(user: dict = Depends(get_current_user)):
+    """Kullanicinin Mahnung gerektiren income faturalari + tavsiye edilen
+    seviye. Frontend bunu liste/widget olarak gosterir.
+    """
+    from autotax.mahnung import determine_mahnung_level, _today_utc, MAHNUNG_DAYS
+    db = SessionLocal()
+    try:
+        invs = (
+            db.query(Invoice)
+            .filter(Invoice.user_id == user["sub"])
+            .filter(Invoice.invoice_type == "income")
+            .filter(Invoice.payment_status != "paid")
+            .filter(Invoice.due_date.isnot(None))
+            .filter((Invoice.is_deleted == False) | (Invoice.is_deleted == None))
+            .all()
+        )
+        today = _today_utc()
+        items = []
+        for inv in invs:
+            recommended = determine_mahnung_level(inv, today)
+            try:
+                due_d = datetime.strptime((inv.due_date or "")[:10], "%Y-%m-%d").date()
+                days_overdue = (today - due_d).days
+            except Exception:
+                days_overdue = None
+            if days_overdue is None or days_overdue < 0:
+                continue
+            items.append({
+                "invoice_id": inv.id,
+                "invoice_number": inv.invoice_number,
+                "vendor": inv.vendor,
+                "vendor_email": inv.vendor_email,
+                "amount": inv.total_amount,
+                "due_date": inv.due_date,
+                "days_overdue": days_overdue,
+                "current_level": int(inv.mahnung_level or 0),
+                "recommended_level": recommended,
+                "last_mahnung_at": inv.last_mahnung_at.isoformat() if inv.last_mahnung_at else None,
+            })
+        items.sort(key=lambda x: -x["days_overdue"])
+        return {"count": len(items), "items": items, "thresholds": MAHNUNG_DAYS}
+    finally:
+        db.close()
+
+
+@app.post("/invoices/{invoice_id}/mahnung/send")
+async def mahnung_send_one(
+    invoice_id: int,
+    body: dict = Body(default={}),
+    user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    """Tek bir fatura icin Mahnung gonder. body: {level?: 1|2|3, send_email?: bool}
+    level verilmezse `determine_mahnung_level()` hesaplar. Telegram + PDF her
+    durumda. Email sadece send_email=true + vendor_email varsa.
+    """
+    from autotax.mahnung import (generate_mahnung_pdf, determine_mahnung_level,
+                                  _MAHNUNG_TEXTS, _today_utc)
+    db = SessionLocal()
+    try:
+        inv = db.query(Invoice).filter(
+            Invoice.id == invoice_id, Invoice.user_id == user["sub"],
+        ).first()
+        if not inv:
+            err(404, "Invoice not found")
+        if inv.invoice_type != "income":
+            err(400, "Mahnung only applies to income invoices")
+        if inv.payment_status == "paid":
+            err(400, "Invoice already paid")
+        level = body.get("level")
+        if level is None:
+            level = determine_mahnung_level(inv, _today_utc())
+        if level not in (1, 2, 3):
+            err(400, "No Mahnung needed (not yet overdue or already at level 3)")
+        sender = db.query(User).filter(User.id == user["sub"]).first()
+        try:
+            pdf_bytes = generate_mahnung_pdf(inv, level, sender)
+        except Exception as e:
+            err(500, f"PDF generation failed: {e}")
+        cfg = _MAHNUNG_TEXTS[level]
+        # Vault'a kaydet
+        try:
+            from autotax import storage
+            fname = f"mahnung-{inv.id}-stufe{level}.pdf"
+            storage.save_file(inv.user_id, pdf_bytes, fname)
+        except Exception:
+            logger.exception("[MAHNUNG] vault save failed")
+        # Telegram bildir
+        try:
+            from autotax.reminders import send_telegram
+            await send_telegram(
+                f"📨 <b>{cfg['title']} versandt</b>\n"
+                f"Kunde: {inv.vendor or '(Kunde)'}\n"
+                f"Rechnung-Nr: {inv.invoice_number or '—'}\n"
+                f"Betrag: {inv.total_amount or 0:.2f} EUR + {cfg['fee']:.2f} Gebühr\n"
+                f"<i>Manuel ausgelöst aus der App.</i>",
+                user_id=inv.user_id, kind="mahnung",
+                ref_type="invoice", ref_id=inv.id,
+            )
+        except Exception:
+            logger.exception("[MAHNUNG] telegram failed")
+        # Email opsiyonel (PDF ile)
+        email_sent = False
+        if body.get("send_email") and inv.vendor_email:
+            try:
+                from autotax.reminders import send_email
+                html_body = f"""<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px">
+<p>Sehr geehrte Damen und Herren,</p>
+<p>{cfg['intro']}</p>
+<p><strong>Rechnungs-Nr:</strong> {inv.invoice_number or '—'}<br>
+<strong>Betrag:</strong> {inv.total_amount or 0:.2f} EUR
+{f'+ Mahngebühr {cfg["fee"]:.2f} EUR' if cfg['fee'] > 0 else ''}<br>
+<strong>Fällig am:</strong> {inv.due_date or '—'}</p>
+<p>Die formale Mahnung als PDF finden Sie im Anhang.</p>
+<p>Mit freundlichen Grüßen,<br>{sender.full_name or sender.email}</p>
+</body></html>"""
+                fname2 = f"Mahnung-{level}-{inv.invoice_number or inv.id}.pdf"
+                email_sent = send_email(
+                    inv.vendor_email,
+                    f"{cfg['title']} — Rechnung {inv.invoice_number or ''}",
+                    html_body,
+                    attachments=[(fname2, pdf_bytes, "application/pdf")],
+                )
+            except Exception:
+                logger.exception("[MAHNUNG] email failed")
+        # State guncelle
+        inv.mahnung_level = level
+        inv.last_mahnung_at = datetime.now(timezone.utc)
+        db.commit()
+        audit("mahnung.sent", user_id=user["sub"], resource_type="invoice",
+              resource_id=inv.id,
+              payload={"level": level, "manual": True, "email_sent": email_sent},
+              request=request)
+        return {
+            "success": True,
+            "level": level,
+            "email_sent": email_sent,
+            "vault_saved": True,
+        }
+    finally:
+        db.close()
+
+
 @app.get("/invoices/{invoice_id}/mahnung-pdf")
 def get_mahnung_pdf(
     invoice_id: int,

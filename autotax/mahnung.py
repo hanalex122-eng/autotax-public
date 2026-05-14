@@ -271,7 +271,9 @@ async def process_mahnungen() -> dict:
                             f"Kunde: {inv.vendor or '(Kunde)'}\n"
                             f"Rechnung: {inv.invoice_number or '—'}\n"
                             f"Betrag: {inv.total_amount or 0:.2f} EUR\n"
-                            f"<i>Mahnung 3 vor {((today - last_d).days)} Tagen verschickt — keine Zahlung. Manuelle Übergabe an Inkassobüro empfohlen.</i>"
+                            f"<i>Mahnung 3 vor {((today - last_d).days)} Tagen verschickt — keine Zahlung. Manuelle Übergabe an Inkassobüro empfohlen.</i>",
+                            user_id=inv.user_id, kind="mahnung",
+                            ref_type="invoice", ref_id=inv.id,
                         )
                         inv.last_mahnung_at = datetime.now(timezone.utc)
                         stats["inkasso_alerts"] += 1
@@ -301,18 +303,19 @@ async def process_mahnungen() -> dict:
                 except Exception:
                     logger.exception("[MAHNUNG] PDF save failed (continuing)")
 
-                # Telegram alert (admin'e)
+                # Telegram alert (operator user'a — kendi chat'i)
                 cfg = _MAHNUNG_TEXTS[new_level]
                 await send_telegram(
                     f"📨 <b>{cfg['title']} versandt</b>\n"
                     f"Kunde: {inv.vendor or '(Kunde)'}\n"
                     f"Rechnung-Nr: {inv.invoice_number or '—'}\n"
                     f"Betrag: {inv.total_amount or 0:.2f} EUR + {cfg['fee']:.2f} Gebühr\n"
-                    f"Operator: {sender.email}\n"
-                    f"<i>PDF wurde im Vault gespeichert.</i>"
+                    f"<i>PDF wurde im Vault gespeichert.</i>",
+                    user_id=inv.user_id, kind="mahnung",
+                    ref_type="invoice", ref_id=inv.id,
                 )
 
-                # Email to customer (vendor_email) — opsiyonel
+                # Email to customer (vendor_email) — Mahnung PDF eki ile
                 if inv.vendor_email:
                     body = f"""<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px">
                     <p>Sehr geehrte Damen und Herren,</p>
@@ -321,9 +324,16 @@ async def process_mahnungen() -> dict:
                     <strong>Betrag:</strong> {inv.total_amount or 0:.2f} EUR
                     {f'+ Mahngebühr {cfg["fee"]:.2f} EUR' if cfg['fee'] > 0 else ''}<br>
                     <strong>Fällig am:</strong> {inv.due_date or '—'}</p>
+                    <p>Die formale Mahnung als PDF finden Sie im Anhang.</p>
                     <p>Mit freundlichen Grüßen,<br>{sender.full_name or sender.email}</p>
                     </body></html>"""
-                    send_email(inv.vendor_email, f"{cfg['title']} — Rechnung {inv.invoice_number or ''}", body)
+                    fname = f"Mahnung-{new_level}-{inv.invoice_number or inv.id}.pdf"
+                    send_email(
+                        inv.vendor_email,
+                        f"{cfg['title']} — Rechnung {inv.invoice_number or ''}",
+                        body,
+                        attachments=[(fname, pdf_bytes, "application/pdf")],
+                    )
 
                 inv.mahnung_level = new_level
                 inv.last_mahnung_at = datetime.now(timezone.utc)
