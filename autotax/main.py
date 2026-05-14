@@ -2071,6 +2071,163 @@ def reminders_overdue(request: Request, user: dict = Depends(get_current_user)):
         db.close()
 
 
+@app.get("/steuer/reminders")
+def steuer_reminders_list(user: dict = Depends(get_current_user), include_done: bool = False, include_snoozed: bool = True):
+    """Kullanıcının tüm aktif vergi reminder'ları + opsiyonel snoozed/done."""
+    from autotax.models import SteuerReminder as _SR
+    from autotax.steuer import ensure_reminders_for_user
+    db = SessionLocal()
+    try:
+        # DB boşsa seed
+        any_row = db.query(_SR.id).filter(_SR.user_id == user["sub"]).first()
+        if not any_row:
+            db.close()
+            ensure_reminders_for_user(user["sub"])
+            db = SessionLocal()
+
+        statuses = ["active"]
+        if include_snoozed: statuses.append("snoozed")
+        if include_done: statuses.extend(["done", "dismissed"])
+
+        rows = db.query(_SR).filter(
+            _SR.user_id == user["sub"],
+            _SR.status.in_(statuses),
+        ).order_by(_SR.due_date.asc()).limit(200).all()
+        today = datetime.now(timezone.utc).date()
+        items = [{
+            "id": r.id, "type": r.type, "label": r.label,
+            "due_date": r.due_date.isoformat() if r.due_date else None,
+            "days_until": (r.due_date - today).days if r.due_date else None,
+            "reminder_date": r.reminder_date.isoformat() if r.reminder_date else None,
+            "status": r.status,
+            "snoozed_until": r.snoozed_until.isoformat() if r.snoozed_until else None,
+            "notes": r.notes,
+            "last_notified_at": r.last_notified_at.isoformat() if r.last_notified_at else None,
+            "notify_count": r.notify_count,
+        } for r in rows]
+        return {"success": True, "items": items, "total": len(items)}
+    finally:
+        db.close()
+
+
+class SteuerReminderCreate(BaseModel):
+    type: str = "custom"
+    due_date: str        # YYYY-MM-DD
+    label: str | None = None
+    notes: str | None = None
+    reminder_date: str | None = None
+
+
+@app.post("/steuer/reminders")
+def steuer_reminders_create(request: Request, body: SteuerReminderCreate, user: dict = Depends(get_current_user)):
+    """Custom vergi vadesi ekle (ust/est/gewst/jahres/custom)."""
+    from autotax.models import SteuerReminder as _SR
+    try:
+        due = datetime.strptime(body.due_date, "%Y-%m-%d").date()
+    except ValueError:
+        err(400, "due_date YYYY-MM-DD formatında olmalı")
+    rem = None
+    if body.reminder_date:
+        try:
+            rem = datetime.strptime(body.reminder_date, "%Y-%m-%d").date()
+        except ValueError:
+            err(400, "reminder_date YYYY-MM-DD formatında olmalı")
+    t = (body.type or "custom").lower()
+    if t not in {"ust", "est", "gewst", "jahres", "custom"}:
+        err(400, f"Geçersiz tip: {t}")
+    db = SessionLocal()
+    try:
+        # Aynı (user, type, due_date) varsa 409
+        existing = db.query(_SR).filter(
+            _SR.user_id == user["sub"],
+            _SR.type == t,
+            _SR.due_date == due,
+        ).first()
+        if existing:
+            return {"success": True, "id": existing.id, "already_exists": True}
+        row = _SR(
+            user_id=user["sub"], type=t, due_date=due,
+            reminder_date=rem or (due - timedelta(days=7)),
+            label=body.label, notes=body.notes, status="active",
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        audit("steuer_reminder.create", user_id=user["sub"], resource_type="steuer_reminder",
+              resource_id=row.id,
+              payload={"type": t, "due_date": body.due_date, "label": body.label},
+              request=request)
+        return {"success": True, "id": row.id}
+    finally:
+        db.close()
+
+
+class SteuerReminderUpdate(BaseModel):
+    status: str | None = None              # active | snoozed | done | dismissed
+    snoozed_until: str | None = None       # YYYY-MM-DD
+    label: str | None = None
+    notes: str | None = None
+
+
+@app.patch("/steuer/reminders/{reminder_id}")
+def steuer_reminders_update(reminder_id: int, request: Request, body: SteuerReminderUpdate, user: dict = Depends(get_current_user)):
+    """Snooze / done / dismiss / not güncelleme."""
+    from autotax.models import SteuerReminder as _SR
+    db = SessionLocal()
+    try:
+        row = db.query(_SR).filter(
+            _SR.id == reminder_id, _SR.user_id == user["sub"]
+        ).first()
+        if not row:
+            err(404, "Reminder nicht gefunden")
+        changes = {}
+        if body.status is not None:
+            if body.status not in {"active", "snoozed", "done", "dismissed"}:
+                err(400, f"Geçersiz status: {body.status}")
+            row.status = body.status
+            changes["status"] = body.status
+        if body.snoozed_until is not None:
+            try:
+                row.snoozed_until = datetime.strptime(body.snoozed_until, "%Y-%m-%d").date()
+                changes["snoozed_until"] = body.snoozed_until
+            except ValueError:
+                err(400, "snoozed_until YYYY-MM-DD")
+        if body.label is not None:
+            row.label = body.label
+            changes["label"] = body.label
+        if body.notes is not None:
+            row.notes = body.notes
+        db.commit()
+        audit("steuer_reminder.update", user_id=user["sub"], resource_type="steuer_reminder",
+              resource_id=reminder_id, payload=changes, request=request)
+        return {"success": True, "id": reminder_id, "changes": changes}
+    finally:
+        db.close()
+
+
+@app.delete("/steuer/reminders/{reminder_id}")
+def steuer_reminders_delete(reminder_id: int, request: Request, user: dict = Depends(get_current_user)):
+    """Tam silme — custom reminder'lar için. Otomatik (ust/est) reminder
+    silinirse cron tekrar UPSERT eder. Pratikte status='dismissed' tercih edilir."""
+    from autotax.models import SteuerReminder as _SR
+    db = SessionLocal()
+    try:
+        row = db.query(_SR).filter(
+            _SR.id == reminder_id, _SR.user_id == user["sub"]
+        ).first()
+        if not row:
+            err(404, "Reminder nicht gefunden")
+        snapshot = {"type": row.type, "label": row.label,
+                    "due_date": row.due_date.isoformat() if row.due_date else None}
+        db.delete(row)
+        db.commit()
+        audit("steuer_reminder.delete", user_id=user["sub"], resource_type="steuer_reminder",
+              resource_id=reminder_id, payload=snapshot, request=request)
+        return {"success": True}
+    finally:
+        db.close()
+
+
 @app.get("/steuer/upcoming")
 @limiter.limit("30/minute")
 def steuer_upcoming(request: Request, user: dict = Depends(get_current_user)):

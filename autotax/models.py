@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
-from sqlalchemy import UniqueConstraint
-from sqlalchemy import Column, Integer, Float, Text, String, Boolean, DateTime, ForeignKey, LargeBinary
+from sqlalchemy import UniqueConstraint, Index
+from sqlalchemy import Column, Integer, Float, Text, String, Boolean, DateTime, Date, ForeignKey, LargeBinary
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -135,6 +135,42 @@ class AuditLog(Base):
     ip = Column(String(50), nullable=True)                         # anonymized (last octet masked)
     user_agent = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+
+class SteuerReminder(Base):
+    """Aktif vergi vadeleri + kullanıcı durumu.
+
+    SteuerReminderLog (dedup) ile birlikte çalışır:
+      - SteuerReminder: vadenin tanımı (due_date, label, status, user notes)
+      - SteuerReminderLog: hangi bildirim kodu (7d/3d/1d/on_day/overdue)
+        kaç kez gönderildi (anti-dup)
+
+    Cron her ayın 1'inde gelecek 12 ay slot'larını UPSERT eder
+    (idempotent — UNIQUE constraint sayesinde duplicate yaratmaz).
+
+    User snooze/done/dismiss yapabilir. 'Custom' tipi user'ın elle
+    eklediği kendi vergi/ödeme vadeleridir (örn. quartal/yıllık özel
+    deadline'lar)."""
+    __tablename__ = "steuer_reminders"
+    __table_args__ = (
+        UniqueConstraint("user_id", "type", "due_date", name="uq_steuer_user_type_due"),
+        Index("ix_steuer_user_status_due", "user_id", "status", "due_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # ust | est | gewst | jahres | custom
+    type = Column(String(20), nullable=False)
+    due_date = Column(Date, nullable=False)          # gerçek vade
+    reminder_date = Column(Date, nullable=True)      # bildirim tetik tarihi (due_date - 7d default)
+    # active | snoozed | done | dismissed
+    status = Column(String(20), default="active", nullable=False, index=True)
+    label = Column(String(200), nullable=True)       # "USt-Voranmeldung Q3 2026"
+    notes = Column(Text, nullable=True)              # kullanıcı notu
+    snoozed_until = Column(Date, nullable=True)
+    last_notified_at = Column(DateTime, nullable=True)
+    notify_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class SteuerReminderLog(Base):

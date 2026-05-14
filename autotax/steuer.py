@@ -16,7 +16,7 @@ from typing import Optional, Iterable
 from calendar import monthrange
 
 from autotax.db import SessionLocal
-from autotax.models import User, SteuerReminderLog
+from autotax.models import User, SteuerReminderLog, SteuerReminder
 from autotax.reminders import send_telegram
 
 logger = logging.getLogger("autotax.steuer")
@@ -230,32 +230,115 @@ async def process_steuer_reminders() -> dict:
     return stats
 
 
-def upcoming_for_user(user_id: int, is_klein: bool = False, limit: int = 5) -> list[dict]:
-    """Kullanicinin onumuzdeki N yaklasan vade — dashboard widget icin.
-    DB hit yok (deadline'lar deterministic)."""
+def ensure_reminders_for_user(user_id: int) -> int:
+    """Gelecek 12 ayın deterministic vergi vadelerini DB'ye UPSERT eder.
+    UNIQUE (user_id, type, due_date) sayesinde idempotent — varsa atlar.
+    Döndürür: kaç yeni satır eklendi."""
     import json as _json
     db = SessionLocal()
     try:
         u = db.query(User).filter(User.id == user_id).first()
         if not u:
-            return []
+            return 0
         user_subs = None
         if u.steuer_subscriptions:
             try:
                 user_subs = _json.loads(u.steuer_subscriptions)
             except Exception:
                 pass
-        is_k = bool(getattr(u, "is_kleinunternehmer", False)) if not is_klein else True
-        deadlines = build_deadlines_for_user(date.today(), user_subs, is_k)
+        is_k = bool(getattr(u, "is_kleinunternehmer", False))
+
+        # 12 ayın deterministic deadline'larını hesapla (build_deadlines_for_user
+        # bir günlük slice veriyor — 12 ay için döngü ile birden çok kez çağırırız)
         today = date.today()
+        end_window = today + timedelta(days=365)
+        all_slots: list[dict] = []
+        cur = today
+        seen = set()
+        while cur < end_window:
+            for d in build_deadlines_for_user(cur, user_subs, is_k):
+                key = (d["type"], d["date"])
+                if key in seen:
+                    continue
+                if d["date"] > end_window:
+                    continue
+                seen.add(key)
+                all_slots.append(d)
+            cur = cur + timedelta(days=31)  # bir sonraki ay'a yakla
+
+        # UPSERT
+        existing = db.query(SteuerReminder).filter(
+            SteuerReminder.user_id == user_id,
+            SteuerReminder.due_date >= today,
+        ).all()
+        existing_keys = {(r.type, r.due_date) for r in existing}
+
+        added = 0
+        for slot in all_slots:
+            k = (slot["type"], slot["date"])
+            if k in existing_keys:
+                continue
+            sr = SteuerReminder(
+                user_id=user_id,
+                type=slot["type"],
+                due_date=slot["date"],
+                reminder_date=slot["date"] - timedelta(days=7),
+                status="active",
+                label=slot["label"],
+            )
+            db.add(sr)
+            added += 1
+        if added > 0:
+            db.commit()
+            logger.info("ensure_reminders: user=%s seeded=%d new slots", user_id, added)
+        return added
+    except Exception:
+        logger.exception("ensure_reminders_for_user failed for %s", user_id)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return 0
+    finally:
+        db.close()
+
+
+def upcoming_for_user(user_id: int, is_klein: bool = False, limit: int = 5) -> list[dict]:
+    """Kullanıcının önündeki N yaklaşan vergi vadesi — DB'den çeker.
+    İlk çağrıda DB boşsa otomatik seed (ensure_reminders_for_user).
+    Snooze edilmiş + done + dismissed olanlar görünmez.
+    """
+    today = date.today()
+    db = SessionLocal()
+    try:
+        active = db.query(SteuerReminder).filter(
+            SteuerReminder.user_id == user_id,
+            SteuerReminder.status == "active",
+            SteuerReminder.due_date >= today,
+        ).order_by(SteuerReminder.due_date.asc()).limit(limit).all()
+
+        if not active:
+            # İlk kullanım — seed yap ve tekrar çek
+            db.close()
+            ensure_reminders_for_user(user_id)
+            db = SessionLocal()
+            active = db.query(SteuerReminder).filter(
+                SteuerReminder.user_id == user_id,
+                SteuerReminder.status == "active",
+                SteuerReminder.due_date >= today,
+            ).order_by(SteuerReminder.due_date.asc()).limit(limit).all()
+
         out = []
-        for d in deadlines[:limit]:
-            diff = (d["date"] - today).days
+        for r in active:
+            diff = (r.due_date - today).days
             out.append({
-                "type": d["type"],
-                "label": d["label"],
-                "date": d["date"].isoformat(),
+                "id": r.id,
+                "type": r.type,
+                "label": r.label or DEADLINE_LABELS_DE.get(r.type, r.type),
+                "date": r.due_date.isoformat(),
                 "days_until": diff,
+                "status": r.status,
+                "snoozed_until": r.snoozed_until.isoformat() if r.snoozed_until else None,
             })
         return out
     finally:

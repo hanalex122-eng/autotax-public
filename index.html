@@ -2531,6 +2531,145 @@ function AdvisorView(){
   </div>);
 }
 
+function SteuerView(){
+  const[items,setItems]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showCreate,setShowCreate]=useState(false);
+  const[newRem,setNewRem]=useState({type:"custom",due_date:"",label:"",notes:""});
+  const _l=getLang();
+  const tr=(de,en)=>_l==="de"?de:en;
+  const typeLabels={
+    ust:"USt-Voranmeldung",
+    est:"ESt-Vorauszahlung",
+    gewst:"GewSt-Vorauszahlung",
+    jahres:"Jahressteuererklärung",
+    custom:tr("Eigener Termin","Custom"),
+  };
+  const typeIcons={ust:"💶",est:"💼",gewst:"🏢",jahres:"📋",custom:"📌"};
+  const load=async()=>{
+    setLoading(true);
+    try{
+      const r=await _authFetch(API+"/steuer/reminders?include_snoozed=true");
+      const d=await r.json();
+      if(r.ok)setItems(d.items||[]);
+    }catch(e){}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+  const updateStatus=async(id,status,extras={})=>{
+    try{
+      const r=await _authFetch(API+"/steuer/reminders/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,...extras})});
+      if(r.ok)load();
+    }catch(e){alert(e.message);}
+  };
+  const snooze=async(id,days)=>{
+    const until=new Date();until.setDate(until.getDate()+days);
+    const iso=until.toISOString().slice(0,10);
+    await updateStatus(id,"snoozed",{snoozed_until:iso});
+  };
+  const createCustom=async()=>{
+    if(!newRem.due_date){alert(tr("Fälligkeit ist erforderlich","Due date required"));return;}
+    try{
+      const r=await _authFetch(API+"/steuer/reminders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(newRem)});
+      const d=await r.json();
+      if(r.ok){setShowCreate(false);setNewRem({type:"custom",due_date:"",label:"",notes:""});load();if(showToast)showToast(tr("Termin hinzugefügt","Reminder added"),"success");}
+      else alert(_extractErr(d));
+    }catch(e){alert(e.message);}
+  };
+  const remove=async(id)=>{
+    if(!confirm(tr("Diesen Termin endgültig löschen?","Delete this reminder permanently?")))return;
+    try{
+      const r=await _authFetch(API+"/steuer/reminders/"+id,{method:"DELETE"});
+      if(r.ok)load();
+    }catch(e){}
+  };
+  const fmtDate=(iso)=>{if(!iso)return"—";const d=new Date(iso+"T00:00:00");return d.toLocaleDateString(_l==="de"?"de-DE":"en-GB");};
+  const today=new Date();today.setHours(0,0,0,0);
+  const groupKey=(r)=>{
+    if(r.status==="done")return"done";
+    if(r.status==="dismissed")return"dismissed";
+    if(r.status==="snoozed")return"snoozed";
+    if(r.days_until<0)return"overdue";
+    if(r.days_until<=7)return"soon";
+    return"upcoming";
+  };
+  const groups={overdue:[],soon:[],upcoming:[],snoozed:[],done:[],dismissed:[]};
+  items.forEach(r=>groups[groupKey(r)]?.push(r));
+  const groupLabels={
+    overdue:{color:theme.danger,icon:"⚠️",txt:tr("Überfällig","Overdue")},
+    soon:{color:"#f59e0b",icon:"⏰",txt:tr("Diese Woche","This week")},
+    upcoming:{color:theme.blue,icon:"📅",txt:tr("Demnächst","Upcoming")},
+    snoozed:{color:theme.textDim,icon:"💤",txt:tr("Erinnerung pausiert","Snoozed")},
+    done:{color:theme.accent,icon:"✓",txt:tr("Erledigt","Done")},
+    dismissed:{color:theme.textDim,icon:"🚫",txt:tr("Verworfen","Dismissed")},
+  };
+  return(<div style={{display:"flex",flexDirection:"column",gap:24}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+      <div>
+        <h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>🧾 {tr("Steuer-Termine","Tax Deadlines")}</h2>
+        <p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{tr("USt, ESt, GewSt + eigene Termine — mit Schlummerfunktion und Verlauf.","VAT, income tax, trade tax + custom — with snooze and history.")}</p>
+      </div>
+      <button style={css.btn()} onClick={()=>setShowCreate(true)}>➕ {tr("Eigener Termin","Custom reminder")}</button>
+    </div>
+    {showCreate&&<div style={{...css.card,padding:20,background:theme.surfaceAlt}}>
+      <h3 style={{margin:"0 0 12px",fontSize:15,color:theme.text}}>{tr("Neuen Steuer-Termin anlegen","New tax reminder")}</h3>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <div>
+          <label style={{fontSize:11,color:theme.textMuted}}>{tr("Typ","Type")}</label>
+          <select style={css.input} value={newRem.type} onChange={e=>setNewRem({...newRem,type:e.target.value})}>
+            {Object.entries(typeLabels).map(([k,v])=>(<option key={k} value={k}>{typeIcons[k]} {v}</option>))}
+          </select>
+        </div>
+        <div>
+          <label style={{fontSize:11,color:theme.textMuted}}>{tr("Fälligkeit","Due date")}</label>
+          <input type="date" style={css.input} value={newRem.due_date} onChange={e=>setNewRem({...newRem,due_date:e.target.value})}/>
+        </div>
+      </div>
+      <div style={{marginBottom:10}}>
+        <label style={{fontSize:11,color:theme.textMuted}}>{tr("Bezeichnung","Label")}</label>
+        <input type="text" style={css.input} placeholder={tr("z.B. USt Q3 2026","e.g. VAT Q3 2026")} value={newRem.label} onChange={e=>setNewRem({...newRem,label:e.target.value})}/>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={{fontSize:11,color:theme.textMuted}}>{tr("Notiz","Note")}</label>
+        <input type="text" style={css.input} value={newRem.notes} onChange={e=>setNewRem({...newRem,notes:e.target.value})}/>
+      </div>
+      <div style={{display:"flex",gap:8}}>
+        <button style={{...css.btn(),flex:1}} onClick={createCustom}>{tr("Speichern","Save")}</button>
+        <button style={{...css.btnOutline,flex:1}} onClick={()=>setShowCreate(false)}>{tr("Abbrechen","Cancel")}</button>
+      </div>
+    </div>}
+    {loading&&<div style={{...css.card,padding:24,textAlign:"center",color:theme.textDim}}>⏳ {tr("Wird geladen","Loading")}…</div>}
+    {!loading&&items.length===0&&<div style={{...css.card,padding:32,textAlign:"center",color:theme.textDim}}>{tr("Noch keine Termine — Termine werden automatisch erstellt sobald Ihre Plan-Einstellungen analysiert sind.","No deadlines yet — they appear automatically once your plan settings are processed.")}</div>}
+    {["overdue","soon","upcoming","snoozed","done","dismissed"].map(g=>{
+      const rs=groups[g];if(rs.length===0)return null;
+      const L=groupLabels[g];
+      return(<div key={g} style={css.card}>
+        <h3 style={{fontSize:14,fontWeight:700,color:L.color,margin:"0 0 12px",display:"flex",alignItems:"center",gap:8}}>
+          <span>{L.icon}</span><span>{L.txt}</span>
+          <span style={{color:theme.textDim,fontSize:12,fontWeight:400}}>({rs.length})</span>
+        </h3>
+        {rs.map((r,i)=>(<div key={r.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:i<rs.length-1?"1px solid "+theme.border:"none",flexWrap:"wrap"}}>
+          <span style={{fontSize:22}}>{typeIcons[r.type]||"📌"}</span>
+          <div style={{flex:1,minWidth:200}}>
+            <div style={{color:theme.text,fontWeight:600,fontSize:14}}>{r.label||typeLabels[r.type]||r.type}</div>
+            <div style={{color:theme.textDim,fontSize:11,fontFamily:mono}}>{fmtDate(r.due_date)} {r.days_until!==null?" · "+(r.days_until>=0?tr("in "+r.days_until+" Tagen","in "+r.days_until+" days"):tr(Math.abs(r.days_until)+" Tage überfällig",Math.abs(r.days_until)+" days overdue")):""}{r.snoozed_until?" · "+tr("Schlummer bis","Snoozed until")+" "+fmtDate(r.snoozed_until):""}</div>
+            {r.notes&&<div style={{color:theme.textMuted,fontSize:11,marginTop:3,fontStyle:"italic"}}>{r.notes}</div>}
+          </div>
+          {r.status==="active"&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            <button style={{...css.btnOutline,fontSize:11,padding:"5px 10px"}} onClick={()=>snooze(r.id,7)}>💤 {tr("+7 Tage","+7 days")}</button>
+            <button style={{...css.btnOutline,fontSize:11,padding:"5px 10px"}} onClick={()=>snooze(r.id,30)}>💤 {tr("+30 Tage","+30 days")}</button>
+            <button style={{...css.btn(theme.accent),fontSize:11,padding:"5px 10px"}} onClick={()=>updateStatus(r.id,"done")}>✓ {tr("Erledigt","Done")}</button>
+            <button style={{...css.btnOutline,fontSize:11,padding:"5px 10px",color:theme.textDim}} onClick={()=>updateStatus(r.id,"dismissed")}>🚫 {tr("Verwerfen","Dismiss")}</button>
+          </div>}
+          {r.status==="snoozed"&&<button style={{...css.btnOutline,fontSize:11,padding:"5px 10px"}} onClick={()=>updateStatus(r.id,"active",{snoozed_until:null})}>▶️ {tr("Reaktivieren","Reactivate")}</button>}
+          {(r.status==="done"||r.status==="dismissed")&&<button style={{...css.btnOutline,fontSize:11,padding:"5px 10px"}} onClick={()=>updateStatus(r.id,"active")}>↺ {tr("Wiederöffnen","Reopen")}</button>}
+          {r.type==="custom"&&<button style={{...css.btnOutline,fontSize:11,padding:"5px 10px",color:theme.danger}} onClick={()=>remove(r.id)}>🗑</button>}
+        </div>))}
+      </div>);
+    })}
+  </div>);
+}
+
 function JobsView(){
   const[items,setItems]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -3082,7 +3221,7 @@ function App(){
     return()=>window.removeEventListener("hashchange",checkHash);
   },[]);
   if(!authed)return<Fragment><AuthScreen onLogin={()=>setAuthed(true)}/><CookieConsent/></Fragment>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView};
+  const views={dashboard:DashboardView,invoices:InvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView};
   const _t=typeof t==="function"?t:k=>k;
   const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.
@@ -3288,6 +3427,9 @@ function App(){
             </div>
             <div onClick={()=>{setPage("advisor");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:16}}>👔</span><span style={{fontSize:13}}>{getLang()==="de"?"Steuerberater":"Tax Advisor"}</span>
+            </div>
+            <div onClick={()=>{setPage("steuer");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:16}}>🧾</span><span style={{fontSize:13}}>{getLang()==="de"?"Steuer-Termine":"Tax Deadlines"}</span>
             </div>
             <div onClick={()=>{setPage("pricing");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:16}}>💳</span><span style={{fontSize:13}}>{getLang()==="de"?"Abonnement & Preise":"Subscription & Pricing"}</span>
