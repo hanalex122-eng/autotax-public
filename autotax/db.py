@@ -199,6 +199,51 @@ def init_db():
                     ))
                 except Exception as ix_e:
                     logger.warning("Status index skipped: %s", ix_e)
+
+        # --- Sprint 0 PERFORMANCE INDEXES (2026-05-14 roadmap) ---
+        # Her index IF NOT EXISTS — idempotent, restart safe.
+        # Bu blokta hata olursa logla ve devam et; sema bozulmaz.
+        with engine.begin() as conn:
+            try:
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_cash_entries_user_date "
+                    "ON cash_entries(user_id, date DESC)"
+                ))
+                logger.info("Sprint-0 idx: ix_cash_entries_user_date OK")
+            except Exception as e:
+                logger.warning("idx cash_entries_user_date skipped: %s", e)
+            try:
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_invoices_user_active "
+                    "ON invoices(user_id, is_deleted, status)"
+                ))
+                logger.info("Sprint-0 idx: ix_invoices_user_active OK")
+            except Exception as e:
+                logger.warning("idx invoices_user_active skipped: %s", e)
+            try:
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_audit_user_created "
+                    "ON audit_log(user_id, created_at DESC)"
+                ))
+                logger.info("Sprint-0 idx: ix_audit_user_created OK")
+            except Exception as e:
+                logger.warning("idx audit_user_created skipped: %s", e)
+            try:
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_jobs_type_started "
+                    "ON background_jobs(job_type, started_at DESC)"
+                ))
+                logger.info("Sprint-0 idx: ix_jobs_type_started OK")
+            except Exception as e:
+                logger.warning("idx jobs_type_started skipped: %s", e)
+            try:
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_corrections_user_field_date "
+                    "ON corrections(user_id, field_name, created_at DESC)"
+                ))
+                logger.info("Sprint-0 idx: ix_corrections_user_field_date OK")
+            except Exception as e:
+                logger.warning("idx corrections_user_field_date skipped: %s", e)
     except Exception as e:
         logger.warning("Column migration skipped: %s", e)
 

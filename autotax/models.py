@@ -40,6 +40,20 @@ class User(Base):
     plan_ends_at = Column(DateTime, nullable=True)
 
 
+class StripeEventLog(Base):
+    """Stripe webhook idempotency — aynı event ikinci kez gelirse 'duplicate'
+    dönüp atlanır. Stripe at-least-once teslimat verir; bu tablo bizim
+    'tam olarak bir kez işleme' garantimiz.
+    90 günden eski kayıtlar cron tarafından silinir (event teslimi
+    Stripe'da en fazla 3 gün retry yapar)."""
+    __tablename__ = "stripe_event_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String, unique=True, nullable=False, index=True)
+    event_type = Column(String, nullable=False)
+    processed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
 class BackgroundJob(Base):
     """Hintergrund-Job-Tracking — fuer Email-Sync, Reminder, Mahnung,
     Recurring, async OCR und alle anderen async Loops. Eine Zeile pro

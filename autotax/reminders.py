@@ -457,6 +457,39 @@ _BERLIN_OFFSET_HOURS = 1  # CET; CEST=2 — handled by zoneinfo where available
 _DAILY_HOUR = 9
 
 
+async def cleanup_old_audit_logs(max_age_days: int = 540) -> dict:
+    """DSGVO uyumlu audit log retention. Default: 18 ay (540 gün).
+
+    Reminder loop'ta haftalık çağrılır (Pazar). Üretim yükü yok —
+    DELETE batch'i tipik 1-2 saniye.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    try:
+        from autotax.db import SessionLocal
+        from autotax.models import AuditLog
+    except Exception:
+        logger.exception("[AUDIT-CLEANUP] import failed")
+        return {"deleted": 0, "error": "import"}
+    db = SessionLocal()
+    try:
+        deleted = db.query(AuditLog).filter(
+            AuditLog.created_at < cutoff
+        ).delete(synchronize_session=False)
+        db.commit()
+        logger.info("[AUDIT-CLEANUP] %d rows older than %d days deleted",
+                    deleted, max_age_days)
+        return {"deleted": deleted, "cutoff": cutoff.isoformat()}
+    except Exception:
+        logger.exception("[AUDIT-CLEANUP] failed")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"deleted": 0, "error": "db"}
+    finally:
+        db.close()
+
+
 def _seconds_until_next_run() -> int:
     """09:00 Europe/Berlin'a kadar kaç saniye."""
     try:
@@ -524,6 +557,13 @@ async def reminder_loop():
                     await process_recurring_spawns()
             except Exception:
                 logger.exception("[RECURRING] tick failed")
+            # DSGVO audit retention — sadece Pazar günleri
+            try:
+                if datetime.now(timezone.utc).weekday() == 6:  # Sunday
+                    with _wrap("audit_cleanup"):
+                        await cleanup_old_audit_logs()
+            except Exception:
+                logger.exception("[AUDIT-CLEANUP] tick failed")
         except Exception as e:
             logger.exception("[REMINDER] loop tick error: %s", e)
         # Sonraki 09:00'a kadar uyu (en az 60 sn, en cok 24 saat)

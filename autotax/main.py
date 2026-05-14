@@ -1924,7 +1924,9 @@ def _serialize_reminder_invoice(inv: Invoice) -> dict:
 
 
 @app.get("/reminders/upcoming")
+@limiter.limit("30/minute")
 def reminders_upcoming(
+    request: Request,
     days: int = Query(7, ge=1, le=90),
     user: dict = Depends(get_current_user),
 ):
@@ -1954,7 +1956,8 @@ def reminders_upcoming(
 
 
 @app.get("/reminders/overdue")
-def reminders_overdue(user: dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+def reminders_overdue(request: Request, user: dict = Depends(get_current_user)):
     """Vadesi gecmis odenmemis faturalar."""
     db = SessionLocal()
     try:
@@ -1977,7 +1980,8 @@ def reminders_overdue(user: dict = Depends(get_current_user)):
 
 
 @app.get("/steuer/upcoming")
-def steuer_upcoming(user: dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+def steuer_upcoming(request: Request, user: dict = Depends(get_current_user)):
     """Kullanicinin yaklasan vergi vadeleri (USt/ESt/GewSt/Jahres).
     Kleinunternehmer'a USt yok."""
     from autotax.steuer import upcoming_for_user
@@ -2587,7 +2591,8 @@ def login(request: Request, body: AuthRequest):
 
 
 @app.post("/auth/refresh")
-def refresh_token_endpoint(body: dict = Body(...)):
+@limiter.limit("10/minute")
+def refresh_token_endpoint(request: Request, body: dict = Body(...)):
     refresh = body.get("refresh_token", "")
     if not refresh:
         err(400, "refresh_token required")
@@ -2884,7 +2889,8 @@ def advisor_revoke(relationship_id: int, request: Request, user: dict = Depends(
 
 
 @app.get("/jobs/recent")
-def jobs_recent(user: dict = Depends(get_acting_context), limit: int = 50):
+@limiter.limit("30/minute")
+def jobs_recent(request: Request, user: dict = Depends(get_acting_context), limit: int = 50):
     """Kullanıcı kendi background jobs'larını görür (mahnung, recurring,
     monthly summary vs. — admin manuel trigger ile başlatınca user_id
     bağlanır). Acting modda mandantın jobs'ları görünür."""
@@ -2963,7 +2969,9 @@ def admin_jobs_health(user: dict = Depends(get_current_user), hours: int = 24):
 
 
 @app.get("/audit/recent")
+@limiter.limit("60/minute")
 def audit_recent(
+    request: Request,
     user: dict = Depends(get_acting_context),
     limit: int = 100,
     offset: int = 0,
@@ -7273,7 +7281,8 @@ def billing_portal_session(user: dict = Depends(get_current_user)):
 @app.post("/billing/webhook")
 async def billing_webhook(request: Request):
     """Stripe webhook — auth via signed payload. Updates User.plan +
-    subscription_status + plan_ends_at on the relevant events."""
+    subscription_status + plan_ends_at on the relevant events.
+    Idempotent: event_id zaten işlendi ise duplicate döner."""
     if not _billing.is_configured():
         return {"received": True, "ignored": "stripe not configured"}
     payload = await request.body()
@@ -7284,10 +7293,35 @@ async def billing_webhook(request: Request):
         logger.warning("Stripe webhook signature verification failed: %s", e)
         return JSONResponse(status_code=400, content={"error": "invalid signature"})
 
-    etype = event.get("type")
+    etype = event.get("type") or ""
+    event_id = event.get("id") or ""
     data = event.get("data", {}).get("object", {}) or {}
     customer_id = data.get("customer") or ""
-    logger.info("STRIPE WEBHOOK: type=%s customer=%s", etype, customer_id)
+    logger.info("STRIPE WEBHOOK: type=%s id=%s customer=%s", etype, event_id, customer_id)
+
+    # Idempotency — Stripe at-least-once teslimat verir
+    if event_id:
+        from autotax.models import StripeEventLog
+        db_idem = SessionLocal()
+        try:
+            existing = db_idem.query(StripeEventLog).filter(
+                StripeEventLog.event_id == event_id
+            ).first()
+            if existing:
+                logger.info("STRIPE WEBHOOK: duplicate event %s — skipping", event_id)
+                return {"received": True, "duplicate": True}
+            db_idem.add(StripeEventLog(event_id=event_id, event_type=etype))
+            db_idem.commit()
+        except Exception as e:
+            # Unique violation race condition — başka request aynı event'i işledi
+            logger.info("STRIPE WEBHOOK: race on %s (%s) — treating as duplicate", event_id, e)
+            try:
+                db_idem.rollback()
+            except Exception:
+                pass
+            return {"received": True, "duplicate": True}
+        finally:
+            db_idem.close()
 
     if etype in ("customer.subscription.created", "customer.subscription.updated"):
         sub_id = data.get("id")
