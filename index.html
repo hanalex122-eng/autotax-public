@@ -682,7 +682,13 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
   const sendMahnung=async(invoiceId,withEmail)=>{
     try{
       const d=await api("/invoices/"+invoiceId+"/mahnung/send",{method:"POST",body:JSON.stringify({send_email:withEmail})});
-      if(showToast)showToast(`✓ Mahnung Stufe ${d.level} gesendet${d.email_sent?" + E-Mail":""}`,"success");
+      if(showToast)showToast(`✓ Mahnung Stufe ${d.level} gesendet${d.email_sent?" + E-Mail":""} — PDF wird heruntergeladen`,"success");
+      // PDF'i hemen yeni sekmede ac (Token query param ile — yetkisiz indirme yok)
+      if(d.pdf_url){
+        const tk=localStorage.getItem("atx_token");
+        const r=await fetch(API+d.pdf_url,{headers:{Authorization:"Bearer "+tk}});
+        if(r.ok){const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`Mahnung-${invoiceId}-Stufe${d.level}.pdf`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);}
+      }
       load();
     }catch(e){alert(_extractErr(e)||e.message);}
   };
@@ -1319,7 +1325,13 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
               const r=await _authFetch(API+"/invoices/"+detailInv.id+"/mahnung/send",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({send_email:sendEmail})});
               const d=await r.json();
               if(r.ok){
-                if(showToast)showToast(`✓ Mahnung Stufe ${d.level} gesendet${d.email_sent?" + E-Mail":""}`,"success");
+                if(showToast)showToast(`✓ Mahnung Stufe ${d.level} gesendet${d.email_sent?" + E-Mail":""} — PDF wird heruntergeladen`,"success");
+                // PDF'i otomatik indir
+                if(d.pdf_url){
+                  const tk=localStorage.getItem("atx_token");
+                  const pr=await fetch(API+d.pdf_url,{headers:{Authorization:"Bearer "+tk}});
+                  if(pr.ok){const blob=await pr.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`Mahnung-${detailInv.id}-Stufe${d.level}.pdf`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);}
+                }
                 setDetailInv(null);triggerRefresh&&triggerRefresh();
               }else alert(_extractErr(d));
             }catch(e){alert(e.message);}

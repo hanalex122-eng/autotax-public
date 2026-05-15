@@ -2588,6 +2588,7 @@ async def mahnung_send_one(
             "level": level,
             "email_sent": email_sent,
             "vault_saved": True,
+            "pdf_url": f"/invoices/{inv.id}/mahnung-pdf?level={level}",
         }
     finally:
         db.close()
