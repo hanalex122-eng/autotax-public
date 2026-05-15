@@ -5480,6 +5480,13 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     except Exception:
         pass
 
+    # Sprint 4: AI reviewer tetikle (fire-and-forget). Async upload'da zaten
+    # vardi, sync upload'da eksikti — bu yuzden AI banner gozukmuyordu.
+    try:
+        await _notify_ai_reviewer(invoice_id, user["sub"], raw_text or "", result, request)
+    except Exception:
+        pass
+
     return {
         "id": invoice_id,
         "total_amount": safe_float(result.get("total_amount")),
