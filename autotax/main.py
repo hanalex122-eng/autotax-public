@@ -2456,6 +2456,10 @@ def mahnung_queue(user: dict = Depends(get_current_user)):
                 days_overdue = None
             if days_overdue is None or days_overdue < 0:
                 continue
+            # Sadece gercekten Mahnung gerektiren faturalari liste (recommended > 0
+            # veya zaten mahnung gonderilmis ama daha fazla overdue).
+            if recommended == 0 and int(inv.mahnung_level or 0) == 0:
+                continue
             items.append({
                 "invoice_id": inv.id,
                 "invoice_number": inv.invoice_number,
@@ -2502,7 +2506,24 @@ async def mahnung_send_one(
         if level is None:
             level = determine_mahnung_level(inv, _today_utc())
         if level not in (1, 2, 3):
-            err(400, "No Mahnung needed (not yet overdue or already at level 3)")
+            # Yardimci mesaj: kullaniciya tam neyin yanlis oldugunu soyle
+            today = _today_utc()
+            try:
+                due_d = datetime.strptime((inv.due_date or "")[:10], "%Y-%m-%d").date()
+                days_ov = (today - due_d).days
+            except Exception:
+                days_ov = None
+            cur = int(inv.mahnung_level or 0)
+            if days_ov is None:
+                err(400, "Mahnung nicht möglich: Fälligkeitsdatum nicht gesetzt")
+            elif days_ov < 0:
+                err(400, f"Mahnung nicht möglich: Rechnung noch nicht fällig ({-days_ov} Tage)")
+            elif days_ov < 7:
+                err(400, f"Mahnung 1 ab Tag 7 nach Fälligkeit — aktuell {days_ov} Tag(e) überfällig")
+            elif cur >= 3:
+                err(400, "Stufe 3 ist die höchste Mahnstufe — Inkasso empfohlen")
+            else:
+                err(400, f"Keine neue Mahnstufe nötig (aktuell Stufe {cur}, {days_ov}T überfällig)")
         sender = db.query(User).filter(User.id == user["sub"]).first()
         try:
             pdf_bytes = generate_mahnung_pdf(inv, level, sender)
