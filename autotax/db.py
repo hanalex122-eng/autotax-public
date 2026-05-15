@@ -154,6 +154,23 @@ def init_db():
             if "ai_reviewed_at" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN ai_reviewed_at TIMESTAMP"))
                 logger.info("Added 'ai_reviewed_at' column to invoices (Sprint 4)")
+            # Steuerlogik Engine v1 (2026-05-16) — AI vergi kategorisi + absetzbarkeit
+            if "tax_category" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN tax_category VARCHAR(40)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_tax_category ON invoices(tax_category)"))
+                logger.info("Added 'tax_category' column to invoices (Steuerlogik v1)")
+            if "absetzbar_pct" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN absetzbar_pct INTEGER"))
+                logger.info("Added 'absetzbar_pct' column to invoices (Steuerlogik v1)")
+            if "vorsteuer_abziehbar" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN vorsteuer_abziehbar BOOLEAN"))
+                logger.info("Added 'vorsteuer_abziehbar' column to invoices (Steuerlogik v1)")
+            if "tax_warnings" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN tax_warnings TEXT"))
+                logger.info("Added 'tax_warnings' column to invoices (Steuerlogik v1)")
+            if "tax_missing_docs" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN tax_missing_docs TEXT"))
+                logger.info("Added 'tax_missing_docs' column to invoices (Steuerlogik v1)")
             if "payment_status" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid'"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_payment_status ON invoices(payment_status)"))

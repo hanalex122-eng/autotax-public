@@ -768,7 +768,32 @@ def invoice_to_dict(i):
         "recurring_freq": safe_str(getattr(i, "recurring_freq", None) or ""),
         "recurring_next_at": safe_str(getattr(i, "recurring_next_at", None) or ""),
         "recurring_parent_id": getattr(i, "recurring_parent_id", None),
+        # Sprint 4 + Steuerlogik Engine v1 — AI degerlendirmesi
+        "ai_status": safe_str(getattr(i, "ai_status", None) or ""),
+        "ai_notes": safe_str(getattr(i, "ai_notes", None) or ""),
+        "ai_reviewed_at": (i.ai_reviewed_at.strftime("%Y-%m-%dT%H:%M:%S") if getattr(i, "ai_reviewed_at", None) else ""),
+        "tax_category": safe_str(getattr(i, "tax_category", None) or ""),
+        "absetzbar_pct": getattr(i, "absetzbar_pct", None),
+        "vorsteuer_abziehbar": getattr(i, "vorsteuer_abziehbar", None),
+        "tax_warnings": _safe_json_list(getattr(i, "tax_warnings", None)),
+        "tax_missing_docs": _safe_json_list(getattr(i, "tax_missing_docs", None)),
+        "mahnung_level": int(getattr(i, "mahnung_level", 0) or 0),
+        "last_mahnung_at": (i.last_mahnung_at.strftime("%Y-%m-%d") if getattr(i, "last_mahnung_at", None) else ""),
     }
+
+
+def _safe_json_list(raw):
+    """JSON string'den liste cikar, hata varsa []."""
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        import json as _j
+        v = _j.loads(raw)
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
 
 
 def cash_entry_to_dict(e):
@@ -4002,32 +4027,77 @@ async def ai_review_callback(request: Request):
     if not invoice_id:
         return JSONResponse(status_code=400, content={"error": "invoice_id required"})
 
+    # Steuerlogik Engine v1 — yeni alanlar
+    tax_category = data.get("tax_category")
+    if tax_category and not isinstance(tax_category, str):
+        tax_category = None
+    elif tax_category:
+        tax_category = tax_category[:40]
+    absetzbar_pct = data.get("absetzbar_pct")
+    try:
+        absetzbar_pct = int(absetzbar_pct) if absetzbar_pct is not None else None
+        if absetzbar_pct is not None and (absetzbar_pct < 0 or absetzbar_pct > 100):
+            absetzbar_pct = None
+    except (TypeError, ValueError):
+        absetzbar_pct = None
+    vorsteuer_abziehbar = data.get("vorsteuer_abziehbar")
+    if vorsteuer_abziehbar is not None:
+        vorsteuer_abziehbar = bool(vorsteuer_abziehbar)
+    tax_warnings = data.get("tax_warnings") or []
+    if not isinstance(tax_warnings, list):
+        tax_warnings = []
+    missing_docs = data.get("missing_docs") or []
+    if not isinstance(missing_docs, list):
+        missing_docs = []
+
     db = SessionLocal()
     try:
         inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
         if not inv:
             return {"received": True, "ignored": "invoice not found"}
+        import json as _json
         inv.ai_status = ai_status
         inv.ai_notes = ai_notes
         inv.ai_reviewed_at = datetime.now(timezone.utc)
+        inv.tax_category = tax_category
+        inv.absetzbar_pct = absetzbar_pct
+        inv.vorsteuer_abziehbar = vorsteuer_abziehbar
+        inv.tax_warnings = _json.dumps(tax_warnings[:5]) if tax_warnings else None
+        inv.tax_missing_docs = _json.dumps(missing_docs[:5]) if missing_docs else None
         db.commit()
         audit("invoice.ai_reviewed", user_id=inv.user_id, resource_type="invoice",
-              resource_id=inv.id, payload={"status": ai_status, "notes_len": len(ai_notes)})
-        # Sadece warning/error'da kullanıcıya Telegram bildirim
-        if ai_status in ("warning", "error") and inv.user_id:
+              resource_id=inv.id,
+              payload={"status": ai_status, "tax_category": tax_category,
+                       "absetzbar_pct": absetzbar_pct,
+                       "warnings_count": len(tax_warnings),
+                       "missing_count": len(missing_docs)})
+        # Telegram bildirim: warning/error OR eksik belge var
+        notify = ai_status in ("warning", "error") or bool(missing_docs)
+        if notify and inv.user_id:
             try:
                 from autotax.reminders import send_telegram
+                emoji = "❌" if ai_status == "error" else "⚠️" if ai_status == "warning" else "💡"
+                cat_line = f"<b>Kategorie:</b> {tax_category}\n" if tax_category else ""
+                abs_line = f"<b>Absetzbar:</b> {absetzbar_pct}%\n" if absetzbar_pct is not None else ""
+                warn_block = ""
+                if tax_warnings:
+                    warn_block = "<b>Hinweise:</b>\n" + "\n".join(f"• {w}" for w in tax_warnings[:3]) + "\n"
+                miss_block = ""
+                if missing_docs:
+                    miss_block = "<b>Fehlende Belege:</b>\n" + "\n".join(f"• {d}" for d in missing_docs[:3]) + "\n"
                 msg = (
-                    f"⚠️ <b>AI Inceleme Önerisi</b>\n\n"
-                    f"Fatura #{inv.id} ({inv.vendor or 'Unbekannt'})\n"
-                    f"<i>{ai_notes[:300]}</i>\n\n"
-                    f"Bu sadece bir öneri — siz son kararı verirsiniz."
+                    f"{emoji} <b>AI Steuer-Analyse</b>\n\n"
+                    f"Rechnung #{inv.id} — {inv.vendor or 'Unbekannt'}\n"
+                    f"{cat_line}{abs_line}"
+                    f"{warn_block}{miss_block}"
+                    f"\n<i>{ai_notes[:250]}</i>"
                 )
                 await send_telegram(msg, user_id=inv.user_id, kind="advisor",
                                     ref_type="invoice", ref_id=inv.id)
             except Exception:
                 logger.exception("AI review Telegram notify failed")
-        return {"received": True, "invoice_id": invoice_id, "status": ai_status}
+        return {"received": True, "invoice_id": invoice_id, "status": ai_status,
+                "tax_category": tax_category, "absetzbar_pct": absetzbar_pct}
     finally:
         db.close()
 

@@ -56,30 +56,109 @@ _claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if (anthropic and ANTHR
 
 
 SYSTEM_PROMPT = """\
-Sen bir Alman fatura denetçisisin. AutoTax-Cloud kullanıcılarının yüklediği \
-faturaları kontrol ediyorsun.
+Du bist ein deutscher Steuer- und Buchhaltungsexperte für Kleinunternehmer \
+und Selbstständige. Du analysierst Rechnungen, die in AutoTax-Cloud \
+hochgeladen werden, und gibst eine vollständige steuerliche Einordnung.
 
-Sana iki şey verilecek:
-  1. OCR'dan çıkarılan ham metin (raw_text)
-  2. Backend parser'ın çıkardığı yapılandırılmış alanlar (parsed)
+INPUT:
+  1. raw_text  — OCR-extrahierter Rohtext der Rechnung
+  2. parsed    — vom Backend-Parser strukturierte Felder
+                 (vendor, total_amount, vat_rate, date, …)
 
-Görevin: uyumsuzluk, eksik bilgi veya şüpheli durum tespit etmek.
+DEINE AUFGABE: vier Dinge gleichzeitig tun
 
-ÖRNEKLER:
-  - OCR'da "Gesamt €119.00" yazıyor ama parsed.total_amount=19 → status=error
-  - OCR'da KDV %19 yazıyor ama parsed.vat_rate="7%" → status=warning
-  - OCR çok belirsiz veya çok kısa → status=warning
-  - Tutarsızlık yok, her şey uyumlu → status=ok
+A) Konsistenzprüfung (Validierung der OCR/Parse-Daten)
+B) Steuerliche Kategorisierung (welche Aufwandsart)
+C) Absetzbarkeit (wie viel % ist steuerlich abzugsfähig)
+D) Hinweise + fehlende Belege
 
-Yanıt SADECE JSON olarak ver, başka açıklama yapma:
+═══════════════════════════════════════════════════════
+DEUTSCHE STEUERREGELN (Stand 2026 — Kleinunternehmer & EÜR):
+═══════════════════════════════════════════════════════
+
+BEWIRTUNG (Geschäftsessen, Cafés, Restaurants):
+  • 70% absetzbar (§4 Abs.5 Nr.2 EStG), 30% nicht abzugsfähig
+  • Vorsteuer 100% abziehbar
+  • PFLICHT-DOKUMENTE: Bewirtungsbeleg mit Anlass, Teilnehmer, Datum, Ort
+  • Trinkgeld nur mit separatem Beleg/Quittung abzugsfähig
+
+GESCHENKE an Geschäftspartner:
+  • Bis 50€ pro Person/Jahr: voll abzugsfähig (ab 2024)
+  • >50€: gar nicht abzugsfähig (auch nicht teilweise)
+  • Vorsteuer entsprechend
+
+MIETE / NEBENKOSTEN (Büro, Lager):
+  • 100% absetzbar wenn rein gewerblich
+  • Wenn Wohnung gemischt: Privatanteil prüfen → Hinweis nötig
+  • Vorsteuer nur wenn Vermieter zur USt optiert hat
+
+HOMEOFFICE-PAUSCHALE:
+  • 6€/Tag, max. 1.260€/Jahr (ab 2023)
+  • Kein separater Raum nötig
+  • Statt: Arbeitszimmer 1.260€/Jahr (Mittelpunkt) oder voll absetzbar
+
+KFZ (Auto, Tankquittung, Werkstatt):
+  • 100% wenn rein gewerblich
+  • Privatanteil: 1%-Regelung (1% Bruttolistenpreis/Monat) ODER Fahrtenbuch
+  • Tankquittung allein → fragen ob privat genutzt
+  • Vorsteuer nach betrieblichem Anteil
+
+REISEKOSTEN:
+  • Übernachtung: 100% absetzbar (mit Beleg) + Frühstück abziehen (5,60€/Tag)
+  • Verpflegungspauschale: Inland 14€ (8-24h), 28€ (>24h), Tag der An/Abreise 14€
+  • Bahn/Flug/Taxi: 100% mit Beleg, Vorsteuer voll
+
+MINI-JOB / LOHN:
+  • 538€/Monat Grenze (2024+)
+  • Pauschalabgaben ~31% an Knappschaft Bahn-See
+  • PFLICHT-DOKUMENTE: Arbeitsvertrag, Lohnabrechnung, A1-Bescheinigung
+  • Sozialversicherung-Anmeldung muss vorliegen
+
+SOZIALABGABEN (Krankenkasse, Rentenversicherung):
+  • Eigene Beiträge: in Sonderausgaben, NICHT als Betriebsausgabe
+  • Mitarbeiterbeiträge: AG-Anteil 100% absetzbar
+
+ABSCHREIBUNG (AfA) — Anschaffungen >800€ netto:
+  • Bis 800€ netto: GWG — sofort 100% absetzbar
+  • 800–1000€: optional GWG-Pool über 5 Jahre
+  • >1000€: AfA-Tabelle (PC 3 Jahre, Möbel 13, Auto 6, etc.)
+  • Hinweis bei >800€ netto: Aktivierung empfohlen
+
+BÜROMATERIAL / KLEININVENTAR:
+  • <800€ netto: sofort 100% absetzbar
+  • Vorsteuer voll
+
+VERSICHERUNGEN:
+  • Betriebshaftpflicht, Berufshaftpflicht: 100% absetzbar
+  • Private Versicherungen (BU, Lebens, KV-Anteil): Sonderausgaben
+
+FORTBILDUNG / SOFTWARE / ABO:
+  • Berufliche Fortbildung: 100% absetzbar
+  • Software-Abos, Cloud, KI-Tools: 100% mit Vorsteuer
+
+═══════════════════════════════════════════════════════
+
+ANTWORTE NUR ALS JSON, KEINE WEITERE ERKLÄRUNG:
+
 {
   "status": "ok" | "warning" | "error",
-  "notes": "Tek cümle Almanca açıklama (max 200 karakter)"
+  "notes": "Kurze Hauptaussage Deutsch, max 200 Zeichen",
+  "tax_category": "Bewirtung" | "Geschenk" | "Miete" | "Homeoffice" | "KFZ" | "Reise" | "Lohn" | "Sozialabgaben" | "AfA" | "Buero" | "Versicherung" | "Software" | "Material" | "Andere",
+  "absetzbar_pct": 0-100,
+  "vorsteuer_abziehbar": true | false,
+  "tax_warnings": ["Warnung 1", "Warnung 2"],
+  "missing_docs": ["Fehlendes Dokument 1"]
 }
 
-status=ok ise notes boş veya kısa onay ("Daten konsistent.").
-status=warning ise insan kontrolü öneren bir not.
-status=error ise net bir sorun açıklaması.
+REGELN:
+- absetzbar_pct: Prozentsatz der steuerlich abzugsfähigen Summe (Bewirtung=70, Geschenk>50€=0, sonst meist 100)
+- vorsteuer_abziehbar: nur false wenn Kleinunternehmer-Rechnung oder reiner Privat-Posten
+- tax_warnings: Hinweise wie "Privatanteil prüfen", "Aktivierung nötig"
+- missing_docs: Pflichtdokumente die fehlen (z.B. "Bewirtungsbeleg mit Teilnehmern")
+- Wenn unklar → status=warning + konkreter Hinweis in tax_warnings
+- Wenn OCR/Parse-Tutarsızlık → status=error + notes erklärt das
+
+Sei präzise und kurz. Du sparst dem Nutzer Geld und Steuerprüfungs-Stress.
 """
 
 
@@ -95,9 +174,18 @@ def _sign(body: bytes) -> str:
 
 
 def _ask_claude(ocr_text: str, parsed: dict) -> dict:
-    """Claude'dan analiz al. Hata varsa status=ok (safe default) dön."""
+    """Claude'dan analiz al. Hata varsa status=ok (safe default) dön.
+    Yanit: {status, notes, tax_category, absetzbar_pct, vorsteuer_abziehbar,
+             tax_warnings, missing_docs}
+    """
+    empty_result = {
+        "status": "ok", "notes": "",
+        "tax_category": None, "absetzbar_pct": None,
+        "vorsteuer_abziehbar": None,
+        "tax_warnings": [], "missing_docs": [],
+    }
     if not _claude:
-        return {"status": "ok", "notes": ""}
+        return empty_result
     try:
         # Prompt cache: system prompt sabit (büyük), her çağrıda %10 maliyetle gelir
         user_content = json.dumps({
@@ -106,7 +194,7 @@ def _ask_claude(ocr_text: str, parsed: dict) -> dict:
         }, ensure_ascii=False)
         msg = _claude.messages.create(
             model=MODEL,
-            max_tokens=300,
+            max_tokens=600,
             system=[{
                 "type": "text",
                 "text": SYSTEM_PROMPT,
@@ -115,7 +203,7 @@ def _ask_claude(ocr_text: str, parsed: dict) -> dict:
             messages=[{"role": "user", "content": user_content}],
         )
         raw = msg.content[0].text.strip() if msg.content else ""
-        # JSON parse
+        # JSON parse — markdown code fence olabilir
         if raw.startswith("```"):
             raw = raw.strip("`").strip()
             if raw.lower().startswith("json"):
@@ -124,10 +212,42 @@ def _ask_claude(ocr_text: str, parsed: dict) -> dict:
         status = (result.get("status") or "ok").lower()
         if status not in ("ok", "warning", "error"):
             status = "ok"
-        return {"status": status, "notes": (result.get("notes") or "")[:500]}
+        # tax_category validation
+        tax_cat = result.get("tax_category")
+        if tax_cat and not isinstance(tax_cat, str):
+            tax_cat = None
+        # absetzbar_pct validation
+        pct = result.get("absetzbar_pct")
+        try:
+            pct = int(pct) if pct is not None else None
+            if pct is not None and (pct < 0 or pct > 100):
+                pct = None
+        except (TypeError, ValueError):
+            pct = None
+        # bool validation
+        vs = result.get("vorsteuer_abziehbar")
+        vs = bool(vs) if vs is not None else None
+        # list validation
+        warn = result.get("tax_warnings") or []
+        if not isinstance(warn, list):
+            warn = []
+        warn = [str(x)[:300] for x in warn[:5]]
+        miss = result.get("missing_docs") or []
+        if not isinstance(miss, list):
+            miss = []
+        miss = [str(x)[:300] for x in miss[:5]]
+        return {
+            "status": status,
+            "notes": (result.get("notes") or "")[:500],
+            "tax_category": tax_cat,
+            "absetzbar_pct": pct,
+            "vorsteuer_abziehbar": vs,
+            "tax_warnings": warn,
+            "missing_docs": miss,
+        }
     except Exception:
         logger.exception("Claude analysis failed")
-        return {"status": "ok", "notes": ""}  # safe default — false-positive yerine sessiz geç
+        return empty_result  # safe default — false-positive yerine sessiz geç
 
 
 @app.get("/health")
@@ -166,11 +286,16 @@ async def review(request: Request):
         parsed=data.get("parsed") or {},
     )
 
-    # Callback
+    # Callback — Steuerlogik Engine v1: vergi alanlari dahil
     callback_payload = {
         "invoice_id": invoice_id,
         "status": result["status"],
         "notes": result["notes"],
+        "tax_category": result.get("tax_category"),
+        "absetzbar_pct": result.get("absetzbar_pct"),
+        "vorsteuer_abziehbar": result.get("vorsteuer_abziehbar"),
+        "tax_warnings": result.get("tax_warnings", []),
+        "missing_docs": result.get("missing_docs", []),
     }
     callback_body = json.dumps(callback_payload).encode()
     callback_sig = _sign(callback_body)

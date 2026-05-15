@@ -301,6 +301,19 @@ class Invoice(Base):
     ai_status = Column(String(20), nullable=True, index=True)
     ai_notes = Column(Text, nullable=True)
     ai_reviewed_at = Column(DateTime, nullable=True)
+    # Steuerlogik Engine v1 — AI'in cikardigi vergi kategorisi + absetzbarkeit.
+    # tax_category: Bewirtung / Geschenk / Miete / Homeoffice / KFZ / Reise /
+    #               Lohn / Sozialabgaben / AfA / Buero / Versicherung /
+    #               Software / Material / Andere
+    # absetzbar_pct: 0-100 yuzde (Bewirtung=70, Geschenk>50€=0, normal=100)
+    # vorsteuer_abziehbar: bool (USt indirim hakki)
+    # tax_warnings / tax_missing_docs: JSON-serialized list (Privatanteil
+    # prüfen, Bewirtungsbeleg fehlt, Aktivierung notig, vs.)
+    tax_category = Column(String(40), nullable=True, index=True)
+    absetzbar_pct = Column(Integer, nullable=True)
+    vorsteuer_abziehbar = Column(Boolean, nullable=True)
+    tax_warnings = Column(Text, nullable=True)
+    tax_missing_docs = Column(Text, nullable=True)
     payment_status = Column(String(20), default="unpaid", nullable=False, index=True)  # unpaid|paid|overdue
     paid_at = Column(DateTime, nullable=True)
     # JSON array string: hangi reminder'lar gonderildi — '["7d","1d","on_day","overdue"]'
