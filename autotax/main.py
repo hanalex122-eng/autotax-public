@@ -4601,21 +4601,37 @@ def email_test(request: Request, user: dict = Depends(get_current_user)):
 
 @app.post("/invoices/create-rechnung")
 def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_user)):
-    """Create a manual outgoing invoice (Einnahme)."""
+    """Create a manual outgoing invoice (Einnahme).
+
+    Otomatik Faelligkeitsdatum: kullanici elle vermezse Rechnungsdatum
+    + 7 gun (Zahlungsziel default). Boylelikle Mahnung-otomasyonu icin
+    gerekli alan en bastan dolu olur, kullanici eklemeyi unutmaz.
+    """
     db = SessionLocal()
     try:
         betrag = float(body.get("betrag", 0))
         mwst_satz = body.get("mwst_satz", "19%")
         rate = float(mwst_satz.replace("%", "").replace(",", ".").strip() or "19")
         mwst_betrag = float(body.get("mwst_betrag", 0)) or round(betrag * rate / (100 + rate), 2)
+        # Faelligkeitsdatum: body'de varsa onu kullan, yoksa Rechnungsdatum + 7 gun
+        datum_str = (body.get("datum") or "").strip()
+        due_str = (body.get("faellig") or body.get("due_date") or "").strip()
+        if not due_str:
+            try:
+                base_d = datetime.strptime(datum_str[:10], "%Y-%m-%d").date() if datum_str else datetime.now().date()
+            except ValueError:
+                base_d = datetime.now().date()
+            due_str = (base_d + timedelta(days=7)).isoformat()
         inv = Invoice(
             user_id=user["sub"], filename="rechnung-erstellt",
             vendor=body.get("kunde", ""), total_amount=betrag,
             vat_amount=mwst_betrag, vat_rate=mwst_satz,
-            date=body.get("datum", ""), raw_text="Manuell erstellte Rechnung",
+            date=datum_str, raw_text="Manuell erstellte Rechnung",
             invoice_type="income", invoice_number=body.get("rechnung_nr", ""),
             payment_method=body.get("zahlungsart", ""),
             category=body.get("kategorie", "service"), processed=True,
+            due_date=due_str, payment_status="unpaid",
+            vendor_email=(body.get("kunde_email") or "").strip() or None,
         )
         db.add(inv)
         db.commit()
