@@ -182,6 +182,19 @@ def init_db():
             if "tax_missing_docs" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN tax_missing_docs TEXT"))
                 logger.info("Added 'tax_missing_docs' column to invoices (Steuerlogik v1)")
+            # Steuerlogik v2 (2026-05-17) — 4-bolumlu juristisch sicher yapi
+            if "ki_einschaetzung" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN ki_einschaetzung TEXT"))
+                logger.info("Added 'ki_einschaetzung' column to invoices (Steuerlogik v2)")
+            if "ki_grund" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN ki_grund TEXT"))
+                logger.info("Added 'ki_grund' column to invoices (Steuerlogik v2)")
+            if "ki_empfehlung" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN ki_empfehlung TEXT"))
+                logger.info("Added 'ki_empfehlung' column to invoices (Steuerlogik v2)")
+            if "ki_confidence" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN ki_confidence REAL"))
+                logger.info("Added 'ki_confidence' column to invoices (Steuerlogik v2)")
             if "payment_status" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid'"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoices_payment_status ON invoices(payment_status)"))

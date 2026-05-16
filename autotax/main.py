@@ -777,6 +777,11 @@ def invoice_to_dict(i):
         "vorsteuer_abziehbar": getattr(i, "vorsteuer_abziehbar", None),
         "tax_warnings": _safe_json_list(getattr(i, "tax_warnings", None)),
         "tax_missing_docs": _safe_json_list(getattr(i, "tax_missing_docs", None)),
+        # Steuerlogik v2 — juristisch sicher 4-bolumlu yapi
+        "ki_einschaetzung": safe_str(getattr(i, "ki_einschaetzung", None) or ""),
+        "ki_grund": safe_str(getattr(i, "ki_grund", None) or ""),
+        "ki_empfehlung": safe_str(getattr(i, "ki_empfehlung", None) or ""),
+        "ki_confidence": getattr(i, "ki_confidence", None),
         "mahnung_level": int(getattr(i, "mahnung_level", 0) or 0),
         "last_mahnung_at": (i.last_mahnung_at.strftime("%Y-%m-%d") if getattr(i, "last_mahnung_at", None) else ""),
     }
@@ -4364,6 +4369,18 @@ async def ai_review_callback(request: Request):
     if not isinstance(missing_docs, list):
         missing_docs = []
 
+    # Steuerlogik v2 — 4-bolumlu yapi
+    ki_einschaetzung = (data.get("ki_einschaetzung") or "")[:1000] or None
+    ki_grund = (data.get("grund") or "")[:1500] or None
+    ki_empfehlung = (data.get("empfehlung") or "")[:1000] or None
+    ki_confidence = data.get("confidence")
+    try:
+        ki_confidence = float(ki_confidence) if ki_confidence is not None else None
+        if ki_confidence is not None:
+            ki_confidence = max(0.0, min(1.0, ki_confidence))
+    except (TypeError, ValueError):
+        ki_confidence = None
+
     db = SessionLocal()
     try:
         inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
@@ -4378,13 +4395,18 @@ async def ai_review_callback(request: Request):
         inv.vorsteuer_abziehbar = vorsteuer_abziehbar
         inv.tax_warnings = _json.dumps(tax_warnings[:5]) if tax_warnings else None
         inv.tax_missing_docs = _json.dumps(missing_docs[:5]) if missing_docs else None
+        inv.ki_einschaetzung = ki_einschaetzung
+        inv.ki_grund = ki_grund
+        inv.ki_empfehlung = ki_empfehlung
+        inv.ki_confidence = ki_confidence
         db.commit()
         audit("invoice.ai_reviewed", user_id=inv.user_id, resource_type="invoice",
               resource_id=inv.id,
               payload={"status": ai_status, "tax_category": tax_category,
                        "absetzbar_pct": absetzbar_pct,
                        "warnings_count": len(tax_warnings),
-                       "missing_count": len(missing_docs)})
+                       "missing_count": len(missing_docs),
+                       "confidence": ki_confidence})
         # Telegram bildirim: warning/error OR eksik belge var
         notify = ai_status in ("warning", "error") or bool(missing_docs)
         if notify and inv.user_id:
@@ -4392,26 +4414,47 @@ async def ai_review_callback(request: Request):
                 from autotax.reminders import send_telegram
                 emoji = "❌" if ai_status == "error" else "⚠️" if ai_status == "warning" else "💡"
                 cat_line = f"<b>Kategorie:</b> {tax_category}\n" if tax_category else ""
-                abs_line = f"<b>Absetzbar:</b> {absetzbar_pct}%\n" if absetzbar_pct is not None else ""
-                warn_block = ""
-                if tax_warnings:
-                    warn_block = "<b>Hinweise:</b>\n" + "\n".join(f"• {w}" for w in tax_warnings[:3]) + "\n"
-                miss_block = ""
-                if missing_docs:
-                    miss_block = "<b>Fehlende Belege:</b>\n" + "\n".join(f"• {d}" for d in missing_docs[:3]) + "\n"
-                msg = (
-                    f"{emoji} <b>AI Steuer-Analyse</b>\n\n"
-                    f"Rechnung #{inv.id} — {inv.vendor or 'Unbekannt'}\n"
-                    f"{cat_line}{abs_line}"
-                    f"{warn_block}{miss_block}"
-                    f"\n<i>{ai_notes[:250]}</i>"
-                )
+                abs_line = f"<b>Absetzbar:</b> ca. {absetzbar_pct}%\n" if absetzbar_pct is not None else ""
+                conf_line = f"<b>Confidence:</b> {int((ki_confidence or 0)*100)}%\n" if ki_confidence is not None else ""
+                # Yeni 4-bolumlu format (varsa)
+                if ki_einschaetzung or ki_grund or ki_empfehlung:
+                    einsch_block = f"<b>1) KI-Einschätzung:</b>\n{ki_einschaetzung}\n\n" if ki_einschaetzung else ""
+                    grund_block = f"<b>2) Warum?</b>\n{ki_grund}\n\n" if ki_grund else ""
+                    empf_block = f"<b>3) Empfehlung:</b>\n{ki_empfehlung}\n\n" if ki_empfehlung else ""
+                    conf_block = f"<b>4) Confidence:</b> {int((ki_confidence or 0)*100)}%\n" if ki_confidence is not None else ""
+                    miss_block = ""
+                    if missing_docs:
+                        miss_block = "\n<b>📋 Fehlende Unterlagen (zu prüfen):</b>\n" + "\n".join(f"• {d}" for d in missing_docs[:3])
+                    msg = (
+                        f"{emoji} <b>AI Steuer-Analyse</b>\n"
+                        f"Rechnung #{inv.id} — {inv.vendor or 'Unbekannt'}\n"
+                        f"{cat_line}{abs_line}\n"
+                        f"{einsch_block}{grund_block}{empf_block}{conf_block}"
+                        f"{miss_block}\n"
+                        f"\n<i>⚠️ Hinweis: Keine Steuerberatung — bitte mit Steuerberater prüfen.</i>"
+                    )
+                else:
+                    # Geriye uyumluluk — eski yapida tax_warnings
+                    warn_block = ""
+                    if tax_warnings:
+                        warn_block = "<b>Hinweise:</b>\n" + "\n".join(f"• {w}" for w in tax_warnings[:3]) + "\n"
+                    miss_block = ""
+                    if missing_docs:
+                        miss_block = "<b>Fehlende Belege:</b>\n" + "\n".join(f"• {d}" for d in missing_docs[:3]) + "\n"
+                    msg = (
+                        f"{emoji} <b>AI Steuer-Analyse</b>\n\n"
+                        f"Rechnung #{inv.id} — {inv.vendor or 'Unbekannt'}\n"
+                        f"{cat_line}{abs_line}{conf_line}"
+                        f"{warn_block}{miss_block}"
+                        f"\n<i>{ai_notes[:250]}</i>"
+                    )
                 await send_telegram(msg, user_id=inv.user_id, kind="advisor",
                                     ref_type="invoice", ref_id=inv.id)
             except Exception:
                 logger.exception("AI review Telegram notify failed")
         return {"received": True, "invoice_id": invoice_id, "status": ai_status,
-                "tax_category": tax_category, "absetzbar_pct": absetzbar_pct}
+                "tax_category": tax_category, "absetzbar_pct": absetzbar_pct,
+                "confidence": ki_confidence}
     finally:
         db.close()
 

@@ -1300,26 +1300,42 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
             </div>
           </div>}
           {detailInv.ai_status==="ok"&&detailInv.ai_reviewed_at&&<div style={{fontSize:11,color:theme.accent,padding:"6px 10px",background:theme.accentSoft,borderRadius:6,display:"inline-block"}}>✓ {getLang()==="de"?"AI geprüft":"AI verified"}</div>}
-          {/* Steuerlogik Engine v1 — vergi analiz paneli */}
-          {(detailInv.tax_category||detailInv.absetzbar_pct!=null||(detailInv.tax_warnings&&detailInv.tax_warnings.length>0)||(detailInv.tax_missing_docs&&detailInv.tax_missing_docs.length>0))&&<div style={{background:"linear-gradient(135deg,rgba(59,130,246,0.08),rgba(99,102,241,0.05))",border:"1px solid rgba(59,130,246,0.3)",borderRadius:10,padding:"14px 16px"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-              <span style={{fontSize:18}}>🧾</span>
-              <div style={{fontWeight:700,color:"#3b82f6",fontSize:13}}>{getLang()==="de"?"Steuer-Hinweise (AI)":"Tax Hints (AI)"}</div>
+          {/* Steuerlogik Engine v2 — juristisch sicher 4-bolumlu yapi */}
+          {(detailInv.ki_einschaetzung||detailInv.ki_grund||detailInv.ki_empfehlung||detailInv.tax_category||detailInv.absetzbar_pct!=null||(detailInv.tax_missing_docs&&detailInv.tax_missing_docs.length>0))&&<div style={{background:"linear-gradient(135deg,rgba(59,130,246,0.08),rgba(99,102,241,0.05))",border:"1px solid rgba(59,130,246,0.3)",borderRadius:12,padding:"16px 18px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:20}}>🧾</span>
+                <div style={{fontWeight:700,color:"#3b82f6",fontSize:14}}>{getLang()==="de"?"KI Steuer-Hinweise":"AI Tax Hints"}</div>
+                <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:5,background:"rgba(139,92,246,0.15)",color:"#8b5cf6",letterSpacing:0.5}}>OPUS 4.7</span>
+              </div>
+              {detailInv.ki_confidence!=null&&<div style={{fontSize:11,padding:"3px 10px",borderRadius:12,background:detailInv.ki_confidence>=0.8?theme.accentSoft:detailInv.ki_confidence>=0.5?"rgba(245,158,11,0.15)":theme.dangerSoft,color:detailInv.ki_confidence>=0.8?theme.accent:detailInv.ki_confidence>=0.5?"#f59e0b":theme.danger,fontWeight:700}}>Confidence {Math.round(detailInv.ki_confidence*100)}%</div>}
             </div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:10}}>
+            {/* Kategori + absetzbar rozetleri */}
+            {(detailInv.tax_category||detailInv.absetzbar_pct!=null||detailInv.vorsteuer_abziehbar!=null)&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
               {detailInv.tax_category&&<span style={{fontSize:11,padding:"4px 10px",borderRadius:12,background:"rgba(59,130,246,0.15)",color:"#3b82f6",fontWeight:600}}>{detailInv.tax_category}</span>}
-              {detailInv.absetzbar_pct!=null&&<span style={{fontSize:11,padding:"4px 10px",borderRadius:12,background:detailInv.absetzbar_pct>=100?theme.accentSoft:detailInv.absetzbar_pct>=50?"rgba(245,158,11,0.15)":theme.dangerSoft,color:detailInv.absetzbar_pct>=100?theme.accent:detailInv.absetzbar_pct>=50?"#f59e0b":theme.danger,fontWeight:600}}>{detailInv.absetzbar_pct}% {getLang()==="de"?"absetzbar":"deductible"}</span>}
+              {detailInv.absetzbar_pct!=null&&<span style={{fontSize:11,padding:"4px 10px",borderRadius:12,background:detailInv.absetzbar_pct>=100?theme.accentSoft:detailInv.absetzbar_pct>=50?"rgba(245,158,11,0.15)":theme.dangerSoft,color:detailInv.absetzbar_pct>=100?theme.accent:detailInv.absetzbar_pct>=50?"#f59e0b":theme.danger,fontWeight:600}}>ca. {detailInv.absetzbar_pct}% {getLang()==="de"?"absetzbar":"deductible"}</span>}
               {detailInv.vorsteuer_abziehbar===true&&<span style={{fontSize:11,padding:"4px 10px",borderRadius:12,background:theme.accentSoft,color:theme.accent,fontWeight:600}}>✓ Vorsteuer</span>}
-              {detailInv.vorsteuer_abziehbar===false&&<span style={{fontSize:11,padding:"4px 10px",borderRadius:12,background:theme.dangerSoft,color:theme.danger,fontWeight:600}}>✗ Vorsteuer</span>}
-            </div>
-            {detailInv.tax_warnings&&detailInv.tax_warnings.length>0&&<div style={{marginBottom:8}}>
-              <div style={{fontSize:10,fontWeight:700,color:theme.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>{getLang()==="de"?"Hinweise":"Warnings"}</div>
-              {detailInv.tax_warnings.map((w,i)=>(<div key={i} style={{fontSize:12,color:theme.text,padding:"4px 0",borderLeft:"2px solid #f59e0b",paddingLeft:8,marginBottom:3}}>⚠️ {w}</div>))}
+              {detailInv.vorsteuer_abziehbar===false&&<span style={{fontSize:11,padding:"4px 10px",borderRadius:12,background:theme.dangerSoft,color:theme.danger,fontWeight:600}}>? Vorsteuer prüfen</span>}
             </div>}
-            {detailInv.tax_missing_docs&&detailInv.tax_missing_docs.length>0&&<div>
-              <div style={{fontSize:10,fontWeight:700,color:theme.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>{getLang()==="de"?"Fehlende Belege":"Missing documents"}</div>
-              {detailInv.tax_missing_docs.map((d,i)=>(<div key={i} style={{fontSize:12,color:theme.text,padding:"4px 0",borderLeft:"2px solid "+theme.danger,paddingLeft:8,marginBottom:3}}>📋 {d}</div>))}
+            {/* 4-bolumlu yapi: Einschaetzung / Grund / Empfehlung / Confidence */}
+            {detailInv.ki_einschaetzung&&<div style={{marginBottom:12,padding:"10px 12px",background:theme.surface,borderRadius:8,borderLeft:"3px solid #8b5cf6"}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#8b5cf6",marginBottom:3,textTransform:"uppercase",letterSpacing:0.5}}>1) {getLang()==="de"?"KI-Einschätzung":"AI Assessment"}</div>
+              <div style={{fontSize:13,color:theme.text,lineHeight:1.5,fontWeight:500}}>{detailInv.ki_einschaetzung}</div>
             </div>}
+            {detailInv.ki_grund&&<div style={{marginBottom:12,padding:"10px 12px",background:theme.surface,borderRadius:8,borderLeft:"3px solid #3b82f6"}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#3b82f6",marginBottom:3,textTransform:"uppercase",letterSpacing:0.5}}>2) {getLang()==="de"?"Warum?":"Why?"}</div>
+              <div style={{fontSize:12.5,color:theme.text,lineHeight:1.5}}>{detailInv.ki_grund}</div>
+            </div>}
+            {detailInv.ki_empfehlung&&<div style={{marginBottom:12,padding:"10px 12px",background:theme.surface,borderRadius:8,borderLeft:"3px solid "+theme.accent}}>
+              <div style={{fontSize:10,fontWeight:700,color:theme.accent,marginBottom:3,textTransform:"uppercase",letterSpacing:0.5}}>3) {getLang()==="de"?"Empfehlung":"Recommendation"}</div>
+              <div style={{fontSize:12.5,color:theme.text,lineHeight:1.5}}>{detailInv.ki_empfehlung}</div>
+            </div>}
+            {/* Eksik belgeler */}
+            {detailInv.tax_missing_docs&&detailInv.tax_missing_docs.length>0&&<div style={{marginTop:6,padding:"10px 12px",background:"rgba(245,158,11,0.06)",borderRadius:8,borderLeft:"3px solid #f59e0b"}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#f59e0b",marginBottom:6,textTransform:"uppercase",letterSpacing:0.5}}>📋 {getLang()==="de"?"Zu prüfende Unterlagen":"Documents to check"}</div>
+              {detailInv.tax_missing_docs.map((d,i)=>(<div key={i} style={{fontSize:12,color:theme.text,padding:"3px 0",lineHeight:1.4}}>• {d}</div>))}
+            </div>}
+            <div style={{marginTop:12,padding:"6px 10px",fontSize:10,color:theme.textDim,fontStyle:"italic",borderTop:"1px dashed "+theme.border,paddingTop:8}}>{getLang()==="de"?"⚠️ Keine rechtsverbindliche Steuerberatung. Bitte mit Ihrem Steuerberater prüfen.":"⚠️ Not legal tax advice. Please verify with your tax advisor."}</div>
           </div>}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span style={css.badge(detailInv.invoice_type==="income"?theme.accentSoft:theme.dangerSoft,detailInv.invoice_type==="income"?theme.accent:theme.danger)}>{detailInv.invoice_type==="income"?_t("income"):_t("expense")}</span>

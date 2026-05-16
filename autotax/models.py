@@ -314,6 +314,11 @@ class Invoice(Base):
     vorsteuer_abziehbar = Column(Boolean, nullable=True)
     tax_warnings = Column(Text, nullable=True)
     tax_missing_docs = Column(Text, nullable=True)
+    # Steuerlogik v2 — 4-bolumlu juristisch sicheres yapi
+    ki_einschaetzung = Column(Text, nullable=True)  # "Wahrscheinlich privat veranlasst"
+    ki_grund = Column(Text, nullable=True)          # "Beleg enthaelt ueberwiegend Lebensmittel"
+    ki_empfehlung = Column(Text, nullable=True)     # "Falls betrieblich, Anlass dokumentieren"
+    ki_confidence = Column(Float, nullable=True)    # 0.0-1.0
     payment_status = Column(String(20), default="unpaid", nullable=False, index=True)  # unpaid|paid|overdue
     paid_at = Column(DateTime, nullable=True)
     # JSON array string: hangi reminder'lar gonderildi — '["7d","1d","on_day","overdue"]'

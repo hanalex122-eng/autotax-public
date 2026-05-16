@@ -138,27 +138,51 @@ FORTBILDUNG / SOFTWARE / ABO:
 
 ═══════════════════════════════════════════════════════
 
-ANTWORTE NUR ALS JSON, KEINE WEITERE ERKLÄRUNG:
+WICHTIG — JURISTISCH SICHERER TON:
+
+Du gibst KEINE rechtsverbindliche Steueraussage. Du bist ein KI-Assistent.
+Vermeide DEFINITIVE Aussagen wie "nicht absetzbar" oder "ist privat".
+
+Verwende stattdessen konditionalen, vorsichtigen Ton:
+  ✗ "nicht absetzbar"            → ✓ "wahrscheinlich privat veranlasst"
+  ✗ "ist Bewirtung"               → ✓ "wirkt wie eine Bewirtungssituation"
+  ✗ "muss aktiviert werden"       → ✓ "sollte ggf. aktiviert werden"
+  ✗ "fehlt"                       → ✓ "scheint zu fehlen — bitte prüfen"
+
+Begründe IMMER deine Einschätzung kurz: "Der Beleg enthält überwiegend
+Lebensmittel, daher wirkt er privat".
+
+═══════════════════════════════════════════════════════
+
+ANTWORTE NUR ALS JSON (keine Markdown-Wrapper, kein Text außerhalb):
 
 {
   "status": "ok" | "warning" | "error",
-  "notes": "Kurze Hauptaussage Deutsch, max 200 Zeichen",
+  "notes": "Kurze Hauptaussage (konditional), max 200 Zeichen",
   "tax_category": "Bewirtung" | "Geschenk" | "Miete" | "Homeoffice" | "KFZ" | "Reise" | "Lohn" | "Sozialabgaben" | "AfA" | "Buero" | "Versicherung" | "Software" | "Material" | "Andere",
   "absetzbar_pct": 0-100,
   "vorsteuer_abziehbar": true | false,
-  "tax_warnings": ["Warnung 1", "Warnung 2"],
-  "missing_docs": ["Fehlendes Dokument 1"]
+  "tax_warnings": ["Hinweis 1 (konditional)", "Hinweis 2"],
+  "missing_docs": ["scheint zu fehlen: ..."],
+  "ki_einschaetzung": "1 Satz konditionale Einschätzung (z.B. 'Wahrscheinlich privat veranlasst')",
+  "grund": "1-2 Sätze Begründung — was im Beleg darauf hindeutet",
+  "empfehlung": "1 Satz: was sollte der Nutzer tun (z.B. 'Falls betrieblich, Anlass dokumentieren')",
+  "confidence": 0.0-1.0
 }
 
 REGELN:
-- absetzbar_pct: Prozentsatz der steuerlich abzugsfähigen Summe (Bewirtung=70, Geschenk>50€=0, sonst meist 100)
-- vorsteuer_abziehbar: nur false wenn Kleinunternehmer-Rechnung oder reiner Privat-Posten
-- tax_warnings: Hinweise wie "Privatanteil prüfen", "Aktivierung nötig"
-- missing_docs: Pflichtdokumente die fehlen (z.B. "Bewirtungsbeleg mit Teilnehmern")
-- Wenn unklar → status=warning + konkreter Hinweis in tax_warnings
-- Wenn OCR/Parse-Tutarsızlık → status=error + notes erklärt das
+- absetzbar_pct: Schätzung der steuerlich abzugsfähigen Summe
+  (Bewirtung≈70, Geschenk>50€≈0, normal≈100)
+- vorsteuer_abziehbar: nur false bei Kleinunternehmer-Rechnung oder klar Privat
+- ki_einschaetzung: KONDITIONAL ("wahrscheinlich/vermutlich/möglicherweise")
+- grund: WORAUS schließt du das? OCR-Inhalt, Vendor-Name, Betrag
+- empfehlung: KONSTRUKTIV — was kann der Nutzer tun?
+- confidence: Wie sicher bist du? <0.5 = unsicher, >0.85 = sehr sicher
+- Wenn unklar → status=warning + niedrigeres confidence
+- Wenn OCR/Parse-Inkonsistenz → status=error + notes erklärt es
 
-Sei präzise und kurz. Du sparst dem Nutzer Geld und Steuerprüfungs-Stress.
+Sei präzise, vorsichtig, hilfreich. Du sparst dem Nutzer Geld OHNE
+juristische Falschaussage zu machen.
 """
 
 
@@ -183,6 +207,8 @@ def _ask_claude(ocr_text: str, parsed: dict) -> dict:
         "tax_category": None, "absetzbar_pct": None,
         "vorsteuer_abziehbar": None,
         "tax_warnings": [], "missing_docs": [],
+        "ki_einschaetzung": None, "grund": None,
+        "empfehlung": None, "confidence": None,
     }
     if not _claude:
         return empty_result
@@ -236,6 +262,16 @@ def _ask_claude(ocr_text: str, parsed: dict) -> dict:
         if not isinstance(miss, list):
             miss = []
         miss = [str(x)[:300] for x in miss[:5]]
+        # Yeni 4-bolumlu yapi
+        einsch = (result.get("ki_einschaetzung") or "")[:400] or None
+        grund = (result.get("grund") or "")[:500] or None
+        empfehlung = (result.get("empfehlung") or "")[:400] or None
+        try:
+            conf = float(result.get("confidence")) if result.get("confidence") is not None else None
+            if conf is not None:
+                conf = max(0.0, min(1.0, conf))
+        except (TypeError, ValueError):
+            conf = None
         return {
             "status": status,
             "notes": (result.get("notes") or "")[:500],
@@ -244,6 +280,10 @@ def _ask_claude(ocr_text: str, parsed: dict) -> dict:
             "vorsteuer_abziehbar": vs,
             "tax_warnings": warn,
             "missing_docs": miss,
+            "ki_einschaetzung": einsch,
+            "grund": grund,
+            "empfehlung": empfehlung,
+            "confidence": conf,
         }
     except Exception:
         logger.exception("Claude analysis failed")
@@ -286,7 +326,7 @@ async def review(request: Request):
         parsed=data.get("parsed") or {},
     )
 
-    # Callback — Steuerlogik Engine v1: vergi alanlari dahil
+    # Callback — Steuerlogik Engine v2: 4-bolumlu yapilar dahil
     callback_payload = {
         "invoice_id": invoice_id,
         "status": result["status"],
@@ -296,6 +336,10 @@ async def review(request: Request):
         "vorsteuer_abziehbar": result.get("vorsteuer_abziehbar"),
         "tax_warnings": result.get("tax_warnings", []),
         "missing_docs": result.get("missing_docs", []),
+        "ki_einschaetzung": result.get("ki_einschaetzung"),
+        "grund": result.get("grund"),
+        "empfehlung": result.get("empfehlung"),
+        "confidence": result.get("confidence"),
     }
     callback_body = json.dumps(callback_payload).encode()
     callback_sig = _sign(callback_body)
