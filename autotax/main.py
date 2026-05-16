@@ -1946,15 +1946,15 @@ def admin_update_user(
         changed = []
         if "plan" in body:
             new_plan = (body["plan"] or "").strip().lower()
-            if new_plan not in ("free", "early", "pro"):
-                err(400, "Invalid plan: must be free|early|pro")
+            if new_plan not in ("free", "early", "pro", "starter", "ai_steuer", "premium"):
+                err(400, "Invalid plan: must be free|early|starter|pro|ai_steuer|premium")
             old = u.plan
             u.plan = new_plan
             changed.append(f"plan: {old} -> {new_plan}")
             # Manuel odeme alindiysa (Pro'ya gecirildiyse) trial'i bitir
             # -> trial_ends_at NULL (kalici Pro). Free'ye dusurulduyse de
             # trial bitmis sayilir.
-            if new_plan == "pro" and getattr(u, "trial_ends_at", None):
+            if new_plan in ("pro", "ai_steuer", "premium", "starter") and getattr(u, "trial_ends_at", None):
                 u.trial_ends_at = None
                 changed.append("trial: cleared (manual payment)")
         if "has_cloud_addon" in body:
@@ -10716,12 +10716,17 @@ async def eur_ai_review(body: dict = Body(default={}),
 def _is_paid_user(user_id: int) -> bool:
     """Kullanici odemeli (Starter/Pro/AI Steuer) mi yoksa Free/expired mi?
     Free veya trial_expired -> False.
+    Admin (ADMIN_EMAILS env'inde olan) her zaman True doner — test icin.
     """
     db = SessionLocal()
     try:
         u = db.query(User).filter(User.id == user_id).first()
         if not u:
             return False
+        # ADMIN BYPASS — admin emailler paid plan'a bagli olmadan AI kullanir
+        admin_emails = set(filter(None, (os.getenv("ADMIN_EMAILS") or "").lower().split(",")))
+        if u.email and u.email.lower().strip() in admin_emails:
+            return True
         plan = (u.plan or "free").lower()
         if plan in ("starter", "pro", "ai_steuer", "premium", "early"):
             return True
