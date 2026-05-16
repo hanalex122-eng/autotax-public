@@ -236,13 +236,54 @@ async def send_telegram(text: str, *, user_id: Optional[int] = None,
 
 def send_email(to_addr: str, subject: str, body_html: str,
                attachments: Optional[list] = None) -> bool:
-    """SMTP ile email gonderir. Hicbir env yoksa skip.
+    """Email gonderir. Iki yol:
+    1) RESEND_API_KEY env varsa Resend HTTP API (modern, SMTP'siz)
+    2) SMTP_HOST + SMTP_USER + SMTP_PASS varsa klasik SMTP
 
     attachments: opsiyonel liste, her oge (filename, bytes, mime_type) tuple.
                  Mahnung PDF'i icin kullanilir.
     """
-    if not (SMTP_HOST and SMTP_USER and SMTP_PASS and to_addr):
-        logger.debug("[REMINDER] email skipped — SMTP not configured or no recipient")
+    if not to_addr:
+        logger.debug("[REMINDER] email skipped — no recipient")
+        return False
+
+    # YOL 1: Resend API (oncelikli, kullanici bunu set etmis)
+    resend_key = (os.getenv("RESEND_API_KEY") or "").strip()
+    if resend_key:
+        try:
+            import httpx as _httpx
+            import base64 as _b64
+            sender = (os.getenv("RESEND_FROM") or os.getenv("SMTP_FROM")
+                       or "AutoTax-Cloud <noreply@autotaxhub.de>").strip()
+            payload = {
+                "from": sender,
+                "to": [to_addr],
+                "subject": subject,
+                "html": body_html,
+            }
+            if attachments:
+                payload["attachments"] = [{
+                    "filename": a[0],
+                    "content": _b64.b64encode(a[1]).decode(),
+                } for a in attachments[:5]]
+            r = _httpx.post(
+                "https://api.resend.com/emails",
+                json=payload,
+                headers={"Authorization": f"Bearer {resend_key}"},
+                timeout=15,
+            )
+            if r.status_code in (200, 201, 202):
+                logger.info("[REMINDER] Resend email sent to %s (subject: %s)",
+                            to_addr, subject[:60])
+                return True
+            logger.warning("[REMINDER] Resend API %s: %s", r.status_code, r.text[:300])
+            # Hata varsa SMTP'ye dusme dene
+        except Exception as e:
+            logger.warning("[REMINDER] Resend error: %s, falling back to SMTP", e)
+
+    # YOL 2: SMTP fallback
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS):
+        logger.warning("[REMINDER] email skipped — neither Resend nor SMTP configured")
         return False
     try:
         # Eklenti varsa mixed multipart, yoksa alternative

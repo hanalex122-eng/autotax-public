@@ -2572,7 +2572,7 @@ function CookieConsent(){
   </div>);
 }
 
-function AdvisorView(){
+function AdvisorView({onNav}={}){
   const[email,setEmail]=useState("");
   const[scope,setScope]=useState("read");
   const[note,setNote]=useState("");
@@ -2618,6 +2618,17 @@ function AdvisorView(){
     }catch(e){}
   };
   return(<div style={{display:"flex",flexDirection:"column",gap:24}}>
+    {/* AI Termin-Vorbereitung shortcut */}
+    <div onClick={()=>{if(onNav)onNav("steuer_uebersicht");}} style={{cursor:"pointer",padding:"18px 22px",borderRadius:14,background:"linear-gradient(135deg,rgba(139,92,246,0.10),rgba(99,102,241,0.05))",border:"1px solid rgba(139,92,246,0.3)",display:"flex",alignItems:"center",gap:14,transition:"all 0.2s"}}
+      onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor="#8b5cf6";e.currentTarget.style.boxShadow="0 8px 24px rgba(139,92,246,0.2)";}}
+      onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(139,92,246,0.3)";e.currentTarget.style.boxShadow="none";}}>
+      <div style={{width:46,height:46,borderRadius:12,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,boxShadow:"0 4px 14px rgba(139,92,246,0.4)",flexShrink:0}}>💡</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:14,fontWeight:700,color:theme.text,marginBottom:3}}>{tr("Termin beim Steuerberater? KI-Vorbereitung verfügbar","Tax advisor meeting? AI prep available")}</div>
+        <div style={{fontSize:12,color:theme.textMuted,lineHeight:1.5}}>{tr("Lassen Sie die KI Ihre Jahresdaten prüfen — auffällige Posten & wichtige Fragen für den Termin.","Let AI review your yearly data — unusual items & key questions for the meeting.")}</div>
+      </div>
+      <div style={{fontSize:13,fontWeight:700,color:"#8b5cf6"}}>→</div>
+    </div>
     <div>
       <h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>👔 {tr("Steuerberater-Zugang","Tax Advisor Access")}</h2>
       <p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0",lineHeight:1.5}}>
