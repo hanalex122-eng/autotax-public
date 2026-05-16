@@ -2878,6 +2878,24 @@ function SteuerOverviewView(){
               setTimeout(()=>load(),30000);
             }catch(e){alert(_extractErr(e)||e.message);}
           }} title={tr("Alte Belege AI-analysieren","Re-analyze old receipts")} style={{padding:"12px 16px",borderRadius:12,border:"1px solid "+theme.border,background:theme.surfaceAlt,color:theme.text,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>🔄 {tr("Alte AI-analysieren","Re-analyze")}</button>
+          <button onClick={async()=>{
+            try{
+              const tk=localStorage.getItem("atx_token");
+              const r=await fetch(API+"/steuer/eur-export?year="+year+"&format=pdf",{headers:{Authorization:"Bearer "+tk}});
+              if(!r.ok){alert(tr("PDF Export fehlgeschlagen","PDF export failed"));return;}
+              const blob=await r.blob();const url=URL.createObjectURL(blob);
+              const a=document.createElement("a");a.href=url;a.download=`EUR_${year}.pdf`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+              if(showToast)showToast("✓ EÜR_"+year+".pdf "+tr("heruntergeladen","downloaded"),"success");
+            }catch(e){alert(e.message);}
+          }} title={tr("Anlage EÜR als PDF herunterladen","Download Anlage EÜR PDF")} style={{padding:"12px 16px",borderRadius:12,border:"1px solid "+theme.border,background:theme.surfaceAlt,color:theme.text,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>📥 {tr("EÜR PDF","EÜR PDF")}</button>
+          <button onClick={async()=>{
+            setShowAsk(true);setAskBusy(true);setAskQ(tr(`Jahresreview ${year}`,`Yearly review ${year}`));setAskA("");
+            try{
+              const d=await api("/steuer/eur-ai-review",{method:"POST",body:JSON.stringify({year})});
+              setAskA(d.answer||tr("Keine Antwort","No answer"));
+            }catch(e){setAskA(tr("Fehler","Error")+": "+(_extractErr(e)||e.message));}
+            setAskBusy(false);
+          }} title={tr("AI Jahresreview deiner EÜR","AI yearly review of your EÜR")} style={{padding:"12px 16px",borderRadius:12,border:"1px solid rgba(245,158,11,0.4)",background:"rgba(245,158,11,0.08)",color:"#f59e0b",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🧠 {tr("AI Jahresreview","AI Yearly Review")}</button>
           <button onClick={()=>setShowAsk(true)} style={{padding:"12px 22px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,animation:"aiPulse 2.5s ease-in-out infinite",fontFamily:"inherit"}}>
             <span style={{fontSize:16}}>✨</span> {tr("Steuer AI fragen","Ask Tax AI")}
           </button>

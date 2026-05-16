@@ -10332,6 +10332,344 @@ def steuer_summary(year: int = Query(default=None), user: dict = Depends(get_cur
         db.close()
 
 
+@app.get("/steuer/eur-export")
+async def eur_export(year: int = Query(default=None), format: str = Query("json"),
+                      user: dict = Depends(get_current_user)):
+    """Anlage EÜR formatinda yillik export.
+
+    EÜR (Einnahmen-Uberschuss-Rechnung) = Kleinunternehmer/Selbstandiger icin
+    yillik vergi formu. AI kategorize ettigi faturalardan + recurring
+    expenses'tan otomatik dolar.
+
+    format=json (default) | pdf
+    Doner:
+      - betriebseinnahmen (Zeile 11): toplam gelir (invoice_type=income)
+      - betriebsausgaben (Zeile 23-66): kategori-kategori gider
+      - sonderausgaben (ayri liste, EUR'e dahil degil ama referans)
+      - vorsteuer_total
+      - umsatzsteuer_einnahmen / ausgaben
+      - net_profit (Gewinn) = einnahmen - ausgaben
+    """
+    if year is None:
+        year = datetime.now().year - 1  # default: gecen yil (cunku bu yilin EUR henuz bitmedi)
+    year_start = f"{year}-01-01"
+    year_end = f"{year}-12-31"
+
+    db = SessionLocal()
+    try:
+        # Income (Einnahmen)
+        income_invs = (
+            db.query(Invoice)
+            .filter(Invoice.user_id == user["sub"])
+            .filter(Invoice.invoice_type == "income")
+            .filter(Invoice.date >= year_start)
+            .filter(Invoice.date <= year_end)
+            .filter((Invoice.is_deleted == False) | (Invoice.is_deleted == None))
+            .all()
+        )
+        betriebseinnahmen = sum(float(i.total_amount or 0) for i in income_invs)
+        ust_einnahmen = sum(float(i.vat_amount or 0) for i in income_invs)
+
+        # Expense (Ausgaben) — kategorize
+        exp_invs = (
+            db.query(Invoice)
+            .filter(Invoice.user_id == user["sub"])
+            .filter(Invoice.invoice_type == "expense")
+            .filter(Invoice.date >= year_start)
+            .filter(Invoice.date <= year_end)
+            .filter((Invoice.is_deleted == False) | (Invoice.is_deleted == None))
+            .all()
+        )
+
+        # EÜR Zeile mapping — gercek vergi formundaki satirlar
+        EUR_ZEILEN = {
+            "Bewirtung": ("Zeile 23 — Bewirtungsaufwendungen (70%)", 0.7),
+            "Geschenk": ("Zeile 24 — Geschenke", 1.0),
+            "KFZ": ("Zeile 28-30 — KFZ-Kosten", 1.0),
+            "Reise": ("Zeile 27 — Reisekosten", 1.0),
+            "Miete": ("Zeile 50 — Miete für Geschäftsräume", 1.0),
+            "Buero": ("Zeile 49 — Büromaterial", 1.0),
+            "Material": ("Zeile 26 — Wareneingang", 1.0),
+            "Telefon": ("Zeile 48 — Telekommunikation", 1.0),
+            "Internet": ("Zeile 48 — Telekommunikation", 1.0),
+            "Software": ("Zeile 47 — EDV / Software-Abos", 1.0),
+            "Versicherung": ("Zeile 45 — Versicherungen (Betrieblich)", 1.0),
+            "Lohn": ("Zeile 35-36 — Personalkosten", 1.0),
+            "Sozialabgaben": ("Zeile 37 — Sozialabgaben AG-Anteil", 1.0),
+            "Homeoffice": ("Zeile 65 — Homeoffice-Pauschale (6€/Tag, max 1260€)", 1.0),
+            "AfA": ("Zeile 31-32 — Abschreibungen (AfA)", 1.0),
+            "Andere": ("Zeile 66 — Übrige Betriebsausgaben", 1.0),
+        }
+
+        ausgaben_by_zeile: dict[str, dict] = {}
+        nicht_absetzbar = 0.0
+        vorsteuer_total = 0.0
+        for inv in exp_invs:
+            cat = inv.tax_category or "Andere"
+            zeile_info = EUR_ZEILEN.get(cat, EUR_ZEILEN["Andere"])
+            zeile_label = zeile_info[0]
+            amt = float(inv.total_amount or 0)
+            pct = inv.absetzbar_pct if inv.absetzbar_pct is not None else int(zeile_info[1] * 100)
+            absetzbar = amt * pct / 100.0
+            nicht_absetzbar += (amt - absetzbar)
+            if inv.vorsteuer_abziehbar:
+                vorsteuer_total += float(inv.vat_amount or 0)
+            entry = ausgaben_by_zeile.setdefault(zeile_label, {"betrag": 0.0, "count": 0, "category": cat})
+            entry["betrag"] += absetzbar
+            entry["count"] += 1
+
+        # Recurring expenses — yillik projekte
+        recs = (
+            db.query(RecurringExpense)
+            .filter(RecurringExpense.user_id == user["sub"])
+            .filter(RecurringExpense.active == True)
+            .all()
+        )
+        period_mult = {"monthly": 12, "quarterly": 4, "yearly": 1, "once": 1}
+        recurring_total = 0.0
+        sonderausgaben = 0.0
+        for r in recs:
+            mult = period_mult.get(r.period or "monthly", 12)
+            yearly = float(r.amount or 0) * mult
+            tt = r.tax_treatment or "betriebsausgabe"
+            if tt == "sonderausgabe":
+                sonderausgaben += yearly
+                continue  # EÜR'e dahil degil, ayri
+            if tt == "nicht_absetzbar":
+                nicht_absetzbar += yearly
+                continue
+            absetzbar = yearly
+            if tt == "bewirtung_70":
+                absetzbar = yearly * 0.7
+                nicht_absetzbar += yearly * 0.3
+            elif tt == "privat_anteil" and r.absetzbar_pct is not None:
+                absetzbar = yearly * r.absetzbar_pct / 100.0
+                nicht_absetzbar += yearly - absetzbar
+            recurring_total += absetzbar
+            # Kategori uyumlu Zeile bul
+            zeile_info = EUR_ZEILEN.get(r.category or "Andere", EUR_ZEILEN["Andere"])
+            zeile_label = zeile_info[0] + " (Wiederkehrend)"
+            entry = ausgaben_by_zeile.setdefault(zeile_label, {"betrag": 0.0, "count": 0, "category": r.category or "Andere"})
+            entry["betrag"] += absetzbar
+            entry["count"] += 1
+
+        # Totals
+        total_ausgaben = sum(v["betrag"] for v in ausgaben_by_zeile.values())
+        gewinn = betriebseinnahmen - total_ausgaben
+
+        result = {
+            "year": year,
+            "user_email": "",  # filled below
+            "betriebseinnahmen": round(betriebseinnahmen, 2),
+            "umsatzsteuer_einnahmen": round(ust_einnahmen, 2),
+            "betriebsausgaben_total": round(total_ausgaben, 2),
+            "ausgaben_by_zeile": {k: {"betrag": round(v["betrag"], 2), "count": v["count"],
+                                       "category": v["category"]}
+                                   for k, v in sorted(ausgaben_by_zeile.items())},
+            "vorsteuer_abziehbar": round(vorsteuer_total, 2),
+            "nicht_absetzbar": round(nicht_absetzbar, 2),
+            "sonderausgaben": round(sonderausgaben, 2),
+            "gewinn": round(gewinn, 2),
+            "income_count": len(income_invs),
+            "expense_count": len(exp_invs),
+            "recurring_count": len(recs),
+        }
+
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if u:
+            result["user_email"] = u.email
+            result["user_name"] = u.full_name or ""
+            result["is_kleinunternehmer"] = bool(getattr(u, "is_kleinunternehmer", False))
+
+        if format == "pdf":
+            try:
+                pdf_bytes = _generate_eur_pdf(result)
+                from fastapi.responses import Response
+                return Response(content=pdf_bytes, media_type="application/pdf",
+                                 headers={"Content-Disposition": f"attachment; filename=EUR_{year}.pdf"})
+            except Exception as e:
+                logger.exception("EUR PDF gen failed")
+                err(500, f"PDF generation failed: {e}")
+
+        return result
+    finally:
+        db.close()
+
+
+def _generate_eur_pdf(data: dict) -> bytes:
+    """Anlage EÜR formatinda PDF olustur. ReportLab kullanir."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas as pdf_canvas
+    from reportlab.lib.units import cm
+    from reportlab.lib.colors import HexColor
+    import io as _io
+
+    buf = _io.BytesIO()
+    c = pdf_canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+    y = h - 2 * cm
+
+    # Header
+    c.setFillColor(HexColor("#0f172a"))
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(2 * cm, y, f"Anlage EÜR {data['year']}")
+    c.setFont("Helvetica", 9)
+    c.setFillColor(HexColor("#64748b"))
+    c.drawRightString(w - 2 * cm, y, f"AutoTax-Cloud · {datetime.now().strftime('%d.%m.%Y')}")
+    y -= 0.8 * cm
+    c.setFont("Helvetica", 10)
+    c.setFillColor(HexColor("#0f172a"))
+    if data.get("user_name"):
+        c.drawString(2 * cm, y, f"Steuerpflichtiger: {data['user_name']} · {data.get('user_email', '')}")
+    else:
+        c.drawString(2 * cm, y, f"Steuerpflichtiger: {data.get('user_email', '')}")
+    if data.get("is_kleinunternehmer"):
+        c.drawString(2 * cm, y - 0.5 * cm, "§19 UStG — Kleinunternehmerregelung (keine USt)")
+    y -= 1.5 * cm
+
+    # Einnahmen section
+    c.setFillColor(HexColor("#10b981"))
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(2 * cm, y, "Betriebseinnahmen")
+    y -= 0.6 * cm
+    c.setFillColor(HexColor("#0f172a"))
+    c.setFont("Helvetica", 10)
+    c.drawString(2.4 * cm, y, f"Zeile 11 — Betriebseinnahmen ({data['income_count']} Rechnungen)")
+    c.drawRightString(w - 2.4 * cm, y, f"{data['betriebseinnahmen']:.2f} €")
+    y -= 0.5 * cm
+    c.drawString(2.4 * cm, y, f"davon Umsatzsteuer-Einnahmen")
+    c.drawRightString(w - 2.4 * cm, y, f"{data['umsatzsteuer_einnahmen']:.2f} €")
+    y -= 1 * cm
+
+    # Ausgaben
+    c.setFillColor(HexColor("#dc2626"))
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(2 * cm, y, "Betriebsausgaben")
+    y -= 0.6 * cm
+    c.setFillColor(HexColor("#0f172a"))
+    c.setFont("Helvetica", 9)
+    for zeile_label, info in data["ausgaben_by_zeile"].items():
+        if y < 4 * cm:
+            c.showPage()
+            y = h - 2 * cm
+            c.setFont("Helvetica", 9)
+        c.drawString(2.4 * cm, y, f"{zeile_label[:65]} ({info['count']})")
+        c.drawRightString(w - 2.4 * cm, y, f"{info['betrag']:.2f} €")
+        y -= 0.45 * cm
+    y -= 0.3 * cm
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(2.4 * cm, y, "Summe Betriebsausgaben")
+    c.drawRightString(w - 2.4 * cm, y, f"{data['betriebsausgaben_total']:.2f} €")
+    y -= 1 * cm
+
+    # Result
+    c.setFillColor(HexColor("#3b82f6"))
+    c.setFont("Helvetica-Bold", 14)
+    label = "Gewinn" if data["gewinn"] >= 0 else "Verlust"
+    c.drawString(2 * cm, y, f"{label} (Einnahmen − Ausgaben)")
+    c.drawRightString(w - 2 * cm, y, f"{data['gewinn']:.2f} €")
+    y -= 1 * cm
+
+    # Vorsteuer + Sonder
+    c.setFillColor(HexColor("#64748b"))
+    c.setFont("Helvetica", 9)
+    c.drawString(2 * cm, y, f"Vorsteuer (§15 UStG, abziehbar)")
+    c.drawRightString(w - 2 * cm, y, f"{data['vorsteuer_abziehbar']:.2f} €")
+    y -= 0.5 * cm
+    c.drawString(2 * cm, y, "Sonderausgaben (private Versicherungen, KV/RV — separat)")
+    c.drawRightString(w - 2 * cm, y, f"{data['sonderausgaben']:.2f} €")
+    y -= 0.5 * cm
+    c.drawString(2 * cm, y, "Nicht absetzbar (Bewirtung 30%, privat, etc.)")
+    c.drawRightString(w - 2 * cm, y, f"{data['nicht_absetzbar']:.2f} €")
+    y -= 1 * cm
+
+    # Disclaimer
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(2 * cm, 1.5 * cm,
+                  "Diese Aufstellung wurde von AutoTax-Cloud KI generiert und ist KEINE rechtsverbindliche Steuererklärung.")
+    c.drawString(2 * cm, 1.1 * cm,
+                  "Bitte mit Ihrem Steuerberater prüfen. Quelle: Anlage EÜR §13a EStG.")
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
+
+
+@app.post("/steuer/eur-ai-review")
+async def eur_ai_review(body: dict = Body(default={}),
+                         user: dict = Depends(get_current_user)):
+    """AI yillik EUR'i inceler — eksiklikler, supheli kalemler, oneriler.
+    Sonuc: serbest metin yorum + key findings list.
+    """
+    year = body.get("year") or (datetime.now().year - 1)
+    # Get the EUR data
+    db = SessionLocal()
+    try:
+        year_start = f"{year}-01-01"
+        year_end = f"{year}-12-31"
+        income_count = db.query(Invoice).filter(
+            Invoice.user_id == user["sub"],
+            Invoice.invoice_type == "income",
+            Invoice.date >= year_start, Invoice.date <= year_end,
+            (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
+        ).count()
+        expense_count = db.query(Invoice).filter(
+            Invoice.user_id == user["sub"],
+            Invoice.invoice_type == "expense",
+            Invoice.date >= year_start, Invoice.date <= year_end,
+            (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
+        ).count()
+        # Compute summary inline (re-use logic from eur_export)
+    finally:
+        db.close()
+
+    # Re-fetch full data via internal call would be cleaner; for now inline:
+    eur_data = await eur_export(year=year, format="json", user=user)
+    if isinstance(eur_data, dict):
+        eur_json = eur_data
+    else:
+        err(500, "EUR export failed")
+
+    # Send to AI ask endpoint with EUR context
+    url = (os.environ.get("AI_REVIEWER_WEBHOOK_URL") or "").strip()
+    if not url:
+        err(503, "AI service not configured")
+    ask_url = url.rsplit("/", 1)[0] + "/ask"
+    secret = (os.environ.get("AI_REVIEWER_SECRET") or "").strip()
+
+    import json as _json
+    summary = _json.dumps(eur_json, ensure_ascii=False, indent=2)
+    question = (
+        f"Hier ist meine Anlage EÜR für {year} (automatisch aus AutoTax generiert). "
+        "Bitte prüfe als Steuerberater-Assistent: "
+        "1) Welche typischen Posten könnten fehlen? "
+        "2) Welche Kategorien sehen ungewöhnlich aus (zu hoch/zu niedrig)? "
+        "3) Welche Tipps für die Steuererklärung gibst du mir? "
+        "Antworte strukturiert in 5-8 Punkten, jeweils 1-2 Sätze."
+    )
+    payload = {"user_id": user["sub"], "question": question, "context": summary[:6000]}
+    payload_bytes = _json.dumps(payload).encode()
+    sig = _ai_reviewer_sign(payload_bytes)
+
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(ask_url, content=payload_bytes,
+                                   headers={"X-Sig": sig, "Content-Type": "application/json"})
+            if r.status_code != 200:
+                err(502, f"AI service error: {r.status_code}")
+            data = r.json()
+            audit("steuer.eur_ai_review", user_id=user["sub"],
+                   payload={"year": year}, resource_type="eur_review")
+            return {"year": year, "answer": data.get("answer") or "",
+                    "model": data.get("model") or "",
+                    "summary": eur_json}
+    except _httpx.RequestError:
+        logger.exception("AI ask failed")
+        err(502, "AI service unreachable")
+
+
 @app.post("/steuer/ask")
 async def steuer_ask(body: dict = Body(...), user: dict = Depends(get_current_user)):
     """AI'a vergi sorusu sor — 'Bu gider dusulur mu?' tarzi.
