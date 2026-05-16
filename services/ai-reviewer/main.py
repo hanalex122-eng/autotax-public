@@ -313,3 +313,60 @@ async def review(request: Request):
 
     logger.info("Reviewed invoice %s: status=%s", invoice_id, result["status"])
     return {"ok": True, "status": result["status"]}
+
+
+ASK_SYSTEM_PROMPT = """\
+Du bist ein deutscher Steuerberater-Assistent fur Kleinunternehmer und \
+Selbststandige. Beantworte konkrete Fragen zur Absetzbarkeit, USt-Behandlung, \
+zur EuR-Erfassung kurz, prazise und mit Paragraf-Referenz wo moglich \
+(z.B. §4 Abs.5 Nr.2 EStG, §15 UStG).
+
+Stil:
+- Maximal 4-6 Satze
+- Falls die Frage unklar ist: nachfrage
+- Bei Streitfallen: konservative Haltung empfehlen
+- Bei klar abzugsfahigen Posten: kurz bestatigen + Hinweis auf Pflicht-Belege
+- IMMER ein Disclaimer am Ende: "Hinweis: Dies ist keine Steuerberatung. \
+Bei rechtsverbindlichen Fragen bitte Steuerberater konsultieren."
+"""
+
+
+@app.post("/ask")
+async def ask(request: Request):
+    """Kullaniciden gelen serbest soru — 'Bu gider dusulur mu?' tarzi."""
+    body = await request.body()
+    sig = request.headers.get("X-Sig", "")
+    if not _verify_signature(body, sig):
+        raise HTTPException(status_code=403, detail="bad signature")
+    try:
+        data = json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad json")
+
+    question = (data.get("question") or "").strip()[:1000]
+    context = (data.get("context") or "").strip()[:2000]
+    if not question:
+        raise HTTPException(status_code=400, detail="question required")
+    if not _claude:
+        raise HTTPException(status_code=503, detail="claude not configured")
+
+    user_msg = f"Frage: {question}"
+    if context:
+        user_msg += f"\n\nKontext: {context}"
+
+    try:
+        msg = _claude.messages.create(
+            model=MODEL,
+            max_tokens=600,
+            system=[{
+                "type": "text",
+                "text": ASK_SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        answer = msg.content[0].text.strip() if msg.content else ""
+        return {"answer": answer, "model": MODEL}
+    except Exception:
+        logger.exception("ask failed")
+        raise HTTPException(status_code=500, detail="ai error")

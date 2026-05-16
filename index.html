@@ -583,6 +583,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     ...(F.beleg_manual!==false?[{id:"beleg",icon:I.invoice,label:"Neuen Beleg erfassen",href:"/beleg"}]:[]),
     {id:"bookkeeping",icon:I.tax,label:_t("bookkeeping")},
     {id:"vault",icon:I.invoice,label:_t("vault")},
+    {id:"steuer_uebersicht",icon:I.tax,label:getLang()==="de"?"Steuer-Übersicht":"Tax Overview"},
     ...(F.editor!==false?[{id:"editor",icon:I.check,label:_t("editor")}]:[]),
     {id:"export",icon:I.export,label:_t("export")},
     {id:"companies",icon:I.invoice,label:_t("companies")},
@@ -2677,6 +2678,227 @@ function AdvisorView(){
   </div>);
 }
 
+function SteuerOverviewView(){
+  const _l=getLang();
+  const tr=(de,en)=>_l==="de"?de:en;
+  const currentYear=new Date().getFullYear();
+  const[year,setYear]=useState(currentYear);
+  const[summary,setSummary]=useState(null);
+  const[recurring,setRecurring]=useState({items:[],yearly_total:0});
+  const[loading,setLoading]=useState(true);
+  const[showAdd,setShowAdd]=useState(false);
+  const[editId,setEditId]=useState(null);
+  const[form,setForm]=useState({label:"",category:"Miete",amount:0,vat_rate:"19%",period:"monthly",tax_treatment:"betriebsausgabe",vendor:"",notes:""});
+  const[showAsk,setShowAsk]=useState(false);
+  const[askQ,setAskQ]=useState("");
+  const[askA,setAskA]=useState("");
+  const[askBusy,setAskBusy]=useState(false);
+
+  const load=async()=>{
+    setLoading(true);
+    try{
+      const [s,r]=await Promise.all([
+        api("/steuer/summary?year="+year),
+        api("/recurring-expenses?active_only=false"),
+      ]);
+      setSummary(s);
+      setRecurring({items:r.items||[],yearly_total:r.yearly_total||0});
+    }catch(e){}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[year]);
+
+  const save=async()=>{
+    if(!form.label||!form.amount){alert(tr("Bezeichnung und Betrag sind Pflicht","Label and amount required"));return;}
+    try{
+      if(editId){
+        await api("/recurring-expenses/"+editId,{method:"PATCH",body:JSON.stringify(form)});
+      }else{
+        await api("/recurring-expenses",{method:"POST",body:JSON.stringify(form)});
+      }
+      setShowAdd(false);setEditId(null);
+      setForm({label:"",category:"Miete",amount:0,vat_rate:"19%",period:"monthly",tax_treatment:"betriebsausgabe",vendor:"",notes:""});
+      load();
+    }catch(e){alert(_extractErr(e)||e.message);}
+  };
+  const remove=async(id)=>{
+    if(!confirm(tr("Wirklich löschen?","Really delete?")))return;
+    try{await api("/recurring-expenses/"+id,{method:"DELETE"});load();}catch(e){alert(e.message);}
+  };
+  const edit=(r)=>{
+    setEditId(r.id);
+    setForm({label:r.label,category:r.category||"Miete",amount:r.amount,vat_rate:r.vat_rate||"19%",period:r.period,tax_treatment:r.tax_treatment,vendor:r.vendor||"",notes:r.notes||""});
+    setShowAdd(true);
+  };
+  const ask=async()=>{
+    if(!askQ.trim())return;
+    setAskBusy(true);setAskA("");
+    try{
+      const d=await api("/steuer/ask",{method:"POST",body:JSON.stringify({question:askQ})});
+      setAskA(d.answer||tr("Keine Antwort","No answer"));
+    }catch(e){setAskA(tr("Fehler","Error")+": "+(_extractErr(e)||e.message));}
+    setAskBusy(false);
+  };
+
+  const CATEGORIES=[
+    {value:"Miete",icon:"🏠"},{value:"Krankenversicherung",icon:"🏥"},
+    {value:"Rentenversicherung",icon:"👴"},{value:"Versicherung",icon:"🛡️"},
+    {value:"Telefon",icon:"📞"},{value:"Internet",icon:"🌐"},
+    {value:"GEZ",icon:"📺"},{value:"Software",icon:"💻"},
+    {value:"Buero",icon:"🪑"},{value:"KFZ",icon:"🚗"},
+    {value:"Lohn",icon:"💼"},{value:"Sozialabgaben",icon:"📋"},
+    {value:"Andere",icon:"📦"},
+  ];
+  const TREATMENTS=[
+    {value:"betriebsausgabe",label:tr("Betriebsausgabe (100%)","Business expense (100%)")},
+    {value:"sonderausgabe",label:tr("Sonderausgabe (private Versicherung)","Special expense (private insurance)")},
+    {value:"bewirtung_70",label:tr("Bewirtung (70%)","Entertainment (70%)")},
+    {value:"privat_anteil",label:tr("Privatanteil (manuell)","Private share (manual)")},
+    {value:"nicht_absetzbar",label:tr("Nicht absetzbar","Not deductible")},
+  ];
+  const PERIODS=[
+    {value:"monthly",label:tr("Monatlich","Monthly")},
+    {value:"quarterly",label:tr("Quartalsweise","Quarterly")},
+    {value:"yearly",label:tr("Jährlich","Yearly")},
+    {value:"once",label:tr("Einmalig","Once")},
+  ];
+
+  const fmtEur=v=>"€"+(v||0).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  return(<div style={{display:"flex",flexDirection:"column",gap:24,maxWidth:1100}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+      <div>
+        <h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>🧾 {tr("Steuer-Übersicht","Tax Overview")}</h2>
+        <p style={{color:theme.textMuted,fontSize:13,margin:"6px 0 0"}}>{tr("AI-kategorisierte Belege + wiederkehrende Kosten — Jahresbilanz für deine EÜR / Steuerberater.","AI-categorized receipts + recurring costs — yearly summary for your tax return.")}</p>
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <select style={{...css.input,width:"auto",padding:"8px 12px"}} value={year} onChange={e=>setYear(parseInt(e.target.value))}>
+          {[currentYear,currentYear-1,currentYear-2,currentYear-3].map(y=><option key={y} value={y}>{y}</option>)}
+        </select>
+        <button style={css.btnOutline} onClick={()=>setShowAsk(true)}>💬 {tr("AI fragen","Ask AI")}</button>
+      </div>
+    </div>
+
+    {loading&&<div style={{padding:40,textAlign:"center",color:theme.textMuted}}>⏳ {tr("Laden...","Loading...")}</div>}
+
+    {!loading&&summary&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
+      <div style={css.card}>
+        <div style={{fontSize:11,color:theme.textMuted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>{tr("Betriebsausgaben","Business expenses")}</div>
+        <div style={{fontSize:22,fontWeight:700,color:theme.accent,fontFamily:mono}}>{fmtEur(summary.totals.betriebsausgaben)}</div>
+        <div style={{fontSize:11,color:theme.textDim,marginTop:2}}>{tr("100% absetzbar","100% deductible")}</div>
+      </div>
+      <div style={css.card}>
+        <div style={{fontSize:11,color:theme.textMuted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>{tr("Sonderausgaben","Special deductions")}</div>
+        <div style={{fontSize:22,fontWeight:700,color:"#8b5cf6",fontFamily:mono}}>{fmtEur(summary.totals.sonderausgaben)}</div>
+        <div style={{fontSize:11,color:theme.textDim,marginTop:2}}>{tr("Private Vers. (KV/RV)","Private ins. (Health/Pension)")}</div>
+      </div>
+      <div style={css.card}>
+        <div style={{fontSize:11,color:theme.textMuted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>{tr("Nicht absetzbar","Not deductible")}</div>
+        <div style={{fontSize:22,fontWeight:700,color:theme.danger,fontFamily:mono}}>{fmtEur(summary.totals.nicht_absetzbar)}</div>
+        <div style={{fontSize:11,color:theme.textDim,marginTop:2}}>{tr("z.B. Bewirtung 30%","e.g. Bewirtung 30%")}</div>
+      </div>
+      <div style={css.card}>
+        <div style={{fontSize:11,color:theme.textMuted,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>{tr("Vorsteuer","Input VAT")}</div>
+        <div style={{fontSize:22,fontWeight:700,color:"#3b82f6",fontFamily:mono}}>{fmtEur(summary.totals.vorsteuer_total)}</div>
+        <div style={{fontSize:11,color:theme.textDim,marginTop:2}}>{tr("abziehbar","deductible")}</div>
+      </div>
+    </div>}
+
+    {!loading&&summary&&Object.keys(summary.by_category).length>0&&<div style={css.card}>
+      <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 14px"}}>📊 {tr("Belege nach Kategorie (AI)","Receipts by category (AI)")}</h3>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {Object.entries(summary.by_category).sort((a,b)=>b[1].gross-a[1].gross).map(([cat,d])=>(<div key={cat} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:theme.surfaceAlt,borderRadius:8,gap:10,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,minWidth:180}}>
+            <span style={{fontSize:11,padding:"3px 10px",borderRadius:12,background:"rgba(59,130,246,0.15)",color:"#3b82f6",fontWeight:600}}>{cat}</span>
+            <span style={{fontSize:11,color:theme.textDim}}>{d.count}× · {d.pct_default}%</span>
+          </div>
+          <div style={{display:"flex",gap:16,fontSize:13,fontFamily:mono,alignItems:"baseline"}}>
+            <span style={{color:theme.textMuted}}>{tr("Brutto","Gross")}: <span style={{color:theme.text,fontWeight:600}}>{fmtEur(d.gross)}</span></span>
+            <span style={{color:theme.textMuted}}>{tr("Absetzbar","Deductible")}: <span style={{color:theme.accent,fontWeight:600}}>{fmtEur(d.absetzbar)}</span></span>
+            {d.vorsteuer>0&&<span style={{color:"#3b82f6",fontWeight:600}}>VSt: {fmtEur(d.vorsteuer)}</span>}
+          </div>
+        </div>))}
+      </div>
+    </div>}
+
+    {!loading&&<div style={css.card}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+        <div>
+          <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:0}}>🔁 {tr("Wiederkehrende Kosten","Recurring expenses")}</h3>
+          <div style={{fontSize:11,color:theme.textMuted,marginTop:4}}>{tr("Miete, Versicherung, Rente — einmal eintragen, jedes Jahr automatisch.","Rent, insurance, pension — enter once, every year automatic.")} {tr("Jährlich","Yearly")}: <b style={{color:theme.accent}}>{fmtEur(recurring.yearly_total)}</b></div>
+        </div>
+        <button style={css.btn()} onClick={()=>{setEditId(null);setForm({label:"",category:"Miete",amount:0,vat_rate:"19%",period:"monthly",tax_treatment:"betriebsausgabe",vendor:"",notes:""});setShowAdd(true);}}>+ {tr("Hinzufügen","Add")}</button>
+      </div>
+      {recurring.items.length===0?<div style={{padding:20,textAlign:"center",color:theme.textMuted,fontSize:13,background:theme.surfaceAlt,borderRadius:8}}>{tr("Noch keine wiederkehrenden Kosten. Füge Miete, Versicherung, Rente, GEZ usw. hinzu.","No recurring expenses yet. Add rent, insurance, pension, etc.")}</div>:
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {recurring.items.map(r=>{const cat=CATEGORIES.find(c=>c.value===r.category);return(<div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:r.active?theme.surfaceAlt:"transparent",border:r.active?"1px solid "+theme.border:"1px dashed "+theme.border,borderRadius:8,gap:10,flexWrap:"wrap",opacity:r.active?1:0.5}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,minWidth:200}}>
+              <span style={{fontSize:18}}>{cat?cat.icon:"📦"}</span>
+              <div>
+                <div style={{fontSize:13,fontWeight:500,color:theme.text}}>{r.label}{r.vendor?" · "+r.vendor:""}</div>
+                <div style={{fontSize:11,color:theme.textMuted}}>{r.category||"—"} · {PERIODS.find(p=>p.value===r.period)?.label||r.period}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{fontSize:13,fontFamily:mono,fontWeight:600,color:theme.text}}>{fmtEur(r.amount)}/{r.period==="monthly"?"M":r.period==="quarterly"?"Q":"J"}</div>
+              <span style={{fontSize:10,padding:"3px 8px",borderRadius:10,background:r.tax_treatment==="sonderausgabe"?"rgba(139,92,246,0.15)":r.tax_treatment==="nicht_absetzbar"?theme.dangerSoft:theme.accentSoft,color:r.tax_treatment==="sonderausgabe"?"#8b5cf6":r.tax_treatment==="nicht_absetzbar"?theme.danger:theme.accent}}>{TREATMENTS.find(t=>t.value===r.tax_treatment)?.label.split(" ")[0]||r.tax_treatment}</span>
+              <button style={{...css.btnOutline,padding:"4px 10px",fontSize:11}} onClick={()=>edit(r)}>✏</button>
+              <button style={{...css.btnOutline,padding:"4px 10px",fontSize:11,borderColor:theme.danger+"55",color:theme.danger}} onClick={()=>remove(r.id)}>🗑</button>
+            </div>
+          </div>);})}
+        </div>}
+    </div>}
+
+    {showAdd&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowAdd(false)}>
+      <div style={{background:theme.surface,borderRadius:14,padding:24,width:"100%",maxWidth:560,maxHeight:"90vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
+        <h3 style={{fontSize:18,fontWeight:700,color:theme.text,margin:"0 0 16px"}}>{editId?tr("Bearbeiten","Edit"):tr("Neue wiederkehrende Kosten","New recurring expense")}</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div><label style={{fontSize:11,color:theme.textMuted,fontWeight:600,display:"block",marginBottom:4}}>{tr("Bezeichnung","Label")} *</label><input style={css.input} value={form.label} onChange={e=>setForm({...form,label:e.target.value})} placeholder={tr("z.B. Büro Miete","e.g. Office rent")}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><label style={{fontSize:11,color:theme.textMuted,fontWeight:600,display:"block",marginBottom:4}}>{tr("Kategorie","Category")}</label>
+              <select style={css.input} value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>
+                {CATEGORIES.map(c=><option key={c.value} value={c.value}>{c.icon} {c.value}</option>)}
+              </select></div>
+            <div><label style={{fontSize:11,color:theme.textMuted,fontWeight:600,display:"block",marginBottom:4}}>{tr("Betrag (€)","Amount (€)")} *</label><input type="number" step="0.01" style={css.input} value={form.amount} onChange={e=>setForm({...form,amount:parseFloat(e.target.value)||0})}/></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><label style={{fontSize:11,color:theme.textMuted,fontWeight:600,display:"block",marginBottom:4}}>{tr("Periode","Period")}</label>
+              <select style={css.input} value={form.period} onChange={e=>setForm({...form,period:e.target.value})}>
+                {PERIODS.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
+              </select></div>
+            <div><label style={{fontSize:11,color:theme.textMuted,fontWeight:600,display:"block",marginBottom:4}}>USt</label>
+              <select style={css.input} value={form.vat_rate} onChange={e=>setForm({...form,vat_rate:e.target.value})}>
+                <option value="19%">19%</option><option value="7%">7%</option><option value="0%">0% / §19</option>
+              </select></div>
+          </div>
+          <div><label style={{fontSize:11,color:theme.textMuted,fontWeight:600,display:"block",marginBottom:4}}>{tr("Steuerliche Behandlung","Tax treatment")}</label>
+            <select style={css.input} value={form.tax_treatment} onChange={e=>setForm({...form,tax_treatment:e.target.value})}>
+              {TREATMENTS.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}
+            </select></div>
+          <div><label style={{fontSize:11,color:theme.textMuted,fontWeight:600,display:"block",marginBottom:4}}>{tr("Anbieter","Vendor")}</label><input style={css.input} value={form.vendor} onChange={e=>setForm({...form,vendor:e.target.value})} placeholder={tr("z.B. AOK / Allianz / Hausverwaltung","e.g. Insurance Co.")}/></div>
+          <div style={{display:"flex",gap:8,marginTop:8}}>
+            <button style={{...css.btn(),flex:1}} onClick={save}>💾 {tr("Speichern","Save")}</button>
+            <button style={css.btnOutline} onClick={()=>setShowAdd(false)}>{tr("Abbrechen","Cancel")}</button>
+          </div>
+        </div>
+      </div>
+    </div>}
+
+    {showAsk&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowAsk(false)}>
+      <div style={{background:theme.surface,borderRadius:14,padding:24,width:"100%",maxWidth:640,maxHeight:"90vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
+        <h3 style={{fontSize:18,fontWeight:700,color:theme.text,margin:"0 0 6px"}}>💬 {tr("AI Steuerberater fragen","Ask AI Tax Advisor")}</h3>
+        <p style={{fontSize:12,color:theme.textMuted,margin:"0 0 14px"}}>{tr("Powered by Claude Opus 4.7 — keine Steuerberatung, nur Hinweis.","Powered by Claude Opus 4.7 — no legal tax advice, hints only.")}</p>
+        <textarea style={{...css.input,minHeight:80,resize:"vertical"}} value={askQ} onChange={e=>setAskQ(e.target.value)} placeholder={tr("z.B. Kann ich mein neues iPad voll absetzen?","e.g. Can I fully deduct my new iPad?")}/>
+        <div style={{display:"flex",gap:8,marginTop:10}}>
+          <button style={{...css.btn(),flex:1}} onClick={ask} disabled={askBusy||!askQ.trim()}>{askBusy?"⏳ "+tr("Denkt nach...","Thinking..."):"🤖 "+tr("Fragen","Ask")}</button>
+          <button style={css.btnOutline} onClick={()=>setShowAsk(false)}>{tr("Schließen","Close")}</button>
+        </div>
+        {askA&&<div style={{marginTop:16,padding:14,background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:10,fontSize:13,lineHeight:1.6,color:theme.text,whiteSpace:"pre-wrap"}}>{askA}</div>}
+      </div>
+    </div>}
+  </div>);
+}
+
 function NotificationsView(){
   const[status,setStatus]=useState(null);
   const[loading,setLoading]=useState(true);
@@ -3506,7 +3728,7 @@ function App(){
     return()=>window.removeEventListener("hashchange",checkHash);
   },[]);
   if(!authed)return<Fragment><AuthScreen onLogin={()=>setAuthed(true)}/><CookieConsent/></Fragment>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView};
+  const views={dashboard:DashboardView,invoices:InvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView};
   const _t=typeof t==="function"?t:k=>k;
   const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.

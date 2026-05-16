@@ -15,7 +15,7 @@ import io
 from autotax.ocr import extract_text, extract_text_and_qr
 from autotax.parser import parse_invoice
 from autotax.db import init_db, save_invoice, SessionLocal
-from autotax.models import Invoice, User, CashEntry, UserCompany, LlmUsage
+from autotax.models import Invoice, User, CashEntry, UserCompany, LlmUsage, RecurringExpense
 from autotax.duplicate_service import generate_file_hash, find_hard_duplicate, check_soft_duplicate
 from autotax.auth import hash_password, verify_password, create_token, create_access_token, create_refresh_token, decode_token, get_current_user, get_acting_context, require_owner_or_export
 from autotax.audit import audit
@@ -9729,3 +9729,319 @@ async def test_ocr_debug(file: UploadFile = File(...), user: dict = Depends(get_
 
 
 # Debug OCR print + Auth header print middleware removed — security risk in production
+
+
+# =============================================================================
+# Steuer-Ubersicht — Wiederkehrende Kosten + Yillik Ozet + AI Ask
+# (Steuerlogik Engine v1 — 2026-05-16)
+# =============================================================================
+
+class RecurringExpenseBody(BaseModel):
+    label: str
+    category: str | None = None
+    amount: float
+    vat_rate: str | None = None
+    period: str = "monthly"
+    tax_treatment: str = "betriebsausgabe"
+    absetzbar_pct: int | None = None
+    vendor: str | None = None
+    notes: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    active: bool = True
+
+
+def _recurring_to_dict(r: RecurringExpense) -> dict:
+    return {
+        "id": r.id,
+        "label": r.label,
+        "category": r.category or "",
+        "amount": float(r.amount or 0),
+        "vat_rate": r.vat_rate or "",
+        "period": r.period or "monthly",
+        "tax_treatment": r.tax_treatment or "betriebsausgabe",
+        "absetzbar_pct": r.absetzbar_pct,
+        "vendor": r.vendor or "",
+        "notes": r.notes or "",
+        "start_date": r.start_date.isoformat() if r.start_date else "",
+        "end_date": r.end_date.isoformat() if r.end_date else "",
+        "active": bool(r.active),
+        "created_at": r.created_at.isoformat() if r.created_at else "",
+    }
+
+
+def _parse_iso_date(s: str | None):
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+@app.get("/recurring-expenses")
+def list_recurring_expenses(active_only: bool = Query(True), user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        q = db.query(RecurringExpense).filter(RecurringExpense.user_id == user["sub"])
+        if active_only:
+            q = q.filter(RecurringExpense.active == True)
+        items = [_recurring_to_dict(r) for r in q.order_by(RecurringExpense.created_at.desc()).all()]
+        # Yillik toplam hesabi
+        period_mult = {"monthly": 12, "quarterly": 4, "yearly": 1, "once": 1}
+        yearly_sum = sum(i["amount"] * period_mult.get(i["period"], 12) for i in items if i["active"])
+        return {"items": items, "count": len(items), "yearly_total": round(yearly_sum, 2)}
+    finally:
+        db.close()
+
+
+@app.post("/recurring-expenses")
+def create_recurring_expense(body: RecurringExpenseBody, request: Request,
+                              user: dict = Depends(get_current_user)):
+    if body.period not in ("monthly", "quarterly", "yearly", "once"):
+        err(400, "period must be monthly|quarterly|yearly|once")
+    if body.tax_treatment not in ("betriebsausgabe", "sonderausgabe", "bewirtung_70",
+                                   "privat_anteil", "nicht_absetzbar"):
+        err(400, "invalid tax_treatment")
+    if body.amount < 0:
+        err(400, "amount must be >= 0")
+    db = SessionLocal()
+    try:
+        r = RecurringExpense(
+            user_id=user["sub"],
+            label=body.label.strip()[:200],
+            category=(body.category or "").strip()[:40] or None,
+            amount=float(body.amount),
+            vat_rate=(body.vat_rate or "").strip()[:10] or None,
+            period=body.period,
+            tax_treatment=body.tax_treatment,
+            absetzbar_pct=body.absetzbar_pct,
+            vendor=(body.vendor or "").strip()[:200] or None,
+            notes=(body.notes or "").strip() or None,
+            start_date=_parse_iso_date(body.start_date),
+            end_date=_parse_iso_date(body.end_date),
+            active=body.active,
+        )
+        db.add(r)
+        db.commit()
+        db.refresh(r)
+        audit("recurring_expense.create", user_id=user["sub"],
+              resource_type="recurring_expense", resource_id=r.id,
+              payload={"label": r.label, "category": r.category,
+                       "amount": r.amount, "period": r.period}, request=request)
+        return _recurring_to_dict(r)
+    finally:
+        db.close()
+
+
+@app.patch("/recurring-expenses/{rid}")
+def update_recurring_expense(rid: int, body: dict = Body(...),
+                              user: dict = Depends(get_current_user),
+                              request: Request = None):
+    db = SessionLocal()
+    try:
+        r = db.query(RecurringExpense).filter(
+            RecurringExpense.id == rid,
+            RecurringExpense.user_id == user["sub"],
+        ).first()
+        if not r:
+            err(404, "Not found")
+        fields = ("label", "category", "amount", "vat_rate", "period",
+                  "tax_treatment", "absetzbar_pct", "vendor", "notes",
+                  "active")
+        for f in fields:
+            if f in body:
+                v = body[f]
+                if f in ("start_date", "end_date"):
+                    v = _parse_iso_date(v)
+                if f == "amount":
+                    v = float(v)
+                setattr(r, f, v)
+        if "start_date" in body:
+            r.start_date = _parse_iso_date(body.get("start_date"))
+        if "end_date" in body:
+            r.end_date = _parse_iso_date(body.get("end_date"))
+        db.commit()
+        db.refresh(r)
+        audit("recurring_expense.update", user_id=user["sub"],
+              resource_type="recurring_expense", resource_id=r.id,
+              payload=body, request=request)
+        return _recurring_to_dict(r)
+    finally:
+        db.close()
+
+
+@app.delete("/recurring-expenses/{rid}")
+def delete_recurring_expense(rid: int, user: dict = Depends(get_current_user),
+                              request: Request = None):
+    db = SessionLocal()
+    try:
+        r = db.query(RecurringExpense).filter(
+            RecurringExpense.id == rid,
+            RecurringExpense.user_id == user["sub"],
+        ).first()
+        if not r:
+            err(404, "Not found")
+        db.delete(r)
+        db.commit()
+        audit("recurring_expense.delete", user_id=user["sub"],
+              resource_type="recurring_expense", resource_id=rid, request=request)
+        return {"success": True}
+    finally:
+        db.close()
+
+
+@app.get("/steuer/summary")
+def steuer_summary(year: int = Query(default=None), user: dict = Depends(get_current_user)):
+    """Yillik vergi ozeti — Invoice'lardan (AI kategorize etti) + RecurringExpense'lardan.
+    Cikti:
+      - by_category: {Bewirtung: {gross, absetzbar, count}, ...}
+      - betriebsausgaben_total / sonderausgaben_total / nicht_absetzbar_total
+      - wiederkehrend_yearly (yillik recurring toplam)
+      - vorsteuer_total (USt indirimi)
+      - net_invoices_count
+    """
+    if year is None:
+        year = datetime.now().year
+    year_start = f"{year}-01-01"
+    year_end = f"{year}-12-31"
+
+    db = SessionLocal()
+    try:
+        # 1) Invoices — AI'in kategorize ettigi expense'lar
+        invs = (
+            db.query(Invoice)
+            .filter(Invoice.user_id == user["sub"])
+            .filter(Invoice.invoice_type == "expense")
+            .filter(Invoice.date >= year_start)
+            .filter(Invoice.date <= year_end)
+            .filter((Invoice.is_deleted == False) | (Invoice.is_deleted == None))
+            .all()
+        )
+
+        by_cat: dict[str, dict] = {}
+        betriebs_total = 0.0
+        sonder_total = 0.0
+        nicht_total = 0.0
+        vorsteuer_total = 0.0
+        for i in invs:
+            cat = i.tax_category or "Unkategorisiert"
+            amt = float(i.total_amount or 0)
+            vat = float(i.vat_amount or 0)
+            pct = i.absetzbar_pct if i.absetzbar_pct is not None else 100
+            absetzbar = amt * pct / 100.0
+            entry = by_cat.setdefault(cat, {"gross": 0, "absetzbar": 0, "count": 0,
+                                            "vorsteuer": 0, "pct_default": pct})
+            entry["gross"] += amt
+            entry["absetzbar"] += absetzbar
+            entry["count"] += 1
+            if i.vorsteuer_abziehbar:
+                entry["vorsteuer"] += vat
+                vorsteuer_total += vat
+            betriebs_total += absetzbar
+            nicht_total += (amt - absetzbar)
+
+        # 2) Recurring expenses — yillik projekte
+        recs = (
+            db.query(RecurringExpense)
+            .filter(RecurringExpense.user_id == user["sub"])
+            .filter(RecurringExpense.active == True)
+            .all()
+        )
+        period_mult = {"monthly": 12, "quarterly": 4, "yearly": 1, "once": 1}
+        recurring_yearly = 0.0
+        recurring_by_cat: dict[str, dict] = {}
+        for r in recs:
+            mult = period_mult.get(r.period or "monthly", 12)
+            yearly_amt = float(r.amount or 0) * mult
+            recurring_yearly += yearly_amt
+            cat = r.category or "Wiederkehrend"
+            tt = r.tax_treatment or "betriebsausgabe"
+            absetzbar = yearly_amt
+            if tt == "bewirtung_70":
+                absetzbar = yearly_amt * 0.7
+                nicht_total += yearly_amt * 0.3
+            elif tt == "sonderausgabe":
+                sonder_total += yearly_amt
+                absetzbar = 0  # Betriebsausgabe degil
+            elif tt == "nicht_absetzbar":
+                absetzbar = 0
+                nicht_total += yearly_amt
+            elif tt == "privat_anteil" and r.absetzbar_pct is not None:
+                absetzbar = yearly_amt * r.absetzbar_pct / 100.0
+                nicht_total += yearly_amt - absetzbar
+            if tt == "betriebsausgabe":
+                betriebs_total += yearly_amt
+            elif tt in ("bewirtung_70", "privat_anteil"):
+                betriebs_total += absetzbar
+            entry = recurring_by_cat.setdefault(cat, {"yearly": 0, "absetzbar": 0,
+                                                       "count": 0, "treatment": tt})
+            entry["yearly"] += yearly_amt
+            entry["absetzbar"] += absetzbar
+            entry["count"] += 1
+
+        return {
+            "year": year,
+            "by_category": {k: {kk: round(vv, 2) if isinstance(vv, (int, float)) else vv
+                                 for kk, vv in v.items()}
+                            for k, v in by_cat.items()},
+            "recurring_by_category": {k: {kk: round(vv, 2) if isinstance(vv, (int, float)) else vv
+                                          for kk, vv in v.items()}
+                                      for k, v in recurring_by_cat.items()},
+            "totals": {
+                "betriebsausgaben": round(betriebs_total, 2),
+                "sonderausgaben": round(sonder_total, 2),
+                "nicht_absetzbar": round(nicht_total, 2),
+                "wiederkehrend_yearly": round(recurring_yearly, 2),
+                "vorsteuer_total": round(vorsteuer_total, 2),
+            },
+            "invoice_count": len(invs),
+        }
+    finally:
+        db.close()
+
+
+@app.post("/steuer/ask")
+async def steuer_ask(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """AI'a vergi sorusu sor — 'Bu gider dusulur mu?' tarzi.
+    body: {question: str, context?: str}
+    Yanit AI-reviewer service'e proxy edilir (kendi Claude'unu kullanir).
+    """
+    question = (body.get("question") or "").strip()
+    if not question or len(question) < 3:
+        err(400, "Frage zu kurz")
+    if len(question) > 1000:
+        err(400, "Frage zu lang (max 1000 Zeichen)")
+
+    url = (os.environ.get("AI_REVIEWER_WEBHOOK_URL") or "").strip()
+    if not url:
+        err(503, "AI service not configured")
+    # /review yerine /ask endpoint'i — ai-reviewer'da yeni
+    ask_url = url.rsplit("/", 1)[0] + "/ask"
+    secret = (os.environ.get("AI_REVIEWER_SECRET") or "").strip()
+
+    import json as _json
+    payload = {
+        "user_id": user["sub"],
+        "question": question,
+        "context": (body.get("context") or "")[:2000],
+    }
+    payload_bytes = _json.dumps(payload).encode()
+    sig = _ai_reviewer_sign(payload_bytes)
+
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(ask_url, content=payload_bytes,
+                                   headers={"X-Sig": sig,
+                                            "Content-Type": "application/json"})
+            if r.status_code != 200:
+                err(502, f"AI service error: {r.status_code}")
+            data = r.json()
+            audit("steuer.ask", user_id=user["sub"], resource_type="ai_query",
+                   payload={"q_len": len(question)})
+            return {"answer": data.get("answer") or "",
+                    "model": data.get("model") or ""}
+    except _httpx.RequestError:
+        logger.exception("AI ask failed")
+        err(502, "AI service unreachable")

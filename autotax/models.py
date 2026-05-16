@@ -486,3 +486,47 @@ class PromptExample(Base):
     use_count = Column(Integer, default=0, nullable=False)
     last_used_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class RecurringExpense(Base):
+    """Periyodik giderler — kira, sigorta, Rentenversicherung, GEZ vb.
+    Kullanici bir kez tanimlar, her ay/yil otomatik Steuer-Ubersicht'e dahil olur.
+    Fatura olarak DB'ye yazilmaz — sadece template + yillik toplam icin sayilir.
+
+    period:
+      monthly  = ayda 1 kez (amount × 12 = yillik)
+      quarterly= 3 ayda 1 (amount × 4)
+      yearly   = yilda 1 (amount)
+      once     = tek seferlik (sadece o yil sayilir, start_date alinir)
+
+    tax_treatment:
+      betriebsausgabe  = Betriebsausgabe (100% abzugsfahig)
+      sonderausgabe    = Sonderausgaben (private Versicherung, KV, RV, vs.)
+      bewirtung_70     = 70% abzugsfahig (Bewirtung)
+      privat_anteil    = kismi (absetzbar_pct ile)
+      nicht_absetzbar  = sifir
+    """
+    __tablename__ = "recurring_expenses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    label = Column(String(200), nullable=False)
+    category = Column(String(40), nullable=True, index=True)  # Miete/Versicherung/Rentenversicherung/Krankenkasse/GEZ/Telefon/Internet/...
+    amount = Column(Float, nullable=False)  # tek period basina (monthly/quarterly/yearly)
+    vat_rate = Column(String(10), nullable=True)   # "19%", "7%", "0%"
+    period = Column(String(20), default="monthly", nullable=False)  # monthly|quarterly|yearly|once
+    tax_treatment = Column(String(30), default="betriebsausgabe", nullable=False)
+    absetzbar_pct = Column(Integer, nullable=True)  # opsiyonel manuel override
+    vendor = Column(String(200), nullable=True)    # Vermieter, Versicherer, vb.
+    notes = Column(Text, nullable=True)
+    start_date = Column(Date, nullable=True)  # ilk gecerli ay/yil
+    end_date = Column(Date, nullable=True)    # iptal edildi/sona erdi
+    active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_recurring_user_active", "user_id", "active"),
+    )
