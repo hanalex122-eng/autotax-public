@@ -1343,7 +1343,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
           </div>}
         </div>
         <div style={{padding:"16px 24px",borderTop:"1px solid "+theme.border,display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
-          {(!detailInv.total_amount||detailInv.total_amount===0||!detailInv.vendor||detailInv.vendor==="Unbekannt")&&<button style={{...css.btnOutline,borderColor:"rgba(59,130,246,0.5)",color:"#3b82f6"}} onClick={async()=>{
+          {detailInv.has_original&&<button style={{...css.btnOutline,borderColor:"rgba(59,130,246,0.5)",color:"#3b82f6"}} onClick={async()=>{
             if(!confirm("👁 "+(getLang()==="de"?"Datei mit Claude Vision neu lesen? Ersetzt aktuelle Daten.":"Re-read file with Claude Vision? Replaces current data.")))return;
             try{
               if(showToast)showToast("👁 "+(getLang()==="de"?"Claude Vision liest die Datei... (10-20s)":"Claude Vision reading file... (10-20s)"),"info");
@@ -1351,7 +1351,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
               if(showToast)showToast("✓ "+(getLang()==="de"?"Daten aktualisiert":"Data updated")+" (conf "+Math.round((r.confidence||0)*100)+"%)","success");
               setDetailInv(null);triggerRefresh&&triggerRefresh();
             }catch(e){alert(_extractErr(e)||e.message);}
-          }}>👁 {getLang()==="de"?"AI Vision neu lesen":"AI Vision re-read"}</button>}
+          }} title={getLang()==="de"?"Mit Claude Vision neu auslesen (~$0.03)":"Re-read with Claude Vision (~$0.03)"}>👁 {getLang()==="de"?"AI Vision":"AI Vision"}</button>}
           <button style={{...css.btnOutline,borderColor:"rgba(139,92,246,0.5)",color:"#8b5cf6"}} onClick={async()=>{
             try{
               await api("/invoices/"+detailInv.id+"/ai-reanalyze",{method:"POST"});
