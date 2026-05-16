@@ -1902,11 +1902,16 @@ def admin_users(
             companies = db.query(UserCompany).filter(UserCompany.user_id == u.id).all()
             trial_ends = getattr(u, "trial_ends_at", None)
             now_utc = datetime.now(timezone.utc)
-            is_trial = bool(trial_ends and trial_ends > now_utc)
-            trial_expired = bool(trial_ends and trial_ends <= now_utc)
+            # DB'deki trial_ends_at naive olabilir — UTC kabul et ve aware'a cevir
+            if trial_ends and trial_ends.tzinfo is None:
+                trial_ends_aware = trial_ends.replace(tzinfo=timezone.utc)
+            else:
+                trial_ends_aware = trial_ends
+            is_trial = bool(trial_ends_aware and trial_ends_aware > now_utc)
+            trial_expired = bool(trial_ends_aware and trial_ends_aware <= now_utc)
             trial_days_left = None
-            if trial_ends:
-                delta = trial_ends - now_utc
+            if trial_ends_aware:
+                delta = trial_ends_aware - now_utc
                 trial_days_left = max(0, delta.days + (1 if delta.seconds > 0 else 0))
             out.append({
                 "id": u.id,
@@ -5210,13 +5215,18 @@ def get_account_me(user: dict = Depends(get_current_user)):
             err(404, "User not found")
         inv_count = db.query(Invoice).filter(Invoice.user_id == user["sub"], (Invoice.is_deleted == False) | (Invoice.is_deleted == None)).count()
         companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
-        # Trial info — frontend banner icin
+        # Trial info — frontend banner icin (naive/aware tz safe)
         trial_ends = getattr(u, 'trial_ends_at', None)
-        is_trial = bool(trial_ends and trial_ends > datetime.now(timezone.utc))
-        trial_expired = bool(trial_ends and trial_ends <= datetime.now(timezone.utc))
+        _now_utc = datetime.now(timezone.utc)
+        if trial_ends and trial_ends.tzinfo is None:
+            trial_ends_aw = trial_ends.replace(tzinfo=timezone.utc)
+        else:
+            trial_ends_aw = trial_ends
+        is_trial = bool(trial_ends_aw and trial_ends_aw > _now_utc)
+        trial_expired = bool(trial_ends_aw and trial_ends_aw <= _now_utc)
         trial_days_left = None
-        if trial_ends:
-            delta = trial_ends - datetime.now(timezone.utc)
+        if trial_ends_aw:
+            delta = trial_ends_aw - _now_utc
             trial_days_left = max(0, delta.days + (1 if delta.seconds > 0 else 0))
         return {
             "id": u.id,
@@ -10730,10 +10740,13 @@ def _is_paid_user(user_id: int) -> bool:
         plan = (u.plan or "free").lower()
         if plan in ("starter", "pro", "ai_steuer", "premium", "early"):
             return True
-        # Trial aktif mi?
+        # Trial aktif mi? (naive/aware tz safe)
         if getattr(u, "trial_ends_at", None):
             now_utc = datetime.now(timezone.utc)
-            if u.trial_ends_at > now_utc:
+            te = u.trial_ends_at
+            if te.tzinfo is None:
+                te = te.replace(tzinfo=timezone.utc)
+            if te > now_utc:
                 return True
         return False
     finally:
