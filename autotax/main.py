@@ -4152,6 +4152,117 @@ def _ai_reviewer_sign(payload_bytes: bytes) -> str:
     return _hmac.new(secret, payload_bytes, hashlib.sha256).hexdigest()
 
 
+async def _auto_vision_reocr(invoice_id: int, user_id: int) -> None:
+    """OCR zayifsa Claude Vision ile fatura dosyasini yeniden oku, DB'yi guncelle.
+    Fire-and-forget background task. Sessizce log'a yazar, kullaniciya etki etmez.
+    """
+    try:
+        db = SessionLocal()
+        try:
+            inv = db.query(Invoice).filter(Invoice.id == invoice_id,
+                                            Invoice.user_id == user_id).first()
+            if not inv:
+                return
+            file_bytes = None
+            media_type = inv.file_content_type or "application/pdf"
+            if getattr(inv, "file_path", None):
+                try:
+                    from autotax import storage as _storage
+                    file_bytes = _storage.read_file(inv.file_path)
+                except Exception:
+                    pass
+            if file_bytes is None and inv.file_data:
+                file_bytes = inv.file_data
+            if not file_bytes:
+                logger.warning("[AUTO_VISION] no file for invoice %s", invoice_id)
+                return
+            # PDF -> JPEG
+            is_pdf = (media_type or "").lower() == "application/pdf" or file_bytes[:4] == b"%PDF"
+            if is_pdf:
+                try:
+                    import fitz as _fitz
+                    doc = _fitz.open(stream=file_bytes, filetype="pdf")
+                    if doc.page_count == 0:
+                        return
+                    page = doc.load_page(0)
+                    zoom = 200 / 72
+                    pix = page.get_pixmap(matrix=_fitz.Matrix(zoom, zoom), alpha=False)
+                    file_bytes = pix.tobytes("jpeg")
+                    media_type = "image/jpeg"
+                    doc.close()
+                except Exception:
+                    logger.exception("[AUTO_VISION] PDF->image failed for %s", invoice_id)
+                    return
+            import base64 as _b64
+            img_b64 = _b64.b64encode(file_bytes).decode()
+        finally:
+            db.close()
+
+        ai_base = (os.environ.get("AI_REVIEWER_WEBHOOK_URL") or "").strip()
+        if not ai_base:
+            return
+        vision_url = ai_base.rsplit("/", 1)[0] + "/vision-reocr"
+        payload = {"image_b64": img_b64, "media_type": media_type}
+        import json as _json
+        pb = _json.dumps(payload).encode()
+        sig = _ai_reviewer_sign(pb)
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(vision_url, content=pb,
+                                   headers={"X-Sig": sig, "Content-Type": "application/json"})
+            if r.status_code != 200:
+                logger.warning("[AUTO_VISION] AI returned %s: %s", r.status_code, r.text[:200])
+                return
+            ai_result = r.json().get("data") or {}
+
+        # Update invoice with AI values (only if AI returned non-empty)
+        db = SessionLocal()
+        try:
+            inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+            if not inv:
+                return
+            if ai_result.get("vendor"):
+                inv.vendor = ai_result["vendor"][:200]
+            ta = ai_result.get("total_amount")
+            if ta is not None:
+                try:
+                    inv.total_amount = float(ta)
+                except (TypeError, ValueError):
+                    pass
+            va = ai_result.get("vat_amount")
+            if va is not None:
+                try:
+                    inv.vat_amount = float(va)
+                except (TypeError, ValueError):
+                    pass
+            if ai_result.get("vat_rate"):
+                inv.vat_rate = ai_result["vat_rate"][:10]
+            if ai_result.get("date"):
+                inv.date = ai_result["date"][:10]
+            if ai_result.get("invoice_number"):
+                inv.invoice_number = str(ai_result["invoice_number"])[:80]
+            if ai_result.get("vendor_address"):
+                inv.vendor_address = ai_result["vendor_address"][:300]
+            if ai_result.get("vendor_email"):
+                inv.vendor_email = ai_result["vendor_email"][:120]
+            if ai_result.get("vendor_phone"):
+                inv.vendor_phone = ai_result["vendor_phone"][:40]
+            if ai_result.get("vendor_iban"):
+                inv.vendor_iban = ai_result["vendor_iban"][:40]
+            if inv.total_amount and inv.total_amount > 0:
+                inv.processed = True
+            db.commit()
+            logger.info("[AUTO_VISION] invoice %s updated (conf=%s)",
+                        invoice_id, ai_result.get("confidence"))
+            audit("invoice.auto_vision_reocr", user_id=user_id,
+                  resource_type="invoice", resource_id=invoice_id,
+                  payload={"confidence": ai_result.get("confidence")})
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("[AUTO_VISION] task failed for invoice %s", invoice_id)
+
+
 async def _notify_ai_reviewer(invoice_id: int, user_id: int, ocr_text: str,
                               parsed: dict, request: Request | None = None) -> None:
     """Fire-and-forget: AI Reviewer servisine 'fatura geldi' webhook'u yolla.
@@ -5696,6 +5807,23 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     except Exception:
         logger.exception("DB save failed")
         err(500, "Failed to save invoice")
+
+    # AUTO Vision fallback — OCR TAMAMEN basarisizsa (total=0 VE text<50 char
+    # VE vendor bos/Unbekannt) Claude Vision'a otomatik gonder.
+    # Strict AND kosulu ki false-positive tetik olmasin.
+    # DEFAULT KAPALI — opt-in. Railway env'inde AI_AUTO_VISION=1 yaparak ac.
+    # Maliyet: ~$0.03 per call. Acaca bedeli artar.
+    try:
+        _auto_vision = os.environ.get("AI_AUTO_VISION", "0").strip() == "1"
+        _ta = float(result.get("total_amount") or 0)
+        _txt_len = len((raw_text or "").strip())
+        _vendor = (result.get("vendor") or "").strip()
+        _is_garbage = (_ta == 0) and (_txt_len < 50) and (_vendor in ("", "Unbekannt"))
+        if _auto_vision and _is_garbage and (os.environ.get("AI_REVIEWER_WEBHOOK_URL") or "").strip():
+            logger.info("[AUTO_VISION] triggering for invoice %s (OCR garbage: total=0, txt<50, vendor empty)", invoice_id)
+            asyncio.create_task(_auto_vision_reocr(invoice_id, user["sub"]))
+    except Exception:
+        logger.exception("[AUTO_VISION] schedule failed (continuing)")
 
     auto_create_cash_entry(invoice_id, user["sub"], result)
 
