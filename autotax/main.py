@@ -2453,6 +2453,75 @@ async def admin_run_monthly_summary_now(user: dict = Depends(get_current_user)):
     return {"success": True, "stats": stats}
 
 
+@app.post("/invoices/ai-reanalyze-all")
+async def reanalyze_all_invoices(request: Request,
+                                  unanalyzed_only: bool = Query(True),
+                                  user: dict = Depends(get_current_user)):
+    """Tum faturalari (veya sadece AI'a hic gitmemis olanları) AI'a yeniden yolla.
+    Eski faturalar (AI deploy oncesi yuklenmisler) icin onerilir."""
+    db = SessionLocal()
+    try:
+        q = db.query(Invoice).filter(
+            Invoice.user_id == user["sub"],
+            (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
+        )
+        if unanalyzed_only:
+            q = q.filter((Invoice.ai_status == None) | (Invoice.ai_status == ""))
+        invs = q.limit(50).all()  # batch limit
+        triggered = 0
+        for inv in invs:
+            parsed = {
+                "vendor": inv.vendor, "total_amount": inv.total_amount,
+                "vat_amount": inv.vat_amount, "vat_rate": inv.vat_rate,
+                "date": inv.date, "invoice_number": inv.invoice_number,
+                "invoice_type": inv.invoice_type, "category": inv.category,
+                "vendor_email": inv.vendor_email,
+                "vendor_address": inv.vendor_address,
+            }
+            try:
+                await _notify_ai_reviewer(inv.id, inv.user_id,
+                                          inv.raw_text or "", parsed, request)
+                triggered += 1
+            except Exception:
+                logger.exception("reanalyze trigger for inv %s failed", inv.id)
+        audit("invoice.ai_reanalyze_batch", user_id=user["sub"],
+              payload={"count": triggered, "unanalyzed_only": unanalyzed_only},
+              request=request)
+        return {"success": True, "triggered": triggered, "total_found": len(invs)}
+    finally:
+        db.close()
+
+
+@app.post("/invoices/{invoice_id}/ai-reanalyze")
+async def reanalyze_invoice_ai(invoice_id: int, request: Request,
+                                user: dict = Depends(get_current_user)):
+    """Mevcut bir faturayi tekrar AI'a yolla — eski faturalar icin
+    (AI henuz aktif degilken yuklenmis olanlar)."""
+    db = SessionLocal()
+    try:
+        inv = db.query(Invoice).filter(
+            Invoice.id == invoice_id,
+            Invoice.user_id == user["sub"],
+        ).first()
+        if not inv:
+            err(404, "Invoice not found")
+        parsed = {
+            "vendor": inv.vendor, "total_amount": inv.total_amount,
+            "vat_amount": inv.vat_amount, "vat_rate": inv.vat_rate,
+            "date": inv.date, "invoice_number": inv.invoice_number,
+            "invoice_type": inv.invoice_type, "category": inv.category,
+            "vendor_email": inv.vendor_email,
+            "vendor_address": inv.vendor_address,
+        }
+        await _notify_ai_reviewer(inv.id, inv.user_id,
+                                   inv.raw_text or "", parsed, request)
+        audit("invoice.ai_reanalyze_triggered", user_id=user["sub"],
+              resource_type="invoice", resource_id=inv.id, request=request)
+        return {"success": True, "message": "AI re-review triggered, check back in 10s"}
+    finally:
+        db.close()
+
+
 @app.get("/invoices/mahnung/queue")
 def mahnung_queue(user: dict = Depends(get_current_user)):
     """Kullanicinin Mahnung gerektiren income faturalari + tavsiye edilen

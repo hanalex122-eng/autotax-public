@@ -1343,6 +1343,13 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
           </div>}
         </div>
         <div style={{padding:"16px 24px",borderTop:"1px solid "+theme.border,display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
+          <button style={{...css.btnOutline,borderColor:"rgba(139,92,246,0.5)",color:"#8b5cf6"}} onClick={async()=>{
+            try{
+              await api("/invoices/"+detailInv.id+"/ai-reanalyze",{method:"POST"});
+              if(showToast)showToast("✨ AI analyse läuft — 10s warten dann neu öffnen","success");
+              setDetailInv(null);
+            }catch(e){alert(_extractErr(e)||e.message);}
+          }}>✨ AI neu analysieren</button>
           {detailInv.invoice_type==="income"&&detailInv.payment_status!=="paid"&&<button style={{...css.btnOutline,borderColor:"rgba(245,158,11,0.5)",color:"#f59e0b"}} onClick={async()=>{
             const sendEmail=detailInv.vendor_email && confirm(`📨 Mahnung an ${detailInv.vendor_email} per E-Mail senden?\n\n(OK = E-Mail + PDF im Vault, Abbrechen = nur PDF im Vault)`);
             if(!detailInv.vendor_email && !confirm("📨 Mahnung-PDF erstellen und im Vault speichern?")) return;
@@ -2854,6 +2861,14 @@ function SteuerOverviewView(){
           <div style={{minWidth:110}}>
             <PremiumSelect value={String(year)} onChange={v=>setYear(parseInt(v))} options={[currentYear,currentYear-1,currentYear-2,currentYear-3].map(y=>({value:String(y),label:String(y),icon:"📅"}))}/>
           </div>
+          <button onClick={async()=>{
+            if(!confirm(tr("Alle Belege ohne AI-Analyse erneut prüfen? (max 50 auf einmal)","Re-analyze all receipts without AI? (max 50 at once)")))return;
+            try{
+              const d=await api("/invoices/ai-reanalyze-all?unanalyzed_only=true",{method:"POST"});
+              alert(tr("✨ ","✨ ")+d.triggered+" "+tr("Belege werden analysiert. In 30-60s aktualisieren.","receipts being analyzed. Refresh in 30-60s."));
+              setTimeout(()=>load(),30000);
+            }catch(e){alert(_extractErr(e)||e.message);}
+          }} title={tr("Alte Belege AI-analysieren","Re-analyze old receipts")} style={{padding:"12px 16px",borderRadius:12,border:"1px solid "+theme.border,background:theme.surfaceAlt,color:theme.text,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>🔄 {tr("Alte AI-analysieren","Re-analyze")}</button>
           <button onClick={()=>setShowAsk(true)} style={{padding:"12px 22px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,animation:"aiPulse 2.5s ease-in-out infinite",fontFamily:"inherit"}}>
             <span style={{fontSize:16}}>✨</span> {tr("Steuer AI fragen","Ask Tax AI")}
           </button>
