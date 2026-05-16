@@ -3411,6 +3411,7 @@ function SteuerOverviewView(){
           {askMode==="ask"&&<button onClick={ask} disabled={askBusy||!askQ.trim()} style={{flex:2,padding:"12px 20px",borderRadius:10,border:"none",background:askBusy?theme.surfaceAlt:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",fontSize:14,fontWeight:700,cursor:askBusy?"wait":"pointer",fontFamily:"inherit",boxShadow:askBusy?"none":"0 4px 14px rgba(139,92,246,0.35)",opacity:askQ.trim()?1:0.5}}>
             {askBusy?<span>⏳ {tr("Denkt nach...","Thinking...")}</span>:<span>✨ {tr("Steuer AI fragen","Ask Tax AI")}</span>}
           </button>}
+        </div>
       </div>
     </div>}
   </div>);
