@@ -2,7 +2,7 @@ import logging
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from autotax.models import Base, Invoice, User, CashEntry, UserCompany, LlmUsage, LearningRule, Correction, PromptExample, VendorIdentity, RecurringExpense
+from autotax.models import Base, Invoice, User, CashEntry, UserCompany, LlmUsage, LearningRule, Correction, PromptExample, VendorIdentity, RecurringExpense, AIKnowledgeEntry
 
 logger = logging.getLogger("autotax")
 
@@ -32,6 +32,17 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     # Add missing columns to existing tables (safe migration)
     from sqlalchemy import text, inspect
+    # pg_trgm extension — AI knowledge cache fuzzy matching icin gerekli
+    # (PostgreSQL only, SQLite'ta atlanir)
+    if db_type == "PostgreSQL":
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ai_knowledge_trgm "
+                                   "ON ai_knowledge USING gin (normalized_question gin_trgm_ops)"))
+            logger.info("pg_trgm extension + GIN index ready (AI knowledge cache)")
+        except Exception as e:
+            logger.warning("pg_trgm setup skipped: %s", e)
     insp = inspect(engine)
     try:
         user_cols = [c["name"] for c in insp.get_columns("users")]

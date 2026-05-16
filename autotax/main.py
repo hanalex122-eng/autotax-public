@@ -10670,24 +10670,79 @@ async def eur_ai_review(body: dict = Body(default={}),
         err(502, "AI service unreachable")
 
 
+def _is_paid_user(user_id: int) -> bool:
+    """Kullanici odemeli (Starter/Pro/AI Steuer) mi yoksa Free/expired mi?
+    Free veya trial_expired -> False.
+    """
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user_id).first()
+        if not u:
+            return False
+        plan = (u.plan or "free").lower()
+        if plan in ("starter", "pro", "ai_steuer", "premium", "early"):
+            return True
+        # Trial aktif mi?
+        if getattr(u, "trial_ends_at", None):
+            now_utc = datetime.now(timezone.utc)
+            if u.trial_ends_at > now_utc:
+                return True
+        return False
+    finally:
+        db.close()
+
+
 @app.post("/steuer/ask")
 async def steuer_ask(body: dict = Body(...), user: dict = Depends(get_current_user)):
     """AI'a vergi sorusu sor — 'Bu gider dusulur mu?' tarzi.
-    body: {question: str, context?: str}
-    Yanit AI-reviewer service'e proxy edilir (kendi Claude'unu kullanir).
+    body: {question: str, context?: str, no_cache?: bool}
+
+    Akis:
+    1. Paid user kontrolu (free -> 402 Payment Required)
+    2. Cache'e bak (no_cache=true degilse)
+    3. Hit varsa cache'ten don ($0)
+    4. Yoksa AI'a sor + cache'e kaydet
     """
+    # Paid-only gate
+    if not _is_paid_user(user["sub"]):
+        err(402, "Diese KI-Funktion ist nur fur zahlende Mitglieder (Starter/Pro/AI Steuer). Bitte upgraden.")
+
     question = (body.get("question") or "").strip()
     if not question or len(question) < 3:
         err(400, "Frage zu kurz")
     if len(question) > 1000:
         err(400, "Frage zu lang (max 1000 Zeichen)")
+    no_cache = bool(body.get("no_cache"))
+    tax_year = body.get("tax_year")
 
+    # CACHE LOOKUP — onceki cevaplara bak
+    if not no_cache:
+        try:
+            from autotax import ai_knowledge as _aik
+            db = SessionLocal()
+            try:
+                cached = _aik.find_cached_answer(db, question, language="de", tax_year=tax_year)
+            finally:
+                db.close()
+            if cached:
+                audit("steuer.ask", user_id=user["sub"], resource_type="ai_query",
+                       payload={"q_len": len(question), "cache_hit": True,
+                                "score": cached.get("score"), "entry_id": cached.get("entry_id")})
+                return {
+                    "answer": cached["answer"],
+                    "model": cached.get("source_model") or "cache",
+                    "cache_hit": True,
+                    "score": cached.get("score"),
+                    "manually_verified": cached.get("manually_verified", False),
+                }
+        except Exception:
+            logger.exception("Cache lookup failed (continuing to AI)")
+
+    # MISS — Claude'a sor
     url = (os.environ.get("AI_REVIEWER_WEBHOOK_URL") or "").strip()
     if not url:
         err(503, "AI service not configured")
-    # /review yerine /ask endpoint'i — ai-reviewer'da yeni
     ask_url = url.rsplit("/", 1)[0] + "/ask"
-    secret = (os.environ.get("AI_REVIEWER_SECRET") or "").strip()
 
     import json as _json
     payload = {
@@ -10707,10 +10762,145 @@ async def steuer_ask(body: dict = Body(...), user: dict = Depends(get_current_us
             if r.status_code != 200:
                 err(502, f"AI service error: {r.status_code}")
             data = r.json()
+            answer = data.get("answer") or ""
+            model = data.get("model") or ""
+
+            # Cache'e kaydet (context bos ve cevap dolu ise)
+            if answer and not (body.get("context") or "").strip():
+                try:
+                    from autotax import ai_knowledge as _aik
+                    db = SessionLocal()
+                    try:
+                        _aik.save_to_cache(db, question, answer,
+                                            user_id=user["sub"],
+                                            source_model=model,
+                                            confidence=0.9,
+                                            tax_year=tax_year)
+                    finally:
+                        db.close()
+                except Exception:
+                    logger.exception("Cache save failed (continuing)")
+
             audit("steuer.ask", user_id=user["sub"], resource_type="ai_query",
-                   payload={"q_len": len(question)})
-            return {"answer": data.get("answer") or "",
-                    "model": data.get("model") or ""}
+                   payload={"q_len": len(question), "cache_hit": False, "model": model})
+            return {"answer": answer, "model": model, "cache_hit": False}
     except _httpx.RequestError:
         logger.exception("AI ask failed")
         err(502, "AI service unreachable")
+
+
+@app.get("/admin/ai-knowledge/stats")
+def ai_knowledge_stats(user: dict = Depends(get_current_user)):
+    """Admin panel — cache istatistikleri (hit rate, kazanc, kategoriler)."""
+    admin_emails = set(filter(None, os.getenv("ADMIN_EMAILS", "").split(",")))
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u or u.email not in admin_emails:
+            err(403, "Admin only")
+        from autotax import ai_knowledge as _aik
+        return _aik.get_cache_stats(db)
+    finally:
+        db.close()
+
+
+@app.get("/admin/ai-knowledge/entries")
+def ai_knowledge_entries(limit: int = Query(50, ge=1, le=200),
+                          sort: str = Query("usage_desc"),
+                          category: Optional[str] = Query(None),
+                          search: Optional[str] = Query(None),
+                          user: dict = Depends(get_current_user)):
+    """Admin panel — kayitli AI cevaplari listele."""
+    admin_emails = set(filter(None, os.getenv("ADMIN_EMAILS", "").split(",")))
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u or u.email not in admin_emails:
+            err(403, "Admin only")
+        from autotax.models import AIKnowledgeEntry
+        q = db.query(AIKnowledgeEntry)
+        if category:
+            q = q.filter(AIKnowledgeEntry.category == category)
+        if search:
+            q = q.filter(AIKnowledgeEntry.normalized_question.ilike(f"%{search.lower()}%"))
+        if sort == "usage_desc":
+            q = q.order_by(AIKnowledgeEntry.usage_count.desc(),
+                            AIKnowledgeEntry.created_at.desc())
+        elif sort == "recent":
+            q = q.order_by(AIKnowledgeEntry.created_at.desc())
+        elif sort == "low_conf":
+            q = q.order_by(AIKnowledgeEntry.confidence.asc())
+        items = []
+        for e in q.limit(limit).all():
+            items.append({
+                "id": e.id,
+                "original_question": e.original_question,
+                "normalized_question": e.normalized_question,
+                "answer_preview": (e.answer or "")[:300],
+                "answer": e.answer,
+                "category": e.category,
+                "language": e.language,
+                "source_model": e.source_model,
+                "confidence": e.confidence,
+                "usage_count": e.usage_count,
+                "tax_year": e.tax_year,
+                "is_deprecated": e.is_deprecated,
+                "manually_verified": e.manually_verified,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "last_used_at": e.last_used_at.isoformat() if e.last_used_at else None,
+            })
+        return {"items": items, "count": len(items)}
+    finally:
+        db.close()
+
+
+@app.patch("/admin/ai-knowledge/{entry_id}")
+def ai_knowledge_patch(entry_id: int, body: dict = Body(...),
+                        user: dict = Depends(get_current_user)):
+    """Admin: entry'i verify et / deprecate et / cevabi degistir."""
+    admin_emails = set(filter(None, os.getenv("ADMIN_EMAILS", "").split(",")))
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u or u.email not in admin_emails:
+            err(403, "Admin only")
+        from autotax.models import AIKnowledgeEntry
+        e = db.query(AIKnowledgeEntry).filter(AIKnowledgeEntry.id == entry_id).first()
+        if not e:
+            err(404, "Not found")
+        if "is_deprecated" in body:
+            e.is_deprecated = bool(body["is_deprecated"])
+        if "manually_verified" in body:
+            e.manually_verified = bool(body["manually_verified"])
+        if "answer" in body and body["answer"]:
+            e.answer = body["answer"][:8000]
+        if "category" in body:
+            e.category = body["category"][:40] if body["category"] else None
+        db.commit()
+        audit("ai_knowledge.update", user_id=user["sub"],
+               resource_type="ai_knowledge", resource_id=entry_id,
+               payload={k: v for k, v in body.items()})
+        return {"success": True, "id": e.id}
+    finally:
+        db.close()
+
+
+@app.delete("/admin/ai-knowledge/{entry_id}")
+def ai_knowledge_delete(entry_id: int, user: dict = Depends(get_current_user)):
+    admin_emails = set(filter(None, os.getenv("ADMIN_EMAILS", "").split(",")))
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        if not u or u.email not in admin_emails:
+            err(403, "Admin only")
+        from autotax.models import AIKnowledgeEntry
+        e = db.query(AIKnowledgeEntry).filter(AIKnowledgeEntry.id == entry_id).first()
+        if not e:
+            err(404, "Not found")
+        db.delete(e)
+        db.commit()
+        audit("ai_knowledge.delete", user_id=user["sub"],
+               resource_type="ai_knowledge", resource_id=entry_id)
+        return {"success": True}
+    finally:
+        db.close()

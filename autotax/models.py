@@ -488,6 +488,56 @@ class PromptExample(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class AIKnowledgeEntry(Base):
+    """AI Tax Knowledge Cache — Claude'a sorulan vergi sorularinin cevaplari.
+
+    Amac: ayni/benzer soru tekrar gelirse cache'ten dondur, Claude'u
+    cagirma. Maliyet azalir, yanit anlik olur.
+
+    Match logic: normalized_question uzerinde
+      - pg_trgm similarity (PostgreSQL extension)
+      - keywords Jaccard intersection
+      - Combined score > 0.55 -> hit
+    """
+    __tablename__ = "ai_knowledge"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Orijinal kullanici sorusu (UI'da goster)
+    original_question = Column(Text, nullable=False)
+    # Normalize edilmis hali (lowercase, stopword cikartilmis, sirali)
+    normalized_question = Column(String(500), nullable=False, index=True)
+    # AI cevabi
+    answer = Column(Text, nullable=False)
+    # Otomatik kategori (Bewirtung/KFZ/Miete/Software/Versicherung/...)
+    category = Column(String(40), nullable=True, index=True)
+    # Anahtar kelimeler (JSON string list)
+    keywords = Column(Text, nullable=True)
+    # Dil — DE/EN/TR (default DE)
+    language = Column(String(5), default="de", nullable=False, index=True)
+    # Hangi model uretti (claude-opus-4-7, sonnet-4-6, ...)
+    source_model = Column(String(40), nullable=True)
+    # AI'in kendi degerlendirdigi guven (0.0-1.0)
+    confidence = Column(Float, default=0.9, nullable=False)
+    # Vector embedding placeholder (vector DB ileride) — JSON list[float]
+    embedding = Column(Text, nullable=True)
+    # Kac kez kullanildi (cache hit sayisi)
+    usage_count = Column(Integer, default=0, nullable=False, index=True)
+    last_used_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                         onupdate=lambda: datetime.now(timezone.utc))
+    # Versiyonlama
+    tax_year = Column(Integer, nullable=True)  # ornek 2026 — bu cevap hangi vergi yili icin gecerli
+    is_deprecated = Column(Boolean, default=False, nullable=False, index=True)
+    manually_verified = Column(Boolean, default=False, nullable=False)  # admin onayladi
+    # Soruyu kim sordu (analytics — opsiyonel, NULL = anonim)
+    first_asked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    __table_args__ = (
+        Index("ix_ai_knowledge_active", "is_deprecated", "language"),
+    )
+
+
 class RecurringExpense(Base):
     """Periyodik giderler — kira, sigorta, Rentenversicherung, GEZ vb.
     Kullanici bir kez tanimlar, her ay/yil otomatik Steuer-Ubersicht'e dahil olur.
