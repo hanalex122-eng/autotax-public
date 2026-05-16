@@ -254,7 +254,7 @@ def send_email(to_addr: str, subject: str, body_html: str,
             import httpx as _httpx
             import base64 as _b64
             sender = (os.getenv("RESEND_FROM") or os.getenv("SMTP_FROM")
-                       or "AutoTax-Cloud <noreply@autotaxhub.de>").strip()
+                       or "AutoTax-Cloud <noreply@autotax.cloud>").strip()
             payload = {
                 "from": sender,
                 "to": [to_addr],
