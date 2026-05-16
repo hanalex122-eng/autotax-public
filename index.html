@@ -2750,6 +2750,7 @@ function SteuerOverviewView(){
   const[askQ,setAskQ]=useState("");
   const[askA,setAskA]=useState("");
   const[askBusy,setAskBusy]=useState(false);
+  const[askMode,setAskMode]=useState("ask"); // "ask" | "review"
   const[hoverRid,setHoverRid]=useState(null);
 
   const load=async()=>{
@@ -2851,110 +2852,318 @@ function SteuerOverviewView(){
   };
 
   return(<div style={{display:"flex",flexDirection:"column",gap:24,maxWidth:1200}}>
-    {/* ═══ Premium Header ═══ */}
-    <div style={{position:"relative",padding:"28px 32px",borderRadius:18,background:`linear-gradient(135deg, ${theme.surface} 0%, ${theme.surfaceAlt} 100%)`,border:"1px solid "+theme.border,overflow:"hidden"}}>
-      <div style={{position:"absolute",top:-50,right:-50,width:240,height:240,background:"radial-gradient(circle, rgba(139,92,246,0.12) 0%, transparent 70%)",pointerEvents:"none"}}/>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:16,position:"relative"}}>
-        <div style={{flex:1,minWidth:280}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-            <h2 style={{fontSize:28,fontWeight:800,color:theme.text,margin:0,letterSpacing:-0.5}}>{tr("Steuer-Übersicht","Tax Overview")}</h2>
-            <span style={{fontSize:9,fontWeight:800,padding:"3px 8px",borderRadius:6,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",letterSpacing:0.8}}>AI</span>
-          </div>
-          <p style={{color:theme.textMuted,fontSize:14,margin:"0 0 14px",fontWeight:450}}>{tr("KI-gestützte Steueranalyse & wiederkehrende Kosten","AI-powered tax analysis & recurring costs")}</p>
-          <div style={{display:"inline-flex",alignItems:"center",gap:8,padding:"8px 14px",background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.25)",borderRadius:10,fontSize:12,color:theme.text}}>
-            <span style={{fontSize:14}}>💡</span>
-            <span>{tr("Wiederkehrende Kosten werden automatisch jährlich berücksichtigt","Recurring costs are automatically accounted for yearly")}</span>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-          <div style={{minWidth:110}}>
-            <PremiumSelect value={String(year)} onChange={v=>setYear(parseInt(v))} options={[currentYear,currentYear-1,currentYear-2,currentYear-3].map(y=>({value:String(y),label:String(y),icon:"📅"}))}/>
-          </div>
-          <button onClick={async()=>{
-            if(!confirm(tr("Alle Belege ohne AI-Analyse erneut prüfen? (max 50 auf einmal)","Re-analyze all receipts without AI? (max 50 at once)")))return;
-            try{
-              const d=await api("/invoices/ai-reanalyze-all?unanalyzed_only=true",{method:"POST"});
-              alert(tr("✨ ","✨ ")+d.triggered+" "+tr("Belege werden analysiert. In 30-60s aktualisieren.","receipts being analyzed. Refresh in 30-60s."));
-              setTimeout(()=>load(),30000);
-            }catch(e){alert(_extractErr(e)||e.message);}
-          }} title={tr("Alte Belege AI-analysieren","Re-analyze old receipts")} style={{padding:"12px 16px",borderRadius:12,border:"1px solid "+theme.border,background:theme.surfaceAlt,color:theme.text,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>🔄 {tr("Alte AI-analysieren","Re-analyze")}</button>
-          <button onClick={async()=>{
-            try{
-              const tk=localStorage.getItem("atx_token");
-              const r=await fetch(API+"/steuer/eur-export?year="+year+"&format=pdf",{headers:{Authorization:"Bearer "+tk}});
-              if(!r.ok){alert(tr("PDF Export fehlgeschlagen","PDF export failed"));return;}
-              const blob=await r.blob();const url=URL.createObjectURL(blob);
-              const a=document.createElement("a");a.href=url;a.download=`EUR_${year}.pdf`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
-              if(showToast)showToast("✓ EÜR_"+year+".pdf "+tr("heruntergeladen","downloaded"),"success");
-            }catch(e){alert(e.message);}
-          }} title={tr("Anlage EÜR als PDF herunterladen","Download Anlage EÜR PDF")} style={{padding:"12px 16px",borderRadius:12,border:"1px solid "+theme.border,background:theme.surfaceAlt,color:theme.text,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>📥 {tr("EÜR PDF","EÜR PDF")}</button>
-          <button onClick={async()=>{
-            setShowAsk(true);setAskBusy(true);setAskQ(tr(`Jahresreview ${year}`,`Yearly review ${year}`));setAskA("");
-            try{
-              const d=await api("/steuer/eur-ai-review",{method:"POST",body:JSON.stringify({year})});
-              setAskA(d.answer||tr("Keine Antwort","No answer"));
-            }catch(e){setAskA(tr("Fehler","Error")+": "+(_extractErr(e)||e.message));}
-            setAskBusy(false);
-          }} title={tr("AI Jahresreview deiner EÜR","AI yearly review of your EÜR")} style={{padding:"12px 16px",borderRadius:12,border:"1px solid rgba(245,158,11,0.4)",background:"rgba(245,158,11,0.08)",color:"#f59e0b",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🧠 {tr("AI Jahresreview","AI Yearly Review")}</button>
-          <button onClick={()=>setShowAsk(true)} style={{padding:"12px 22px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,animation:"aiPulse 2.5s ease-in-out infinite",fontFamily:"inherit"}}>
-            <span style={{fontSize:16}}>✨</span> {tr("Steuer AI fragen","Ask Tax AI")}
-          </button>
-        </div>
-      </div>
-    </div>
-
     {loading&&<div style={{padding:60,textAlign:"center",color:theme.textMuted}}>
       <div style={{display:"inline-block",animation:"spin 1s linear infinite",fontSize:32}}>⚙️</div>
       <div style={{marginTop:8,fontSize:13}}>{tr("Berechne Steueranalyse...","Calculating tax analysis...")}</div>
     </div>}
 
-    {!loading&&summary&&<>
-      {/* ═══ Premium 4 metric cards ═══ */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:14}}>
-        {metricCard(
-          tr("Betriebsausgaben","Business expenses"),
-          summary.totals.betriebsausgaben,
-          theme.accent,
-          `linear-gradient(135deg, ${theme.card} 0%, rgba(16,185,129,0.04) 100%)`,
-          "rgba(16,185,129,0.15)","🏢",
-          tr("100% steuerlich absetzbar","100% tax deductible"),
-          summaryPrev?.totals?.betriebsausgaben
-        )}
-        {metricCard(
-          tr("Sonderausgaben","Special deductions"),
-          summary.totals.sonderausgaben,
-          "#8b5cf6",
-          `linear-gradient(135deg, ${theme.card} 0%, rgba(139,92,246,0.04) 100%)`,
-          "rgba(139,92,246,0.15)","🛡️",
-          tr("Private Versicherung (KV/RV)","Private insurance (Health/Pension)"),
-          summaryPrev?.totals?.sonderausgaben
-        )}
-        {metricCard(
-          tr("Nicht absetzbar","Not deductible"),
-          summary.totals.nicht_absetzbar,
-          theme.danger,
-          `linear-gradient(135deg, ${theme.card} 0%, rgba(239,68,68,0.04) 100%)`,
-          "rgba(239,68,68,0.15)","✗",
-          tr("z.B. Bewirtung 30% / privat","e.g. Bewirtung 30% / private"),
-          summaryPrev?.totals?.nicht_absetzbar
-        )}
-        {metricCard(
-          tr("Vorsteuer","Input VAT"),
-          summary.totals.vorsteuer_total,
-          "#3b82f6",
-          `linear-gradient(135deg, ${theme.card} 0%, rgba(59,130,246,0.04) 100%)`,
-          "rgba(59,130,246,0.15)","%",
-          tr("§15 UStG — abziehbar","§15 UStG — deductible"),
-          summaryPrev?.totals?.vorsteuer_total
-        )}
+    {!loading&&summary&&(()=>{
+      // Compute hero numbers
+      const _gewinn=(summary.totals.betriebsausgaben||0)*0+ /* placeholder */ 0;
+      // Hesaplama: gewinn = einnahmen - betriebsausgaben (Anlage EÜR formul'u)
+      // by_category'den income hesabi yok — summary.invoice_count'tan tahmin
+      // Daha dogru: yeni endpoint /steuer/eur-export'tan al, ama summary'de var
+      const einnahmen=summary.einnahmen_total||0;
+      const ausgaben=summary.totals.betriebsausgaben||0;
+      const gewinn=einnahmen-ausgaben;
+      const vorsteuer=summary.totals.vorsteuer_total||0;
+      const aiInsightCount=Object.keys(summary.by_category||{}).length;
+      const recurringTotal=recurring.yearly_total||0;
+      // Progress: 5-step completion
+      const stepsDone={
+        upload: summary.invoice_count>0,
+        ai_cat: aiInsightCount>0,
+        recurring: recurring.items.length>0,
+        eur: einnahmen>0||ausgaben>0,
+        review: false,  // bilinmiyor — review yapildi mi?
+      };
+      const stepsTotal=5;
+      const stepsCompleted=Object.values(stepsDone).filter(Boolean).length;
+      return(<>
+      {/* ═══════════════════════════════════════════
+          1) HERO — Jahres-Steuerübersicht
+          ═══════════════════════════════════════════ */}
+      <div style={{position:"relative",padding:"36px 36px 32px",borderRadius:22,background:`linear-gradient(135deg, ${theme.surface} 0%, rgba(139,92,246,0.04) 50%, ${theme.surfaceAlt} 100%)`,border:"1px solid "+theme.border,overflow:"hidden"}}>
+        <div style={{position:"absolute",top:-80,right:-80,width:320,height:320,background:"radial-gradient(circle, rgba(139,92,246,0.18) 0%, transparent 70%)",pointerEvents:"none"}}/>
+        <div style={{position:"absolute",bottom:-50,left:-50,width:240,height:240,background:"radial-gradient(circle, rgba(16,185,129,0.10) 0%, transparent 70%)",pointerEvents:"none"}}/>
+        <div style={{position:"relative",zIndex:1}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:16,marginBottom:24}}>
+            <div style={{flex:1,minWidth:280}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                <span style={{fontSize:11,fontWeight:800,padding:"4px 10px",borderRadius:6,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",letterSpacing:1}}>KI-ASSISTENT</span>
+                <span style={{fontSize:11,color:theme.textDim,fontWeight:500}}>· Claude Opus 4.7</span>
+              </div>
+              <h1 style={{fontSize:34,fontWeight:800,color:theme.text,margin:0,letterSpacing:-0.8,lineHeight:1.1}}>{tr(`Ihre Jahres-Steuerübersicht ${year}`,`Your Annual Tax Overview ${year}`)}</h1>
+              <p style={{color:theme.textMuted,fontSize:15,margin:"8px 0 0",fontWeight:450,maxWidth:640,lineHeight:1.5}}>{tr("KI-gestützte Analyse Ihrer Betriebsausgaben, EÜR und steuerlichen Optimierung.","AI-powered analysis of business expenses, EÜR and tax optimization.")}</p>
+            </div>
+            <div style={{minWidth:120}}>
+              <PremiumSelect value={String(year)} onChange={v=>setYear(parseInt(v))} options={[currentYear,currentYear-1,currentYear-2,currentYear-3].map(y=>({value:String(y),label:"Steuerjahr "+y,icon:"📅"}))}/>
+            </div>
+          </div>
+
+          {/* Hero KPIs — 4 büyük rakam */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:18,marginTop:8}}>
+            <div>
+              <div style={{fontSize:11,color:theme.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6}}>{tr("Geschätzter Gewinn","Estimated Profit")}</div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,color:gewinn>=0?theme.accent:theme.danger,letterSpacing:-0.5,lineHeight:1}}>{fmtEur(gewinn)}</div>
+              <div style={{fontSize:11,color:theme.textDim,marginTop:4}}>{tr("Einnahmen − Ausgaben (Anlage EÜR)","Income − Expenses")}</div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:theme.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6}}>{tr("Betriebsausgaben","Business Expenses")}</div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,color:theme.text,letterSpacing:-0.5,lineHeight:1}}>{fmtEur(ausgaben)}</div>
+              <div style={{fontSize:11,color:theme.textDim,marginTop:4}}>{tr("Alle abzugsfähigen Posten","All deductible items")}</div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:theme.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6}}>{tr("Vorsteuer","Input VAT")}</div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,color:"#3b82f6",letterSpacing:-0.5,lineHeight:1}}>{fmtEur(vorsteuer)}</div>
+              <div style={{fontSize:11,color:theme.textDim,marginTop:4}}>{tr("§15 UStG abziehbar","§15 UStG deductible")}</div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:theme.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6}}>{tr("KI-Erkenntnisse","AI Insights")}</div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,color:"#8b5cf6",letterSpacing:-0.5,lineHeight:1}}>{aiInsightCount}</div>
+              <div style={{fontSize:11,color:theme.textDim,marginTop:4}}>{tr("Kategorien automatisch erkannt","Categories auto-detected")}</div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* ═══════════════════════════════════════════
+          2) PROGRESS FLOW — WISO-stil 5 adim
+          ═══════════════════════════════════════════ */}
+      <div style={{padding:"22px 26px",borderRadius:16,background:theme.card,border:"1px solid "+theme.border}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18,flexWrap:"wrap",gap:8}}>
+          <div>
+            <h3 style={{fontSize:15,fontWeight:700,color:theme.text,margin:0}}>{tr("Jahres-Abschluss Fortschritt","Annual Closing Progress")}</h3>
+            <div style={{fontSize:12,color:theme.textMuted,marginTop:3}}>{stepsCompleted} {tr("von","of")} {stepsTotal} {tr("Schritten erledigt","steps complete")}</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{fontSize:22,fontWeight:800,color:theme.accent,fontFamily:mono}}>{Math.round(stepsCompleted/stepsTotal*100)}%</div>
+          </div>
+        </div>
+        <div style={{height:6,background:theme.surfaceAlt,borderRadius:3,overflow:"hidden",marginBottom:18}}>
+          <div style={{width:(stepsCompleted/stepsTotal*100)+"%",height:"100%",background:`linear-gradient(90deg, ${theme.accent}, #34d399)`,borderRadius:3,transition:"width 0.6s cubic-bezier(0.4,0,0.2,1)"}}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
+          {[
+            {key:"upload",label:tr("Belege hochgeladen","Receipts uploaded"),icon:"📤",sub:summary.invoice_count+" "+tr("Belege","items")},
+            {key:"ai_cat",label:tr("KI kategorisiert","AI categorized"),icon:"🧠",sub:aiInsightCount+" "+tr("Kategorien","categories")},
+            {key:"recurring",label:tr("Wiederkehrende Kosten","Recurring costs"),icon:"🔁",sub:recurring.items.length+" "+tr("Posten","items")},
+            {key:"eur",label:tr("EÜR berechnet","EÜR calculated"),icon:"📊",sub:tr("Gewinn/Verlust","Profit/Loss")},
+            {key:"review",label:tr("KI Jahresreview","AI Yearly Review"),icon:"✨",sub:tr("Optional","Optional")},
+          ].map((s,i)=>(<div key={s.key} style={{padding:"10px 12px",borderRadius:10,background:stepsDone[s.key]?theme.accentSoft:theme.surfaceAlt,border:"1px solid "+(stepsDone[s.key]?theme.accent+"55":theme.border),display:"flex",alignItems:"center",gap:10}}>
+            <div style={{fontSize:18,opacity:stepsDone[s.key]?1:0.5}}>{stepsDone[s.key]?"✓":s.icon}</div>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:600,color:stepsDone[s.key]?theme.accent:theme.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.label}</div>
+              <div style={{fontSize:10,color:theme.textDim,marginTop:1}}>{s.sub}</div>
+            </div>
+          </div>))}
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════
+          3) PRIMARY ACTION CARDS — 4 büyük kart
+          ═══════════════════════════════════════════ */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:16}}>
+        {/* CARD 1: EÜR PDF */}
+        <div onClick={async()=>{
+          try{
+            const tk=localStorage.getItem("atx_token");
+            const r=await fetch(API+"/steuer/eur-export?year="+year+"&format=pdf",{headers:{Authorization:"Bearer "+tk}});
+            if(!r.ok){alert(tr("PDF Export fehlgeschlagen","PDF export failed"));return;}
+            const blob=await r.blob();const url=URL.createObjectURL(blob);
+            const a=document.createElement("a");a.href=url;a.download=`EUR_${year}.pdf`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+            if(showToast)showToast("✓ EÜR_"+year+".pdf "+tr("heruntergeladen","downloaded"),"success");
+          }catch(e){alert(e.message);}
+        }} style={{padding:"22px 22px",borderRadius:16,background:`linear-gradient(135deg, ${theme.card}, rgba(16,185,129,0.06))`,border:"1px solid "+theme.border,cursor:"pointer",transition:"all 0.25s",position:"relative",overflow:"hidden"}}
+          onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-4px)";e.currentTarget.style.borderColor=theme.accent+"88";e.currentTarget.style.boxShadow="0 12px 32px rgba(16,185,129,0.2)";}}
+          onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor=theme.border;e.currentTarget.style.boxShadow="none";}}>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+            <div style={{width:52,height:52,borderRadius:14,background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,boxShadow:"0 4px 14px rgba(16,185,129,0.4)"}}>📥</div>
+            <div>
+              <div style={{fontSize:9,fontWeight:800,color:theme.accent,letterSpacing:0.8,marginBottom:2}}>FORMULAR</div>
+              <h3 style={{fontSize:16,fontWeight:700,color:theme.text,margin:0}}>{tr("Anlage EÜR PDF","Anlage EÜR PDF")}</h3>
+            </div>
+          </div>
+          <p style={{fontSize:13,color:theme.textMuted,margin:0,lineHeight:1.5}}>{tr("Komplettes Steuer-Formular als PDF — direkt an den Steuerberater.","Complete tax form as PDF — directly to your tax advisor.")}</p>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:14,fontSize:11,color:theme.accent,fontWeight:700}}>
+            <span>{tr("PDF erstellen","Create PDF")}</span><span style={{transform:"translateX(0)",transition:"transform 0.2s"}}>→</span>
+          </div>
+        </div>
+
+        {/* CARD 2: AI Jahresreview */}
+        <div onClick={async()=>{
+          setShowAsk(true);setAskBusy(true);setAskQ(tr(`Jahresreview ${year}`,`Yearly review ${year}`));setAskA("");setAskMode("review");
+          try{
+            const d=await api("/steuer/eur-ai-review",{method:"POST",body:JSON.stringify({year})});
+            setAskA(d.answer||tr("Keine Antwort","No answer"));
+          }catch(e){setAskA(tr("Fehler","Error")+": "+(_extractErr(e)||e.message));}
+          setAskBusy(false);
+        }} style={{padding:"22px 22px",borderRadius:16,background:`linear-gradient(135deg, ${theme.card}, rgba(139,92,246,0.08))`,border:"1px solid rgba(139,92,246,0.35)",cursor:"pointer",transition:"all 0.25s",position:"relative",overflow:"hidden"}}
+          onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-4px)";e.currentTarget.style.borderColor="#8b5cf6";e.currentTarget.style.boxShadow="0 12px 32px rgba(139,92,246,0.3)";}}
+          onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(139,92,246,0.35)";e.currentTarget.style.boxShadow="none";}}>
+          <div style={{position:"absolute",top:8,right:8,fontSize:9,fontWeight:800,padding:"3px 7px",borderRadius:5,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",letterSpacing:0.5}}>PREMIUM</div>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+            <div style={{width:52,height:52,borderRadius:14,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,boxShadow:"0 4px 14px rgba(139,92,246,0.5)",animation:"aiPulse 3s ease-in-out infinite"}}>🧠</div>
+            <div>
+              <div style={{fontSize:9,fontWeight:800,color:"#8b5cf6",letterSpacing:0.8,marginBottom:2}}>KI ANALYSE</div>
+              <h3 style={{fontSize:16,fontWeight:700,color:theme.text,margin:0}}>{tr("KI Jahresreview","AI Yearly Review")}</h3>
+            </div>
+          </div>
+          <p style={{fontSize:13,color:theme.textMuted,margin:0,lineHeight:1.5}}>{tr("KI prüft Ihre Jahresdaten — fehlende Posten, Tipps, Optimierungen.","AI reviews your yearly data — missing items, tips, optimizations.")}</p>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:14,fontSize:11,color:"#8b5cf6",fontWeight:700}}>
+            <span>{tr("Analyse starten","Start analysis")}</span><span>→</span>
+          </div>
+        </div>
+
+        {/* CARD 3: Steueranalyse ansehen */}
+        <div onClick={()=>{
+          // Scroll to category breakdown
+          const cb=document.getElementById("category-breakdown-section");
+          if(cb)cb.scrollIntoView({behavior:"smooth",block:"start"});
+        }} style={{padding:"22px 22px",borderRadius:16,background:`linear-gradient(135deg, ${theme.card}, rgba(59,130,246,0.06))`,border:"1px solid "+theme.border,cursor:"pointer",transition:"all 0.25s"}}
+          onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-4px)";e.currentTarget.style.borderColor="#3b82f688";e.currentTarget.style.boxShadow="0 12px 32px rgba(59,130,246,0.2)";}}
+          onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor=theme.border;e.currentTarget.style.boxShadow="none";}}>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+            <div style={{width:52,height:52,borderRadius:14,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,boxShadow:"0 4px 14px rgba(59,130,246,0.4)"}}>📊</div>
+            <div>
+              <div style={{fontSize:9,fontWeight:800,color:"#3b82f6",letterSpacing:0.8,marginBottom:2}}>STATISTIK</div>
+              <h3 style={{fontSize:16,fontWeight:700,color:theme.text,margin:0}}>{tr("Steueranalyse","Tax Analysis")}</h3>
+            </div>
+          </div>
+          <p style={{fontSize:13,color:theme.textMuted,margin:0,lineHeight:1.5}}>{tr("Verteilung nach Kategorien, Bewirtung, KFZ, Software, Versicherung.","Distribution by category, dining, vehicle, software, insurance.")}</p>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:14,fontSize:11,color:"#3b82f6",fontWeight:700}}>
+            <span>{tr("Details ansehen","View details")}</span><span>↓</span>
+          </div>
+        </div>
+
+        {/* CARD 4: Steuerpotenziale erkennen */}
+        <div onClick={()=>{
+          const sv=document.getElementById("savings-section");
+          if(sv)sv.scrollIntoView({behavior:"smooth",block:"start"});
+        }} style={{padding:"22px 22px",borderRadius:16,background:`linear-gradient(135deg, ${theme.card}, rgba(245,158,11,0.06))`,border:"1px solid "+theme.border,cursor:"pointer",transition:"all 0.25s"}}
+          onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-4px)";e.currentTarget.style.borderColor="#f59e0b88";e.currentTarget.style.boxShadow="0 12px 32px rgba(245,158,11,0.2)";}}
+          onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor=theme.border;e.currentTarget.style.boxShadow="none";}}>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+            <div style={{width:52,height:52,borderRadius:14,background:"linear-gradient(135deg,#f59e0b,#d97706)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,boxShadow:"0 4px 14px rgba(245,158,11,0.4)"}}>💡</div>
+            <div>
+              <div style={{fontSize:9,fontWeight:800,color:"#f59e0b",letterSpacing:0.8,marginBottom:2}}>OPTIMIERUNG</div>
+              <h3 style={{fontSize:16,fontWeight:700,color:theme.text,margin:0}}>{tr("Steuerpotenziale","Tax Potential")}</h3>
+            </div>
+          </div>
+          <p style={{fontSize:13,color:theme.textMuted,margin:0,lineHeight:1.5}}>{tr("Welche typischen Kosten fehlen? Wo lässt sich noch sparen?","Which typical costs are missing? Where can you still save?")}</p>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:14,fontSize:11,color:"#f59e0b",fontWeight:700}}>
+            <span>{tr("Tipps ansehen","View tips")}</span><span>↓</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════
+          4) TAX SAVINGS ESTIMATOR — eksik kategoriler + tipler
+          ═══════════════════════════════════════════ */}
+      <div id="savings-section" style={{padding:"22px 26px",borderRadius:16,background:`linear-gradient(135deg, rgba(245,158,11,0.06), ${theme.card})`,border:"1px solid rgba(245,158,11,0.25)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18}}>
+          <div style={{width:44,height:44,borderRadius:12,background:"rgba(245,158,11,0.18)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>💡</div>
+          <div>
+            <h3 style={{fontSize:16,fontWeight:700,color:theme.text,margin:0}}>{tr("Potenzielle Steueroptimierung","Tax Optimization Potential")}</h3>
+            <div style={{fontSize:12,color:theme.textMuted,marginTop:3}}>{tr("Typische Posten, die in Ihrem Jahr fehlen könnten","Typical items that might be missing in your year")}</div>
+          </div>
+        </div>
+        {(()=>{
+          const cats=Object.keys(summary.by_category||{});
+          const recCats=recurring.items.map(r=>r.category);
+          const allCats=new Set([...cats,...recCats]);
+          const tips=[];
+          if(!allCats.has("Homeoffice"))tips.push({icon:"🏠",title:tr("Homeoffice-Pauschale fehlt","Homeoffice flat rate missing"),desc:tr("Bis zu 1.260€/Jahr (6€ × 210 Arbeitstage) — kein Arbeitszimmer nötig","Up to €1,260/year — no separate office room required"),amount:1260,color:"#22c55e"});
+          if(!allCats.has("Versicherung")&&!recCats.includes("Krankenversicherung"))tips.push({icon:"🛡️",title:tr("Krankenkasse / Versicherungen","Health insurance / Insurance"),desc:tr("Eigene KV/RV → Sonderausgabe. Berufshaftpflicht → Betriebsausgabe","Own health/pension → special deduction. Liability insurance → business expense"),amount:4000,color:"#8b5cf6"});
+          if(!allCats.has("KFZ"))tips.push({icon:"🚗",title:tr("KFZ-Kosten","Vehicle costs"),desc:tr("Tankquittungen, Werkstatt, Versicherung — anteilig betrieblich absetzbar","Fuel, repair, insurance — partially deductible for business use"),amount:null,color:"#3b82f6"});
+          if(!allCats.has("Software"))tips.push({icon:"💻",title:tr("Software-Abos","Software subscriptions"),desc:tr("Cloud, KI-Tools (ChatGPT, Claude), Buchhaltung — 100% mit Vorsteuer","Cloud, AI tools, accounting software — 100% with VAT"),amount:null,color:"#8b5cf6"});
+          if(!allCats.has("Bewirtung"))tips.push({icon:"🍽️",title:tr("Bewirtungsaufwendungen","Entertainment expenses"),desc:tr("Geschäftsessen — 70% absetzbar. Bewirtungsbeleg mit Teilnehmern!","Business meals — 70% deductible. Receipt with attendees required!"),amount:null,color:"#f59e0b"});
+          if(!allCats.has("Reise"))tips.push({icon:"✈️",title:tr("Reisekosten","Travel expenses"),desc:tr("Verpflegungspauschale 14-28€/Tag, Übernachtung 100%","Per diem €14-28/day, accommodation 100%"),amount:null,color:"#06b6d4"});
+          if(tips.length===0)return(<div style={{padding:20,textAlign:"center",color:theme.textMuted,fontSize:13}}>
+            <div style={{fontSize:32,marginBottom:8}}>✓</div>
+            <div style={{color:theme.accent,fontWeight:700,marginBottom:4}}>{tr("Alle typischen Kategorien erfasst","All typical categories covered")}</div>
+            <div>{tr("KI Jahresreview für individuelle Tipps starten","Start AI Yearly Review for personalized tips")}</div>
+          </div>);
+          return(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
+            {tips.map((t,i)=>(<div key={i} style={{padding:"14px 16px",borderRadius:12,background:theme.surface,border:"1px solid "+theme.border,display:"flex",gap:12}}>
+              <div style={{fontSize:24,flexShrink:0}}>{t.icon}</div>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:theme.text,marginBottom:3}}>{t.title}</div>
+                <div style={{fontSize:11.5,color:theme.textMuted,lineHeight:1.45}}>{t.desc}</div>
+                {t.amount&&<div style={{marginTop:6,display:"inline-flex",alignItems:"center",gap:4,padding:"3px 8px",borderRadius:8,background:t.color+"22",color:t.color,fontSize:10,fontWeight:800}}>
+                  + ca. {fmtEur(t.amount)} {tr("Ersparnis","savings")}
+                </div>}
+              </div>
+            </div>))}
+          </div>);
+        })()}
+        <div style={{marginTop:18,padding:"10px 14px",background:"rgba(139,92,246,0.06)",border:"1px dashed rgba(139,92,246,0.25)",borderRadius:10,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:18}}>✨</span>
+          <div style={{flex:1,fontSize:12,color:theme.textMuted}}>{tr("Möchten Sie eine vollständige KI-Analyse mit individuellen Tipps?","Want a full AI analysis with personalized tips?")}</div>
+          <button onClick={async()=>{
+            setShowAsk(true);setAskBusy(true);setAskQ(tr(`Jahresreview ${year}`,`Yearly review ${year}`));setAskA("");setAskMode("review");
+            try{
+              const d=await api("/steuer/eur-ai-review",{method:"POST",body:JSON.stringify({year})});
+              setAskA(d.answer||tr("Keine Antwort","No answer"));
+            }catch(e){setAskA(tr("Fehler","Error")+": "+(_extractErr(e)||e.message));}
+            setAskBusy(false);
+          }} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✨ {tr("KI Review starten","Start AI Review")}</button>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════
+          5) DETAILLI METRIC CARDS (eski, ama gizli toggle)
+          ═══════════════════════════════════════════ */}
+      <details style={{padding:0}}>
+        <summary style={{padding:"12px 16px",cursor:"pointer",fontSize:12,color:theme.textMuted,fontWeight:600,listStyle:"none",display:"flex",alignItems:"center",gap:8,userSelect:"none"}}>
+          <span>▶</span> {tr("Detaillierte Kennzahlen anzeigen","Show detailed metrics")}
+        </summary>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:14,marginTop:10}}>
+          {metricCard(
+            tr("Betriebsausgaben","Business expenses"),
+            summary.totals.betriebsausgaben,
+            theme.accent,
+            `linear-gradient(135deg, ${theme.card} 0%, rgba(16,185,129,0.04) 100%)`,
+            "rgba(16,185,129,0.15)","🏢",
+            tr("100% steuerlich absetzbar","100% tax deductible"),
+            summaryPrev?.totals?.betriebsausgaben
+          )}
+          {metricCard(
+            tr("Sonderausgaben","Special deductions"),
+            summary.totals.sonderausgaben,
+            "#8b5cf6",
+            `linear-gradient(135deg, ${theme.card} 0%, rgba(139,92,246,0.04) 100%)`,
+            "rgba(139,92,246,0.15)","🛡️",
+            tr("Private Versicherung (KV/RV)","Private insurance (Health/Pension)"),
+            summaryPrev?.totals?.sonderausgaben
+          )}
+          {metricCard(
+            tr("Nicht absetzbar","Not deductible"),
+            summary.totals.nicht_absetzbar,
+            theme.danger,
+            `linear-gradient(135deg, ${theme.card} 0%, rgba(239,68,68,0.04) 100%)`,
+            "rgba(239,68,68,0.15)","✗",
+            tr("z.B. Bewirtung 30% / privat","e.g. Bewirtung 30% / private"),
+            summaryPrev?.totals?.nicht_absetzbar
+          )}
+          {metricCard(
+            tr("Vorsteuer","Input VAT"),
+            summary.totals.vorsteuer_total,
+            "#3b82f6",
+            `linear-gradient(135deg, ${theme.card} 0%, rgba(59,130,246,0.04) 100%)`,
+            "rgba(59,130,246,0.15)","%",
+            tr("§15 UStG — abziehbar","§15 UStG — deductible"),
+            summaryPrev?.totals?.vorsteuer_total
+          )}
+        </div>
+      </details>
 
       {/* ═══ Category breakdown with progress bars ═══ */}
       {Object.keys(summary.by_category).length>0&&(()=>{
         const entries=Object.entries(summary.by_category).sort((a,b)=>b[1].gross-a[1].gross);
         const maxGross=Math.max(...entries.map(([_,d])=>d.gross));
         const COLORS={"Bewirtung":"#f59e0b","KFZ":"#3b82f6","Reise":"#06b6d4","Software":"#8b5cf6","Buero":"#10b981","Material":"#10b981","Versicherung":"#a855f7","Telefon":"#0ea5e9","Lohn":"#ec4899","Miete":"#f97316","Homeoffice":"#22c55e","AfA":"#6366f1","Sozialabgaben":"#d946ef","Geschenk":"#facc15","Andere":"#64748b","Unkategorisiert":"#94a3b8"};
-        return(<div style={{padding:"22px 24px",borderRadius:16,background:theme.card,border:"1px solid "+theme.border}}>
+        return(<div id="category-breakdown-section" style={{padding:"22px 24px",borderRadius:16,background:theme.card,border:"1px solid "+theme.border}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18,flexWrap:"wrap",gap:8}}>
             <div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -3062,7 +3271,7 @@ function SteuerOverviewView(){
         <span style={{display:"flex",alignItems:"center",gap:6}}><span style={{color:theme.accent}}>✓</span> Deutsche Steuerlogik 2026</span>
         <span style={{display:"flex",alignItems:"center",gap:6}}><span style={{color:"#8b5cf6"}}>✨</span> Claude Opus 4.7</span>
       </div>
-    </>}
+    </>);})()}
 
     {/* ═══ Modal — premium narrower layout ═══ */}
     {showAdd&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeIn 0.2s ease-out"}} onClick={()=>setShowAdd(false)}>
@@ -3122,36 +3331,86 @@ function SteuerOverviewView(){
       </div>
     </div>}
 
-    {/* ═══ AI Ask modal — premium look ═══ */}
-    {showAsk&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeIn 0.2s ease-out"}} onClick={()=>setShowAsk(false)}>
-      <div style={{background:theme.surface,borderRadius:18,width:"100%",maxWidth:600,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden",boxShadow:"0 25px 70px rgba(0,0,0,0.5)"}} onClick={e=>e.stopPropagation()}>
-        <div style={{padding:"24px 28px",borderBottom:"1px solid "+theme.border,background:"linear-gradient(135deg,rgba(139,92,246,0.08),rgba(99,102,241,0.04))"}}>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}>
-            <div style={{width:42,height:42,borderRadius:12,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 4px 14px rgba(139,92,246,0.4)"}}>✨</div>
-            <div>
-              <h3 style={{fontSize:18,fontWeight:700,color:theme.text,margin:0,letterSpacing:-0.3}}>{tr("Steuer AI","Tax AI")}</h3>
-              <div style={{fontSize:11,color:theme.textMuted,marginTop:2}}>Claude Opus 4.7 · Deutsche Steuerlogik</div>
+    {/* ═══ AI Ask / Review modal — premium look ═══ */}
+    {showAsk&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeIn 0.2s ease-out"}} onClick={()=>{setShowAsk(false);setAskMode("ask");}}>
+      <div style={{background:theme.surface,borderRadius:18,width:"100%",maxWidth:askMode==="review"?780:600,maxHeight:"92vh",display:"flex",flexDirection:"column",overflow:"hidden",boxShadow:"0 25px 70px rgba(0,0,0,0.5)"}} onClick={e=>e.stopPropagation()}>
+        <div style={{padding:"24px 28px",borderBottom:"1px solid "+theme.border,background:"linear-gradient(135deg,rgba(139,92,246,0.10),rgba(99,102,241,0.05))"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{width:48,height:48,borderRadius:14,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,boxShadow:"0 6px 18px rgba(139,92,246,0.5)",animation:askBusy?"aiPulse 1.5s ease-in-out infinite":"none"}}>{askMode==="review"?"🧠":"✨"}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <h3 style={{fontSize:19,fontWeight:800,color:theme.text,margin:0,letterSpacing:-0.3}}>{askMode==="review"?tr(`KI Jahresreview ${year}`,`AI Yearly Review ${year}`):tr("Steuer AI","Tax AI")}</h3>
+              <div style={{fontSize:11,color:theme.textMuted,marginTop:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:5,background:"rgba(139,92,246,0.15)",color:"#8b5cf6",fontWeight:700,fontSize:9,letterSpacing:0.5}}>OPUS 4.7</span>
+                <span>· {tr("Deutsche Steuerlogik 2026","German Tax Logic 2026")}</span>
+                <span>· {tr("Kein Steuerberater-Ersatz","Not legal tax advice")}</span>
+              </div>
             </div>
-            <div style={{flex:1}}/>
-            <div onClick={()=>setShowAsk(false)} style={{width:32,height:32,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:theme.textMuted,fontSize:16}}>✕</div>
+            <div onClick={()=>{setShowAsk(false);setAskMode("ask");}} style={{width:36,height:36,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:theme.textMuted,fontSize:16,flexShrink:0,transition:"all 0.15s"}} onMouseEnter={e=>{e.currentTarget.style.background=theme.surfaceAlt;e.currentTarget.style.color=theme.text;}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=theme.textMuted;}}>✕</div>
           </div>
         </div>
-        <div style={{padding:"22px 28px",flex:1,overflow:"auto"}}>
-          <textarea style={{...css.input,minHeight:90,resize:"vertical",fontSize:14,fontFamily:"inherit"}} value={askQ} onChange={e=>setAskQ(e.target.value)} placeholder={tr("z.B. Kann ich mein neues iPad voll absetzen?","e.g. Can I fully deduct my new iPad?")}/>
-          {!askA&&!askBusy&&<div style={{marginTop:12,display:"flex",flexWrap:"wrap",gap:6}}>
-            {[tr("Bewirtung mit Kunden — wie viel absetzbar?","Client meal — how much deductible?"),tr("Homeoffice 2026 — Pauschale?","Homeoffice 2026 — flat rate?"),tr("Geschäftshandy + Privatanteil?","Business phone + private share?")].map((q,i)=>(<button key={i} onClick={()=>setAskQ(q)} style={{padding:"6px 12px",borderRadius:8,border:"1px solid "+theme.border,background:theme.surfaceAlt,color:theme.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>💭 {q}</button>))}
+        <div style={{padding:"24px 28px",flex:1,overflow:"auto"}}>
+          {/* ASK mode — soru sor */}
+          {askMode==="ask"&&<>
+            <textarea style={{...css.input,minHeight:90,resize:"vertical",fontSize:14,fontFamily:"inherit"}} value={askQ} onChange={e=>setAskQ(e.target.value)} placeholder={tr("z.B. Kann ich mein neues iPad voll absetzen?","e.g. Can I fully deduct my new iPad?")}/>
+            {!askA&&!askBusy&&<div style={{marginTop:12,display:"flex",flexWrap:"wrap",gap:6}}>
+              {[tr("Bewirtung mit Kunden — wie viel absetzbar?","Client meal — how much deductible?"),tr("Homeoffice 2026 — Pauschale?","Homeoffice 2026 — flat rate?"),tr("Geschäftshandy + Privatanteil?","Business phone + private share?")].map((q,i)=>(<button key={i} onClick={()=>setAskQ(q)} style={{padding:"6px 12px",borderRadius:8,border:"1px solid "+theme.border,background:theme.surfaceAlt,color:theme.textMuted,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>💭 {q}</button>))}
+            </div>}
+          </>}
+
+          {/* REVIEW mode — Jahresreview insight cards */}
+          {askMode==="review"&&askBusy&&<div style={{padding:"40px 20px",textAlign:"center"}}>
+            <div style={{fontSize:36,animation:"spin 2s linear infinite",display:"inline-block"}}>🧠</div>
+            <div style={{marginTop:12,fontSize:14,color:theme.text,fontWeight:600}}>{tr("Claude analysiert Ihr Steuerjahr...","Claude is analyzing your tax year...")}</div>
+            <div style={{marginTop:4,fontSize:11,color:theme.textMuted}}>{tr("15-30 Sekunden — Opus 4.7 prüft alle Kategorien","15-30 seconds — Opus 4.7 reviews all categories")}</div>
           </div>}
-          {askA&&<div style={{marginTop:18,padding:"16px 18px",background:"linear-gradient(135deg,rgba(139,92,246,0.06),rgba(99,102,241,0.03))",border:"1px solid rgba(139,92,246,0.25)",borderRadius:12,fontSize:13.5,lineHeight:1.7,color:theme.text,whiteSpace:"pre-wrap",position:"relative"}}>
+
+          {askMode==="review"&&askA&&<div style={{display:"flex",flexDirection:"column",gap:16}}>
+            {/* Quick-stats kartlari */}
+            {summary&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
+              <div style={{padding:"12px 14px",borderRadius:10,background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.25)"}}>
+                <div style={{fontSize:10,color:theme.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{tr("Geprüfte Belege","Reviewed receipts")}</div>
+                <div style={{fontSize:20,fontWeight:800,color:theme.accent,fontFamily:mono,marginTop:3}}>{summary.invoice_count}</div>
+              </div>
+              <div style={{padding:"12px 14px",borderRadius:10,background:"rgba(59,130,246,0.08)",border:"1px solid rgba(59,130,246,0.25)"}}>
+                <div style={{fontSize:10,color:theme.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{tr("Kategorien","Categories")}</div>
+                <div style={{fontSize:20,fontWeight:800,color:"#3b82f6",fontFamily:mono,marginTop:3}}>{Object.keys(summary.by_category||{}).length}</div>
+              </div>
+              <div style={{padding:"12px 14px",borderRadius:10,background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.25)"}}>
+                <div style={{fontSize:10,color:theme.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{tr("Wiederkehrend","Recurring")}</div>
+                <div style={{fontSize:20,fontWeight:800,color:"#8b5cf6",fontFamily:mono,marginTop:3}}>{recurring.items.length}</div>
+              </div>
+            </div>}
+            {/* AI yaniti — paragraflari/maddeleri ayri kart yap */}
+            <div style={{padding:"18px 20px",background:"linear-gradient(135deg,rgba(139,92,246,0.06),rgba(99,102,241,0.03))",border:"1px solid rgba(139,92,246,0.3)",borderRadius:14,position:"relative"}}>
+              <div style={{position:"absolute",top:-9,left:16,padding:"3px 10px",background:theme.surface,fontSize:9,fontWeight:800,color:"#8b5cf6",letterSpacing:0.8,borderRadius:5,border:"1px solid rgba(139,92,246,0.3)"}}>🧠 KI BEFUND</div>
+              <div style={{marginTop:6,fontSize:13.5,lineHeight:1.75,color:theme.text,whiteSpace:"pre-wrap"}}>{askA}</div>
+            </div>
+            {/* Action shortcuts */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+              <button onClick={async()=>{
+                try{
+                  const tk=localStorage.getItem("atx_token");
+                  const r=await fetch(API+"/steuer/eur-export?year="+year+"&format=pdf",{headers:{Authorization:"Bearer "+tk}});
+                  if(!r.ok)return;
+                  const blob=await r.blob();const url=URL.createObjectURL(blob);
+                  const a=document.createElement("a");a.href=url;a.download=`EUR_${year}.pdf`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+                }catch(e){}
+              }} style={{padding:"10px 14px",borderRadius:10,border:"1px solid "+theme.border,background:theme.surfaceAlt,color:theme.text,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>📥 {tr("EÜR PDF","EÜR PDF")}</button>
+              <button onClick={()=>{setAskMode("ask");setAskA("");setAskQ("");}} style={{padding:"10px 14px",borderRadius:10,border:"1px solid "+theme.border,background:theme.surfaceAlt,color:theme.text,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>💬 {tr("Frage stellen","Ask question")}</button>
+            </div>
+          </div>}
+
+          {/* ASK mode answer (review degil) */}
+          {askMode==="ask"&&askA&&<div style={{marginTop:18,padding:"16px 18px",background:"linear-gradient(135deg,rgba(139,92,246,0.06),rgba(99,102,241,0.03))",border:"1px solid rgba(139,92,246,0.25)",borderRadius:12,fontSize:13.5,lineHeight:1.7,color:theme.text,whiteSpace:"pre-wrap",position:"relative"}}>
             <div style={{position:"absolute",top:-9,left:14,padding:"2px 8px",background:theme.surface,fontSize:9,fontWeight:800,color:"#8b5cf6",letterSpacing:0.5,borderRadius:4,border:"1px solid rgba(139,92,246,0.25)"}}>AI ANTWORT</div>
             <div style={{marginTop:4}}>{askA}</div>
           </div>}
         </div>
         <div style={{padding:"16px 28px",borderTop:"1px solid "+theme.border,background:theme.surfaceAlt,display:"flex",gap:10}}>
-          <button style={{...css.btnOutline,flex:1}} onClick={()=>setShowAsk(false)}>{tr("Schließen","Close")}</button>
-          <button onClick={ask} disabled={askBusy||!askQ.trim()} style={{flex:2,padding:"12px 20px",borderRadius:10,border:"none",background:askBusy?theme.surfaceAlt:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",fontSize:14,fontWeight:700,cursor:askBusy?"wait":"pointer",fontFamily:"inherit",boxShadow:askBusy?"none":"0 4px 14px rgba(139,92,246,0.35)",opacity:askQ.trim()?1:0.5}}>
+          <button style={{...css.btnOutline,flex:1}} onClick={()=>{setShowAsk(false);setAskMode("ask");}}>{tr("Schließen","Close")}</button>
+          {askMode==="ask"&&<button onClick={ask} disabled={askBusy||!askQ.trim()} style={{flex:2,padding:"12px 20px",borderRadius:10,border:"none",background:askBusy?theme.surfaceAlt:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",fontSize:14,fontWeight:700,cursor:askBusy?"wait":"pointer",fontFamily:"inherit",boxShadow:askBusy?"none":"0 4px 14px rgba(139,92,246,0.35)",opacity:askQ.trim()?1:0.5}}>
             {askBusy?<span>⏳ {tr("Denkt nach...","Thinking...")}</span>:<span>✨ {tr("Steuer AI fragen","Ask Tax AI")}</span>}
-          </button>
-        </div>
+          </button>}
       </div>
     </div>}
   </div>);
