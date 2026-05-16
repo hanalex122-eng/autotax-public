@@ -21,3 +21,4 @@ alembic==1.13.3
 stripe==11.4.0
 sentry-sdk[fastapi]==2.18.0
 python-json-logger==2.0.7
+pymupdf==1.24.13

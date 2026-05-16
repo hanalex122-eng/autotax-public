@@ -2453,6 +2453,140 @@ async def admin_run_monthly_summary_now(user: dict = Depends(get_current_user)):
     return {"success": True, "stats": stats}
 
 
+@app.post("/invoices/{invoice_id}/vision-reocr")
+async def vision_reocr_invoice(invoice_id: int, request: Request,
+                                 user: dict = Depends(get_current_user)):
+    """Fatura dosyasini Claude Vision'a gonder, gercek degerleri oku, DB'yi guncelle.
+    OCR'in zayif kaldigi durumlarda kullanilir (total=0, garbage text)."""
+    db = SessionLocal()
+    try:
+        inv = db.query(Invoice).filter(
+            Invoice.id == invoice_id,
+            Invoice.user_id == user["sub"],
+        ).first()
+        if not inv:
+            err(404, "Invoice not found")
+        # Dosyayi oku (file_path veya file_data)
+        file_bytes = None
+        media_type = inv.file_content_type or "application/pdf"
+        if getattr(inv, "file_path", None):
+            try:
+                from autotax import storage as _storage
+                file_bytes = _storage.read_file(inv.file_path)
+            except Exception as e:
+                logger.warning("Failed to read file_path %s: %s", inv.file_path, e)
+        if file_bytes is None and inv.file_data:
+            file_bytes = inv.file_data
+        if not file_bytes:
+            err(400, "No original file stored for this invoice — cannot re-OCR")
+        # PDF ise ilk sayfayi JPEG'e cevir (Claude vision PDF kabul etmez,
+        # image kabul eder). 1 sayfa yeterli fatura icin.
+        is_pdf = (media_type or "").lower() == "application/pdf" or file_bytes[:4] == b"%PDF"
+        if is_pdf:
+            try:
+                # PyMuPDF (fitz) — pure Python, poppler binary'sine ihtiyac yok.
+                # Ilk sayfayi 200 DPI JPEG'e cevir, Claude vision'a yolla.
+                import fitz as _fitz
+                import io as _io
+                doc = _fitz.open(stream=file_bytes, filetype="pdf")
+                if doc.page_count == 0:
+                    err(400, "PDF leer")
+                page = doc.load_page(0)
+                # 200 DPI = zoom 2.78 (default 72 DPI)
+                zoom = 200 / 72
+                mat = _fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                jpeg_bytes = pix.tobytes("jpeg")
+                doc.close()
+                file_bytes = jpeg_bytes
+                media_type = "image/jpeg"
+            except ImportError:
+                err(500, "PyMuPDF (fitz) not installed — add pymupdf to requirements.txt")
+            except Exception as e:
+                logger.exception("PDF->image conversion failed")
+                err(500, f"PDF Konvertierung fehlgeschlagen: {e}")
+
+        # Base64 encode
+        import base64 as _b64
+        img_b64 = _b64.b64encode(file_bytes).decode()
+
+        # AI service URL
+        ai_base = (os.environ.get("AI_REVIEWER_WEBHOOK_URL") or "").strip()
+        if not ai_base:
+            err(503, "AI reviewer not configured")
+        vision_url = ai_base.rsplit("/", 1)[0] + "/vision-reocr"
+
+        payload = {"image_b64": img_b64, "media_type": media_type}
+        import json as _json
+        payload_bytes = _json.dumps(payload).encode()
+        sig = _ai_reviewer_sign(payload_bytes)
+
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(vision_url, content=payload_bytes,
+                                   headers={"X-Sig": sig, "Content-Type": "application/json"})
+            if r.status_code != 200:
+                logger.warning("Vision re-OCR failed: %s %s", r.status_code, r.text[:300])
+                err(502, f"AI vision service returned {r.status_code}")
+            ai_result = r.json().get("data") or {}
+
+        # Update invoice fields with AI-extracted data
+        updated_fields = {}
+        if ai_result.get("vendor"):
+            inv.vendor = ai_result["vendor"][:200]
+            updated_fields["vendor"] = inv.vendor
+        ta = ai_result.get("total_amount")
+        if ta is not None:
+            try:
+                inv.total_amount = float(ta)
+                updated_fields["total_amount"] = inv.total_amount
+            except (TypeError, ValueError):
+                pass
+        va = ai_result.get("vat_amount")
+        if va is not None:
+            try:
+                inv.vat_amount = float(va)
+                updated_fields["vat_amount"] = inv.vat_amount
+            except (TypeError, ValueError):
+                pass
+        if ai_result.get("vat_rate"):
+            inv.vat_rate = ai_result["vat_rate"][:10]
+            updated_fields["vat_rate"] = inv.vat_rate
+        if ai_result.get("date"):
+            inv.date = ai_result["date"][:10]
+            updated_fields["date"] = inv.date
+        if ai_result.get("invoice_number"):
+            inv.invoice_number = str(ai_result["invoice_number"])[:80]
+            updated_fields["invoice_number"] = inv.invoice_number
+        if ai_result.get("vendor_address"):
+            inv.vendor_address = ai_result["vendor_address"][:300]
+        if ai_result.get("vendor_email"):
+            inv.vendor_email = ai_result["vendor_email"][:120]
+        if ai_result.get("vendor_phone"):
+            inv.vendor_phone = ai_result["vendor_phone"][:40]
+        if ai_result.get("vendor_iban"):
+            inv.vendor_iban = ai_result["vendor_iban"][:40]
+        # AI re-OCR sonrasi processed=True isaretle (artik garbage degil)
+        if inv.total_amount and inv.total_amount > 0:
+            inv.processed = True
+        db.commit()
+
+        audit("invoice.vision_reocr", user_id=user["sub"], resource_type="invoice",
+              resource_id=inv.id,
+              payload={"updated_fields": list(updated_fields.keys()),
+                       "confidence": ai_result.get("confidence")},
+              request=request)
+        return {
+            "success": True,
+            "id": inv.id,
+            "updated": updated_fields,
+            "confidence": ai_result.get("confidence"),
+            "notes": ai_result.get("notes", ""),
+        }
+    finally:
+        db.close()
+
+
 @app.post("/invoices/ai-reanalyze-all")
 async def reanalyze_all_invoices(request: Request,
                                   unanalyzed_only: bool = Query(True),

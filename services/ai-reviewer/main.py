@@ -331,6 +331,103 @@ Bei rechtsverbindlichen Fragen bitte Steuerberater konsultieren."
 """
 
 
+VISION_SYSTEM_PROMPT = """\
+You are an expert at extracting structured data from German invoices and \
+receipts. You will receive an image (PDF page or photo). Read it carefully \
+and extract the following fields. Return ONLY a JSON object, no explanation.
+
+REQUIRED FIELDS:
+{
+  "vendor": "Firma name (exact, as printed)",
+  "total_amount": 0.00,           // Brutto total in EUR (the final paid amount)
+  "vat_amount": 0.00,             // USt amount in EUR
+  "vat_rate": "19%" | "7%" | "0%",
+  "date": "YYYY-MM-DD",           // invoice date
+  "invoice_number": "string or null",
+  "vendor_address": "string or null",
+  "vendor_email": "string or null",
+  "vendor_phone": "string or null",
+  "vendor_iban": "string or null",
+  "currency": "EUR",
+  "confidence": 0.0-1.0,          // how sure you are
+  "is_german": true,
+  "notes": "Any uncertainty or notable detail"
+}
+
+RULES:
+- "total_amount" is the GROSS (Brutto), what was actually paid. Look for "Gesamt", "Summe", "Zu zahlen", "Total", "Endsumme"
+- Parse German number format: "1.234,56" = 1234.56 (period=thousands, comma=decimal)
+- Parse "19,00 €" or "EUR 19,00" -> 19.00
+- If multiple totals appear, take the highest (final after VAT) labeled "Gesamt"/"Brutto"/"Endbetrag"
+- Date: convert "27.03.2026" -> "2026-03-27"
+- If field is genuinely missing, use null (not empty string)
+- Be VERY careful with decimal — €3,77 is THREE euros, not 377
+- confidence: 1.0=perfect read, 0.7=mostly clear, 0.4=blurry/unclear
+
+Return JSON only, no markdown, no explanation."""
+
+
+@app.post("/vision-reocr")
+async def vision_reocr(request: Request):
+    """PDF veya image base64 alir, Claude Vision ile gercek degerleri okur.
+    OCR'in basarisiz oldugu (total=0, garbage text) faturalarda kullanilir.
+    """
+    body = await request.body()
+    sig = request.headers.get("X-Sig", "")
+    if not _verify_signature(body, sig):
+        raise HTTPException(status_code=403, detail="bad signature")
+    try:
+        data = json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad json")
+
+    image_b64 = data.get("image_b64") or ""
+    media_type = data.get("media_type") or "image/jpeg"
+    if not image_b64:
+        raise HTTPException(status_code=400, detail="image_b64 required")
+    if not _claude:
+        raise HTTPException(status_code=503, detail="claude not configured")
+
+    # Claude vision messages format
+    try:
+        msg = _claude.messages.create(
+            model=MODEL,
+            max_tokens=1000,
+            system=VISION_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": image_b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": "Extract all invoice fields from this image. Return JSON only.",
+                    },
+                ],
+            }],
+        )
+        raw = msg.content[0].text.strip() if msg.content else "{}"
+        # Markdown code fence temizle
+        if raw.startswith("```"):
+            raw = raw.strip("`").strip()
+            if raw.lower().startswith("json"):
+                raw = raw[4:].strip()
+        result = json.loads(raw)
+        return {"ok": True, "model": MODEL, "data": result}
+    except json.JSONDecodeError as e:
+        logger.exception("Vision JSON parse failed")
+        raise HTTPException(status_code=502, detail=f"AI returned invalid JSON: {e}")
+    except Exception as e:
+        logger.exception("Vision re-OCR failed")
+        raise HTTPException(status_code=500, detail=f"AI error: {e}")
+
+
 @app.post("/ask")
 async def ask(request: Request):
     """Kullaniciden gelen serbest soru — 'Bu gider dusulur mu?' tarzi."""
