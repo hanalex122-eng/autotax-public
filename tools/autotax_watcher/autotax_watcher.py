@@ -38,8 +38,12 @@ from typing import Any, Callable
 # Sabitler
 # ---------------------------------------------------------------------------
 APP_NAME = "AutoTaxWatcher"
-APP_VERSION = "2.0.0"
-DEFAULT_API = "https://autotax-public-production-3f2a.up.railway.app"
+APP_VERSION = "2.1.0"
+DEFAULT_API = "https://autotax.cloud"
+
+# Auto-update state — set by updater callback, read by tray menu
+_tray_icon = None
+_update_url: str | None = None
 SUPPORTED_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
 POLL_INTERVAL = 5  # saniye — klasör tarama
 STABILITY_WAIT = 3  # saniye — dosya boyutu sabitleşene kadar bekle
@@ -611,10 +615,28 @@ def run_tray(cfg_path: Path, cfg: Config, watcher: Watcher) -> None:
         watcher.stop()
         icon.stop()
 
+    def _open_update(_icon, _item):
+        """Yeni surum yayinlandiysa indirme sayfasini aç."""
+        import webbrowser
+        global _update_url
+        url = _update_url or "https://autotax.cloud/app"
+        try:
+            webbrowser.open(url)
+        except Exception:
+            logging.exception("Update URL acilamadi")
+
     def _status_text(_item: "pystray.MenuItem") -> str:
         n = len(watcher.queue)
         state = "DURDU" if watcher.is_paused() else "ÇALIŞIYOR"
         return f"Durum: {state} — Kuyruk: {n}"
+
+    def _update_label(_item):
+        global _update_url
+        return "🆕 Update verfügbar — Herunterladen" if _update_url else "✓ Aktuelle Version"
+
+    def _update_enabled(_item):
+        global _update_url
+        return bool(_update_url)
 
     menu = pystray.Menu(
         pystray.MenuItem(_status_text, lambda *_: None, enabled=False),
@@ -626,10 +648,14 @@ def run_tray(cfg_path: Path, cfg: Config, watcher: Watcher) -> None:
         ),
         pystray.MenuItem("Failed-Uploads erneut versuchen", _retry_now),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem(_update_label, _open_update, enabled=_update_enabled),
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem("Beenden", _quit),
     )
 
     icon = pystray.Icon(APP_NAME, _make_icon_image(), f"{APP_NAME} v{APP_VERSION}", menu)
+    global _tray_icon
+    _tray_icon = icon
 
     # Watcher'ı arka thread'de çalıştır, tray ana thread'de
     t = threading.Thread(target=watcher.run, daemon=True)
@@ -731,6 +757,36 @@ def main() -> None:
         cfg.save(cfg_path)
 
     ensure_autostart(cfg.auto_start)
+
+    # Auto-Update check — backend'in /watcher/version.json'ina bakar,
+    # yeni sürüm varsa tray balon ile haber verir. Engellemez/blok yok.
+    try:
+        from updater import check_for_update_async
+        def _on_update(info):
+            try:
+                logging.info("Update available: v%s — %s", info.version, info.download_url)
+                # Tray icon varsa balon mesaj
+                global _tray_icon
+                if _tray_icon is not None:
+                    _tray_icon.notify(
+                        f"Neue Version verfügbar: v{info.version}\nKlicke 'Update herunterladen' im Menü.",
+                        "AutoTax Watcher Update"
+                    )
+                # Update URL'ini global'e koy ki tray menü açsın
+                global _update_url
+                _update_url = info.download_url
+            except Exception:
+                logging.exception("update notify failed")
+        api_base = cfg.api_url.rstrip("/")
+        check_for_update_async(
+            api_url=f"{api_base}/watcher/version.json",
+            current_version=APP_VERSION,
+            on_update_available=_on_update,
+        )
+    except ImportError:
+        pass
+    except Exception:
+        logging.exception("Update check failed (continuing)")
 
     upload_queue = UploadQueue(queue_path)
     uploader = Uploader(cfg, auth)
