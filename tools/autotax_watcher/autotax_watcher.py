@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import queue
+import re
 import shutil
 import sys
 import threading
@@ -52,6 +53,52 @@ STABILITY_WAIT = 3  # saniye — dosya boyutu sabitleşene kadar bekle
 RETRY_INTERVAL = 30  # saniye — offline queue retry
 MAX_429_RETRIES = 3
 DEFAULT_BACKOFF = [15, 30, 60]  # Retry-After yoksa kullanılacak süreler
+
+
+_PAGE_PATTERNS = [
+    re.compile(r"^(.+)_page_?(\d+)$", re.IGNORECASE),  # scan_page_1, doc_pageN
+    re.compile(r"^(.+)_p(\d+)$", re.IGNORECASE),       # scan_p1, scan_p01
+    re.compile(r"^(.+)_(\d{2,})$"),                    # scan_001, IMG_20260517_001
+    re.compile(r"^(.+)\s\((\d+)\)$"),                  # Document (1), Document (2)
+    re.compile(r"^(.+)-(\d{3,})$"),                    # scan-001 (3+ dijit, tarihlerle karismasin)
+]
+
+
+def _split_page_suffix(stem: str) -> tuple[str, int] | None:
+    """Dosya adinin sayfa-suffix'i varsa (base, page_num) doner, yoksa None.
+
+    Ornek: 'scan_001' -> ('scan', 1), 'Document (2)' -> ('Document', 2),
+           '2026-05-17' -> None (tarih, sayfa degil).
+    """
+    for pat in _PAGE_PATTERNS:
+        m = pat.match(stem)
+        if m:
+            base = m.group(1).rstrip(" _-.")
+            if base:
+                return base, int(m.group(2))
+    return None
+
+
+def _merge_pdfs(pages: list[Path], output: Path) -> Path | None:
+    """pypdf ile PDF birlestir. Hata olursa None doner (caller fallback'e duser)."""
+    try:
+        from pypdf import PdfWriter
+    except ImportError:
+        logging.warning("pypdf eksik — PDF merge atlandi (pip install pypdf)")
+        return None
+    if output.exists():
+        output = output.with_name(f"{output.stem}_merged{output.suffix}")
+    try:
+        writer = PdfWriter()
+        for p in pages:
+            writer.append(str(p))
+        with output.open("wb") as fh:
+            writer.write(fh)
+        writer.close()
+        return output
+    except Exception:
+        logging.exception("PDF merge basarisiz: %s", output.name)
+        return None
 
 
 def _tray_notify(title: str, message: str, force: bool = False) -> None:
@@ -113,6 +160,8 @@ class Config:
     failed_subfolder: str = "Failed"
     retry_interval: int = RETRY_INTERVAL
     auto_start: bool = True  # Windows başlangıcında otomatik aç (default açık)
+    merge_multi_page: bool = True  # scan_001/scan_002 → tek PDF merge
+    merge_idle_seconds: int = 10  # son sayfa yazildiktan sonra bekleme suresi
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -398,6 +447,8 @@ class Watcher:
             return
         processed = watch / self.cfg.processed_subfolder
         failed = watch / self.cfg.failed_subfolder
+
+        stable_files: list[Path] = []
         for entry in sorted(watch.iterdir()):
             if not entry.is_file():
                 continue
@@ -411,7 +462,72 @@ class Watcher:
                     self._seen_unstable.add(str(entry))
                 continue
             self._seen_unstable.discard(str(entry))
+            stable_files.append(entry)
+
+        groups, singles = self._partition_pdf_groups(stable_files)
+
+        # Tamamlanan PDF gruplari -> tek PDF'e birlestir, normal upload akisina sok
+        for base_name, pages in groups.items():
+            try:
+                newest = max(p.stat().st_mtime for p in pages)
+            except OSError:
+                continue
+            if (time.time() - newest) < self.cfg.merge_idle_seconds:
+                logging.info(
+                    "Merge bekleniyor: %s (%d sayfa, %ds sonra tetiklenir)",
+                    base_name, len(pages), self.cfg.merge_idle_seconds,
+                )
+                continue
+            output = watch / f"{base_name}.pdf"
+            merged = _merge_pdfs(pages, output)
+            if merged:
+                logging.info("PDF Merge: %d sayfa -> %s", len(pages), merged.name)
+                _tray_notify("PDF birleştirildi", f"{merged.name} ({len(pages)} sayfa)")
+                for p in pages:
+                    try:
+                        p.unlink()
+                    except OSError as e:
+                        logging.warning("Sayfa silinemedi (%s): %s", e, p.name)
+                self._process(merged, processed, failed)
+            else:
+                # Merge basarisiz -> sayfalari ayri ayri yukle (fallback)
+                for p in pages:
+                    self._process(p, processed, failed)
+
+        for entry in singles:
             self._process(entry, processed, failed)
+
+    def _partition_pdf_groups(
+        self, files: list[Path]
+    ) -> tuple[dict[str, list[Path]], list[Path]]:
+        """PDF'leri sayfa-suffix pattern'ine gore grupla. (groups, singles) doner.
+
+        - 2+ sayfa olan gruplar `groups` dict'inde, sayfa numarasina gore sirali
+        - Tek dosya / non-PDF / pattern eslesmiyor -> `singles`
+        - Config'de merge_multi_page=False ise hicbir sey gruplanmaz
+        """
+        if not self.cfg.merge_multi_page:
+            return {}, list(files)
+        pdf_groups: dict[str, list[tuple[int, Path]]] = {}
+        singles: list[Path] = []
+        for f in files:
+            if f.suffix.lower() != ".pdf":
+                singles.append(f)
+                continue
+            info = _split_page_suffix(f.stem)
+            if info is None:
+                singles.append(f)
+                continue
+            base, num = info
+            pdf_groups.setdefault(base, []).append((num, f))
+        result: dict[str, list[Path]] = {}
+        for base, items in pdf_groups.items():
+            if len(items) >= 2:
+                items.sort(key=lambda x: x[0])
+                result[base] = [p for _, p in items]
+            else:
+                singles.extend(p for _, p in items)
+        return result, singles
 
     def _process(self, file_path: Path, processed: Path, failed: Path) -> None:
         logging.info("Yükleniyor: %s", file_path.name)
