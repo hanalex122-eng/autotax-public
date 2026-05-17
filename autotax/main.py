@@ -1108,15 +1108,23 @@ def _inject_features(html: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend():
-    # Public niche instance shows the marketing landing at root so first-time
-    # visitors see the pitch, not an empty login form. Personal deploy keeps
-    # the login/app shell at root (single-user, no visitors).
+    # Marketing landing at root (autotax.cloud yeni 3-dilli landing)
+    # /app -> actual SPA. Public_niche flag legacy.
     from autotax.config import FEATURES, render_landing_placeholders
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # PUBLIC_LANDING=0 ile kapatilabilir (eski davranis isteyenler icin)
+    if os.getenv("PUBLIC_LANDING", "1").strip() != "0":
+        landing_path = os.path.join(base, "landing.html")
+        if os.path.exists(landing_path):
+            with open(landing_path, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read(), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+    # Legacy public_niche fallback
     if FEATURES.get("public_niche") is True:
-        lp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "landing-new.html")
-        with open(lp, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=render_landing_placeholders(f.read()), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
-    index_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")
+        lp = os.path.join(base, "landing-new.html")
+        if os.path.exists(lp):
+            with open(lp, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=render_landing_placeholders(f.read()), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+    index_path = os.path.join(base, "index.html")
     with open(index_path, "r", encoding="utf-8") as f:
         return HTMLResponse(content=_inject_features(f.read()), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
