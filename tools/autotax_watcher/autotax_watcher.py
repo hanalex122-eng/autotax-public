@@ -87,7 +87,7 @@ class Config:
     processed_subfolder: str = "Uploaded"
     failed_subfolder: str = "Failed"
     retry_interval: int = RETRY_INTERVAL
-    auto_start: bool = False  # Windows başlangıcında otomatik aç
+    auto_start: bool = True  # Windows başlangıcında otomatik aç (default açık)
 
     @classmethod
     def load(cls, path: Path) -> "Config":

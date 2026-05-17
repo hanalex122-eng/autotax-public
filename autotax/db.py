@@ -362,12 +362,71 @@ def get_db():
         db.close()
 
 
+def _smart_filename(parsed: dict, original: str | None) -> str | None:
+    """AI Filename: 'IMG_001.pdf' -> '2026-05-17_AUCHAN_3.77EUR.pdf'.
+
+    Strategy:
+    - If original looks generic (IMG_xxx, scan_xxx, untitled, foto_xxx, vb.)
+      AND parsed has good data -> generate smart name.
+    - Otherwise keep original (user named it intentionally).
+    """
+    if not original:
+        return original
+    import os as _os
+    import re as _re
+    base, ext = _os.path.splitext(original)
+    base_lower = base.lower()
+    GENERIC = ("img_", "img-", "image", "scan", "scan_", "scan-",
+               "untitled", "neue", "neu_", "photo", "foto_", "foto-",
+               "document", "doc_", "screenshot", "page", "kopie")
+    is_generic = any(base_lower.startswith(p) for p in GENERIC) or len(base_lower) <= 4
+    if not is_generic:
+        return original  # user named it on purpose
+    # Need vendor + (amount OR date) to build smart name
+    vendor = (parsed.get("vendor") or "").strip()
+    if not vendor or vendor.lower() in ("unbekannt", "manual entry", ""):
+        return original
+    # Clean vendor: uppercase, strip special, max 20 chars
+    v = _re.sub(r"[^A-Za-z0-9 ]", "", vendor)
+    v = _re.sub(r"\s+", "_", v.strip()).upper()[:20]
+    if not v:
+        return original
+    parts = []
+    # Date
+    date = (parsed.get("date") or "").strip()
+    if date and _re.match(r"^\d{4}-\d{2}-\d{2}", date):
+        parts.append(date[:10])
+    parts.append(v)
+    # Amount
+    amt = parsed.get("total_amount")
+    try:
+        amt = float(amt) if amt is not None else None
+        if amt and amt > 0:
+            parts.append(f"{amt:.2f}EUR")
+    except (TypeError, ValueError):
+        pass
+    if len(parts) < 2:
+        return original  # not enough info
+    new_name = "_".join(parts) + (ext or ".pdf")
+    return new_name
+
+
 def save_invoice(data: dict, user_id: int, filename: str = None, file_data: bytes = None, file_content_type: str = None, file_hash: str = None, possible_duplicate: bool = False) -> int:
     """Persist an invoice. If file_data is provided it is written to disk
     (via autotax.storage) and only the relative path is stored in the DB.
     The file_data column is no longer populated for new rows.
     """
     from autotax import storage
+
+    # AI Filename: 'IMG_001.pdf' -> '2026-05-17_AUCHAN_3.77EUR.pdf'
+    # Sadece generic filename varsa devreye girer, kullanici adlandirmasi korunur.
+    try:
+        smart_name = _smart_filename(data, filename)
+        if smart_name and smart_name != filename:
+            logger.info("AI filename: %r -> %r", filename, smart_name)
+            filename = smart_name
+    except Exception:
+        logger.exception("smart filename failed (continuing with original)")
 
     file_path = None
     file_size = None
