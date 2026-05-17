@@ -904,11 +904,12 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
         <div style={{flex:1}}><div style={{fontSize:12,color:theme.textMuted,marginBottom:3,fontWeight:500}}>{_t("recognized_receipts")}</div><div style={{fontSize:26,fontWeight:700,color:theme.accent,fontFamily:mono,lineHeight:1}}>{readCount}</div></div>
         <div style={{fontSize:11,color:theme.accent,fontWeight:600,background:theme.accentSoft,padding:"4px 10px",borderRadius:20}}>{totalPct}%</div>
       </div>
-      <div style={{...css.card,display:"flex",alignItems:"center",gap:16,padding:"20px 22px",cursor:"default"}}
+      <div style={{...css.card,display:"flex",alignItems:"center",gap:16,padding:"20px 22px",cursor:unreadCount>0?"pointer":"default"}}
+        onClick={()=>{if(unreadCount>0&&onNav){sessionStorage.setItem("atx_invoices_status","unread");onNav("invoices");}}}
         onMouseEnter={e=>{e.currentTarget.style.transitionDelay="65ms";e.currentTarget.style.borderColor=theme.warn+"44";e.currentTarget.style.transform="translateY(-2px) scale(1.01)";e.currentTarget.style.boxShadow="0 8px 20px rgba(0,0,0,0.2)";}} onMouseLeave={e=>{e.currentTarget.style.transitionDelay="0ms";e.currentTarget.style.borderColor=theme.border;e.currentTarget.style.transform="translateY(0) scale(1)";e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.1)";}}>
         <div style={{width:44,height:44,borderRadius:12,background:theme.warnSoft,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,border:`1px solid ${theme.warn}22`}}><Icon d={I.help} size={20} color={theme.warn}/></div>
         <div style={{flex:1}}><div style={{fontSize:12,color:theme.textMuted,marginBottom:3,fontWeight:500}}>{_t("not_processed")}</div><div style={{fontSize:26,fontWeight:700,color:theme.warn,fontFamily:mono,lineHeight:1}}>{unreadCount}</div></div>
-        {unreadCount>0&&<div style={{fontSize:11,color:theme.warn,fontWeight:600,background:theme.warnSoft,padding:"4px 10px",borderRadius:20}}>{_t("check")}</div>}
+        {unreadCount>0&&<div style={{fontSize:11,color:theme.warn,fontWeight:600,background:theme.warnSoft,padding:"4px 10px",borderRadius:20}}>{_t("check")} →</div>}
       </div>
       <div style={{...css.card,display:"flex",alignItems:"center",gap:16,padding:"20px 22px",cursor:"default"}}
         onMouseEnter={e=>{e.currentTarget.style.transitionDelay="65ms";e.currentTarget.style.borderColor=theme.blue+"44";e.currentTarget.style.transform="translateY(-2px) scale(1.01)";e.currentTarget.style.boxShadow="0 8px 20px rgba(0,0,0,0.2)";}} onMouseLeave={e=>{e.currentTarget.style.transitionDelay="0ms";e.currentTarget.style.borderColor=theme.border;e.currentTarget.style.transform="translateY(0) scale(1)";e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.1)";}}>
@@ -988,6 +989,10 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
   const[syncing,setSyncing]=useState(false);
   const syncAll=async()=>{setSyncing(true);try{const r=await api("/bookkeeping/sync-invoices",{method:"POST"});if(showToast)showToast((r.synced||0)+" sync, "+(r.reverse_synced||0)+" synced from cash book","success");doSearch();}catch(e){if(showToast)showToast(_t("sync_failed"),"error");}setSyncing(false);};
   useEffect(()=>{load(filter,filterCat,dateFrom,dateTo);},[refreshKey]);
+  useEffect(()=>{
+    const hint=typeof sessionStorage!=="undefined"&&sessionStorage.getItem("atx_invoices_status");
+    if(hint){setFilterStatus(hint);sessionStorage.removeItem("atx_invoices_status");}
+  },[]);
   const del=async(id)=>{
     if(_isActing){if(showToast)showToast(_readOnlyTip,"info");return;}
     if(!confirm(_t("delete_invoice")))return;
