@@ -1147,6 +1147,15 @@ def api_config():
 # --- AutoTax Watcher (desktop agent) update channel ---
 # tools/autotax_watcher/updater.py polls this every startup. Values come
 # from env so a release can be cut without redeploying the API.
+_WATCHER_DEFAULT_VERSION = "2.2.0"
+_WATCHER_RELEASES_BASE = "https://github.com/hanalex122-eng/autotax-public/releases/download"
+
+
+def _watcher_default_download_url(version: str) -> str:
+    """Gercek release pattern'i: tag=v{version}, asset=AutoTaxWatcher-Setup-{version}.exe."""
+    return f"{_WATCHER_RELEASES_BASE}/v{version}/AutoTaxWatcher-Setup-{version}.exe"
+
+
 @app.get("/watcher/download")
 def watcher_download():
     """Direkt indirme — landing'deki 'Indir' butonu bunu cagirir.
@@ -1154,12 +1163,8 @@ def watcher_download():
     Boylece URL degisirse kullaniciya yansimaz (autotax.cloud/watcher/download stabil).
     """
     from fastapi.responses import RedirectResponse
-    version = os.environ.get("WATCHER_LATEST_VERSION", "2.1.0").strip()
-    default_dl = (
-        "https://github.com/hanalex122-eng/autotax-public/releases/download/"
-        f"watcher-v{version}/AutoTaxWatcher-Setup-{version}.exe"
-    )
-    url = (os.environ.get("WATCHER_DOWNLOAD_URL") or default_dl).strip()
+    version = os.environ.get("WATCHER_LATEST_VERSION", _WATCHER_DEFAULT_VERSION).strip()
+    url = (os.environ.get("WATCHER_DOWNLOAD_URL") or _watcher_default_download_url(version)).strip()
     return RedirectResponse(url=url, status_code=302)
 
 
@@ -1167,18 +1172,16 @@ def watcher_download():
 def watcher_version():
     """Latest desktop watcher version + download URL.
 
-    Defaults derive a working direct-download URL from WATCHER_LATEST_VERSION,
-    so even if WATCHER_DOWNLOAD_URL is forgotten the link still resolves to
-    the EXE asset. Override WATCHER_DOWNLOAD_URL for a CDN or custom mirror.
+    Default'lar gerçek GitHub release pattern'iyle eslesir
+    (tag=v{version}, asset=AutoTaxWatcher-Setup-{version}.exe).
+    Env yoksa bile auto-update sorunsuz çalisir; override icin
+    WATCHER_LATEST_VERSION / WATCHER_DOWNLOAD_URL ekleyin.
     """
-    version = os.environ.get("WATCHER_LATEST_VERSION", "2.0.0").strip()
-    default_dl = (
-        "https://github.com/hanalex122-eng/autotax-public/releases/download/"
-        f"watcher-v{version}/AutoTaxWatcher.exe"
-    )
+    version = os.environ.get("WATCHER_LATEST_VERSION", _WATCHER_DEFAULT_VERSION).strip()
+    url = (os.environ.get("WATCHER_DOWNLOAD_URL") or _watcher_default_download_url(version)).strip()
     return {
         "version": version,
-        "download_url": (os.environ.get("WATCHER_DOWNLOAD_URL") or default_dl).strip(),
+        "download_url": url,
         "mandatory": os.environ.get("WATCHER_MANDATORY", "0") == "1",
         "notes": os.environ.get("WATCHER_RELEASE_NOTES", ""),
         "sha256": os.environ.get("WATCHER_SHA256", ""),
