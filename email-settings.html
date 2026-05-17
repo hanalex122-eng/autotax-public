@@ -253,7 +253,9 @@ async function sync(allMode) {
   try {
     const url = "/email/sync" + (allMode ? "?all=1" : "");
     const d = await apiCall(url, { method: "POST" });
-    if (d.message && (d.processed || 0) === 0) {
+    if (d.background) {
+      show("🔍 " + d.message, "info");
+    } else if (d.message && (d.processed || 0) === 0) {
       show(d.message, "info");
     } else {
       const scanned = d.scanned != null ? (" · " + d.scanned + " Mails gescannt") : "";

@@ -5130,11 +5130,31 @@ async def email_sync(request: Request, user: dict = Depends(get_current_user)):
     """Pull inbox messages, process PDF/XML attachments into invoices.
 
     ?all=1 -> tum mesajlari (read + unread, son 200 tane) tara,
-    SEEN bayragini degistirme. Duplicate protection file hash uzerinden.
+    SEEN bayragini degistirme. OCR yavas oldugu icin asyncio.create_task ile
+    arka plana atilir; endpoint hemen doner. Kullanici Belege sayfasinda
+    sonuclari gorur. Duplicate protection file hash uzerinden.
     """
+    import asyncio as _asyncio
     all_flag = request.query_params.get("all", "").lower() in ("1", "true", "yes")
     from autotax.email_sync import sync_user_inbox
-    return await sync_user_inbox(user["sub"], all_messages=all_flag)
+
+    if all_flag:
+        async def _bg_run():
+            try:
+                r = await sync_user_inbox(user["sub"], all_messages=True)
+                logger.info("Background all-mail-sync done user=%s: %s", user["sub"], r)
+            except Exception:
+                logger.exception("Background all-mail-sync failed user=%s", user["sub"])
+        _asyncio.create_task(_bg_run())
+        return {
+            "background": True,
+            "processed": 0,
+            "skipped": 0,
+            "errors": 0,
+            "message": "🔍 Tiefen-Scan im Hintergrund gestartet — bis zu 10 Min. Belege erscheinen automatisch, du kannst die Seite verlassen.",
+        }
+
+    return await sync_user_inbox(user["sub"], all_messages=False)
 
 
 @app.post("/email/test")
