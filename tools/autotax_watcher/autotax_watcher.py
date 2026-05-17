@@ -162,6 +162,13 @@ class Config:
     auto_start: bool = True  # Windows başlangıcında otomatik aç (default açık)
     merge_multi_page: bool = True  # scan_001/scan_002 → tek PDF merge
     merge_idle_seconds: int = 10  # son sayfa yazildiktan sonra bekleme suresi
+    hot_folder_routing: bool = True  # watch/expense/, watch/income/ subfolder routing
+    routing_map: dict[str, str] = field(default_factory=lambda: {
+        "expense": "expense",
+        "income": "income",
+        "ausgabe": "expense",
+        "einnahme": "income",
+    })
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -311,8 +318,10 @@ class Uploader:
         self.cfg = cfg
         self.auth = auth
 
-    def upload(self, file_path: Path) -> tuple[str, str]:
+    def upload(self, file_path: Path, invoice_type: str | None = None) -> tuple[str, str]:
         """Dosyayı yükle. Dönüş: (status, message).
+
+        invoice_type None ise config default kullanilir (hot-folder routing icin override).
 
         status değerleri:
           - "ok"        → başarılı
@@ -321,7 +330,7 @@ class Uploader:
           - "fail"      → kalıcı hata (400 / 415 / dosya bozuk) — Failed/'e taşı
         """
         url = self.cfg.api_url.rstrip("/") + "/invoices/upload"
-        params = {"invoice_type": self.cfg.invoice_type or "expense"}
+        params = {"invoice_type": invoice_type or self.cfg.invoice_type or "expense"}
 
         for attempt in range(MAX_429_RETRIES + 1):
             headers = {"Authorization": f"Bearer {self.cfg.api_token}"}
@@ -445,16 +454,34 @@ class Watcher:
     def _scan(self, watch: Path) -> None:
         if not watch.exists() or not watch.is_dir():
             return
-        processed = watch / self.cfg.processed_subfolder
-        failed = watch / self.cfg.failed_subfolder
+        # Root klasor: config default invoice_type
+        self._scan_dir(watch, watch, self.cfg.invoice_type or "expense")
+        # Hot-folder routing: alt klasor adina gore farkli type
+        if self.cfg.hot_folder_routing:
+            reserved = {self.cfg.processed_subfolder, self.cfg.failed_subfolder}
+            for folder_name, inv_type in self.cfg.routing_map.items():
+                if folder_name in reserved:
+                    continue
+                sub = watch / folder_name
+                if sub.exists() and sub.is_dir():
+                    self._scan_dir(sub, watch, inv_type)
+
+    def _scan_dir(self, scan_dir: Path, watch_root: Path, invoice_type: str) -> None:
+        """Tek klasoru tarayip dosyalari verilen invoice_type ile isle.
+
+        Uploaded/Failed her zaman watch_root altina yazilir — hot-folder
+        subfolder'larina degil — kullanici hepsini tek yerde gorur.
+        """
+        processed = watch_root / self.cfg.processed_subfolder
+        failed = watch_root / self.cfg.failed_subfolder
 
         stable_files: list[Path] = []
-        for entry in sorted(watch.iterdir()):
+        for entry in sorted(scan_dir.iterdir()):
             if not entry.is_file():
                 continue
             if entry.suffix.lower() not in SUPPORTED_EXTS:
                 continue
-            if entry.parent != watch:  # alt klasör (Uploaded/Failed) atla
+            if entry.parent != scan_dir:
                 continue
             if not self._is_stable(entry):
                 if str(entry) not in self._seen_unstable:
@@ -478,7 +505,7 @@ class Watcher:
                     base_name, len(pages), self.cfg.merge_idle_seconds,
                 )
                 continue
-            output = watch / f"{base_name}.pdf"
+            output = scan_dir / f"{base_name}.pdf"
             merged = _merge_pdfs(pages, output)
             if merged:
                 logging.info("PDF Merge: %d sayfa -> %s", len(pages), merged.name)
@@ -488,14 +515,14 @@ class Watcher:
                         p.unlink()
                     except OSError as e:
                         logging.warning("Sayfa silinemedi (%s): %s", e, p.name)
-                self._process(merged, processed, failed)
+                self._process(merged, processed, failed, invoice_type)
             else:
                 # Merge basarisiz -> sayfalari ayri ayri yukle (fallback)
                 for p in pages:
-                    self._process(p, processed, failed)
+                    self._process(p, processed, failed, invoice_type)
 
         for entry in singles:
-            self._process(entry, processed, failed)
+            self._process(entry, processed, failed, invoice_type)
 
     def _partition_pdf_groups(
         self, files: list[Path]
@@ -529,12 +556,13 @@ class Watcher:
                 singles.extend(p for _, p in items)
         return result, singles
 
-    def _process(self, file_path: Path, processed: Path, failed: Path) -> None:
-        logging.info("Yükleniyor: %s", file_path.name)
-        status, msg = self.uploader.upload(file_path)
+    def _process(self, file_path: Path, processed: Path, failed: Path, invoice_type: str | None = None) -> None:
+        eff_type = invoice_type or self.cfg.invoice_type or "expense"
+        logging.info("Yükleniyor: %s (type=%s)", file_path.name, eff_type)
+        status, msg = self.uploader.upload(file_path, invoice_type=eff_type)
         if status == "ok":
             logging.info("  ✓ %s", msg)
-            _tray_notify("Fatura yüklendi", file_path.name)
+            _tray_notify("Fatura yüklendi", f"{file_path.name} ({eff_type})")
             self._dispose_success(file_path, processed)
         elif status == "duplicate":
             logging.info("  ↻ %s", msg)
@@ -547,6 +575,14 @@ class Watcher:
             logging.error("  ✗ %s", msg)
             _tray_notify("Yükleme başarısız", f"{file_path.name}\n{msg}", force=True)
             self._move(file_path, failed)
+
+    def _detect_invoice_type(self, file_path: Path) -> str:
+        """Hot-folder routing: dosyanin parent klasor adina gore type sec."""
+        if self.cfg.hot_folder_routing:
+            parent_name = file_path.parent.name
+            if parent_name in self.cfg.routing_map:
+                return self.cfg.routing_map[parent_name]
+        return self.cfg.invoice_type or "expense"
 
     def _dispose_success(self, file_path: Path, processed: Path) -> None:
         if self.cfg.delete_after_upload:
@@ -572,11 +608,12 @@ class Watcher:
                 continue
             processed = watch_root / self.cfg.processed_subfolder
             failed = watch_root / self.cfg.failed_subfolder
-            status, msg = self.uploader.upload(file_path)
+            inv_type = self._detect_invoice_type(file_path)
+            status, msg = self.uploader.upload(file_path, invoice_type=inv_type)
             if status in ("ok", "duplicate"):
-                logging.info("Kuyruktan başarılı: %s — %s", file_path.name, msg)
+                logging.info("Kuyruktan başarılı: %s — %s (type=%s)", file_path.name, msg, inv_type)
                 if status == "ok":
-                    _tray_notify("Fatura yüklendi", f"{file_path.name} (kuyruktan)")
+                    _tray_notify("Fatura yüklendi", f"{file_path.name} ({inv_type}, kuyruktan)")
                 self.queue.remove(path_str)
                 self._dispose_success(file_path, processed)
             elif status == "fail":
