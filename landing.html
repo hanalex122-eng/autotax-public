@@ -812,19 +812,31 @@ footer .links a:hover { color:var(--text); }
         <div class="popular-badge" data-i18n="popular_badge">⭐ BELIEBTESTE WAHL</div>
         <div class="price-name">AI Steuer</div>
         <div class="price-amount"><span class="cur">€</span>89<span class="per" data-i18n="per_month">/Monat</span></div>
-        <div class="price-sub" data-i18n="price_ai_sub">Wie ein KI-Steuerberater — rund um die Uhr.</div>
+        <div class="price-sub" data-i18n="price_ai_sub">Für aktive Selbstständige & kleine Unternehmen.</div>
         <ul class="price-features">
-          <li data-i18n="pf_ai_1">Unbegrenzt Belege</li>
-          <li data-i18n="pf_ai_2"><strong>Steuerlogik Engine</strong> (Bewirtung, AfA, ...)</li>
-          <li data-i18n="pf_ai_3"><strong>KI Jahresreview</strong> + EÜR PDF</li>
-          <li data-i18n="pf_ai_4"><strong>AI Steuerberater-Chat</strong> 24/7</li>
-          <li data-i18n="pf_ai_5"><strong>Vision OCR Fallback</strong> (Opus 4.7)</li>
-          <li data-i18n="pf_ai_6">Steuerberater-Zugang</li>
+          <li data-i18n="pf_ai_1">Bis zu 5.000 KI-analysierte Belege / Monat</li>
+          <li data-i18n="pf_ai_2">Erweiterbare Fair-Use Limits</li>
+          <li data-i18n="pf_ai_3"><strong>KI-Steuerlogik Engine</strong></li>
+          <li data-i18n="pf_ai_4"><strong>KI Jahresreview</strong> + EÜR PDF</li>
+          <li data-i18n="pf_ai_5"><strong>AI Steuerberater-Chat</strong></li>
+          <li data-i18n="pf_ai_6"><strong>Vision OCR Fallback</strong> (Opus 4.7)</li>
+          <li data-i18n="pf_ai_7">Wiederkehrende Kosten</li>
+          <li data-i18n="pf_ai_8">DATEV + Steuerberater-Zugang</li>
+          <li data-i18n="pf_ai_9">Priorisierte KI-Verarbeitung</li>
         </ul>
         <a href="/app?action=register" class="btn btn-primary" data-i18n="cta_trial">Kostenlos testen</a>
+        <div style="margin-top:10px;font-size:10.5px;color:var(--text-dim);text-align:center;" data-i18n="fair_use_note">🛡 Fair-Use Schutz gegen Bot- und Massen-Uploads</div>
       </div>
     </div>
     <p style="font-size:12px;color:var(--text-dim);margin-top:24px;" data-i18n="pricing_note">+ €19/Monat Steuerberater-Add-on · Jährliche Zahlung 2 Monate gratis</p>
+    <div style="margin-top:28px;padding:18px 24px;max-width:680px;margin-left:auto;margin-right:auto;background:linear-gradient(135deg,rgba(139,92,246,0.06),rgba(99,102,241,0.03));border:1px solid rgba(139,92,246,0.25);border-radius:14px;display:flex;align-items:center;gap:14px;text-align:left;flex-wrap:wrap;">
+      <div style="font-size:24px;">🏢</div>
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px;" data-i18n="enterprise_title">Enterprise & Steuerberater-Kanzleien</div>
+        <div style="font-size:12px;color:var(--text-dim);line-height:1.5;" data-i18n="enterprise_sub">Für größere Kanzleien oder Teams: individuelle Enterprise-Limits möglich. Multi-User-Verwaltung, SLA, dedizierter Support.</div>
+      </div>
+      <a href="mailto:enterprise@autotax.cloud" class="btn btn-glass" style="font-size:12px;padding:8px 14px;" data-i18n="enterprise_cta">Kontakt aufnehmen</a>
+    </div>
   </div>
 </section>
 
@@ -951,14 +963,21 @@ const i18n = {
     pf_pro_1:"1.500 Belege / Monat", pf_pro_2:"Scanner Watcher Agent",
     pf_pro_3:"KI-Analyse + Kategorisierung", pf_pro_4:"Wiederkehrende Rechnungen", pf_pro_5:"Premium Support",
     popular_badge:"⭐ BELIEBTESTE WAHL",
-    price_ai_sub:"Wie ein KI-Steuerberater — rund um die Uhr.",
-    pf_ai_1:"Unbegrenzt Belege",
-    pf_ai_2:"<strong>Steuerlogik Engine</strong> (Bewirtung, AfA, ...)",
-    pf_ai_3:"<strong>KI Jahresreview</strong> + EÜR PDF",
-    pf_ai_4:"<strong>AI Steuerberater-Chat</strong> 24/7",
-    pf_ai_5:"<strong>Vision OCR Fallback</strong> (Opus 4.7)",
-    pf_ai_6:"Steuerberater-Zugang",
+    price_ai_sub:"Für aktive Selbstständige & kleine Unternehmen.",
+    pf_ai_1:"Bis zu 5.000 KI-analysierte Belege / Monat",
+    pf_ai_2:"Erweiterbare Fair-Use Limits",
+    pf_ai_3:"<strong>KI-Steuerlogik Engine</strong>",
+    pf_ai_4:"<strong>KI Jahresreview</strong> + EÜR PDF",
+    pf_ai_5:"<strong>AI Steuerberater-Chat</strong>",
+    pf_ai_6:"<strong>Vision OCR Fallback</strong> (Opus 4.7)",
+    pf_ai_7:"Wiederkehrende Kosten",
+    pf_ai_8:"DATEV + Steuerberater-Zugang",
+    pf_ai_9:"Priorisierte KI-Verarbeitung",
+    fair_use_note:"🛡 Fair-Use Schutz gegen Bot- und Massen-Uploads",
     pricing_note:"+ €19/Monat Steuerberater-Add-on · Jährliche Zahlung 2 Monate gratis",
+    enterprise_title:"Enterprise & Steuerberater-Kanzleien",
+    enterprise_sub:"Für größere Kanzleien oder Teams: individuelle Enterprise-Limits möglich. Multi-User-Verwaltung, SLA, dedizierter Support.",
+    enterprise_cta:"Kontakt aufnehmen",
     final_t1:"Konzentrieren Sie sich auf Ihr Business.", final_t2:"Nicht auf Papierkram.",
     final_p:"AutoTax.Cloud erledigt den Rest. 14 Tage kostenlos. Keine Verpflichtungen.",
     final_small:"Keine Kreditkarte erforderlich · Jederzeit kündbar",
@@ -1060,14 +1079,21 @@ const i18n = {
     pf_pro_1:"1,500 receipts / month", pf_pro_2:"Scanner Watcher Agent",
     pf_pro_3:"AI analysis + categorization", pf_pro_4:"Recurring invoices", pf_pro_5:"Premium support",
     popular_badge:"⭐ MOST POPULAR",
-    price_ai_sub:"Like an AI tax advisor — around the clock.",
-    pf_ai_1:"Unlimited receipts",
-    pf_ai_2:"<strong>Tax Logic Engine</strong> (entertainment, AfA, ...)",
-    pf_ai_3:"<strong>AI yearly review</strong> + EÜR PDF",
-    pf_ai_4:"<strong>AI tax advisor chat</strong> 24/7",
-    pf_ai_5:"<strong>Vision OCR fallback</strong> (Opus 4.7)",
-    pf_ai_6:"Tax advisor access",
+    price_ai_sub:"For active self-employed & small businesses.",
+    pf_ai_1:"Up to 5,000 AI-analyzed receipts / month",
+    pf_ai_2:"Extendable fair-use limits",
+    pf_ai_3:"<strong>AI Tax Logic Engine</strong>",
+    pf_ai_4:"<strong>AI yearly review</strong> + EÜR PDF",
+    pf_ai_5:"<strong>AI tax advisor chat</strong>",
+    pf_ai_6:"<strong>Vision OCR fallback</strong> (Opus 4.7)",
+    pf_ai_7:"Recurring expenses",
+    pf_ai_8:"DATEV + tax advisor access",
+    pf_ai_9:"Priority AI processing",
+    fair_use_note:"🛡 Fair-use protection against bot & mass uploads",
     pricing_note:"+ €19/month tax-advisor add-on · Annual billing 2 months free",
+    enterprise_title:"Enterprise & tax advisor offices",
+    enterprise_sub:"For larger firms or teams: individual enterprise limits available. Multi-user management, SLA, dedicated support.",
+    enterprise_cta:"Get in touch",
     final_t1:"Focus on your business.", final_t2:"Not on paperwork.",
     final_p:"AutoTax.Cloud does the rest. 14 days free. No commitment.",
     final_small:"No credit card required · Cancel anytime",
@@ -1169,14 +1195,21 @@ const i18n = {
     pf_pro_1:"Aylık 1.500 fatura", pf_pro_2:"Scanner Watcher Ajan",
     pf_pro_3:"KI analizi + kategorize", pf_pro_4:"Tekrarlayan faturalar", pf_pro_5:"Premium destek",
     popular_badge:"⭐ EN POPÜLER",
-    price_ai_sub:"7/24 KI mali müşavir gibi.",
-    pf_ai_1:"Sınırsız fatura",
-    pf_ai_2:"<strong>Vergi Mantığı Motoru</strong> (Bewirtung, AfA, ...)",
-    pf_ai_3:"<strong>KI Yıllık İnceleme</strong> + EÜR PDF",
-    pf_ai_4:"<strong>AI Müşavir Chat</strong> 24/7",
-    pf_ai_5:"<strong>Vision OCR Fallback</strong> (Opus 4.7)",
-    pf_ai_6:"Müşavir erişimi",
+    price_ai_sub:"Aktif serbest çalışanlar ve küçük işletmeler için.",
+    pf_ai_1:"Aylık 5.000 KI ile analiz edilen fatura",
+    pf_ai_2:"Genişletilebilir Fair-Use limitleri",
+    pf_ai_3:"<strong>KI Vergi Mantığı Motoru</strong>",
+    pf_ai_4:"<strong>KI Yıllık İnceleme</strong> + EÜR PDF",
+    pf_ai_5:"<strong>AI Müşavir Chat</strong>",
+    pf_ai_6:"<strong>Vision OCR Fallback</strong> (Opus 4.7)",
+    pf_ai_7:"Tekrarlayan giderler",
+    pf_ai_8:"DATEV + Müşavir erişimi",
+    pf_ai_9:"Öncelikli KI işleme",
+    fair_use_note:"🛡 Bot ve toplu yüklemelere karşı Fair-Use koruması",
     pricing_note:"+ €19/ay Müşavir eklentisi · Yıllık ödeme 2 ay bedava",
+    enterprise_title:"Enterprise ve Müşavir Ofisleri",
+    enterprise_sub:"Büyük ofisler veya ekipler için: özel enterprise limitleri mümkün. Çoklu kullanıcı yönetimi, SLA, özel destek.",
+    enterprise_cta:"İletişime geçin",
     final_t1:"İşinize odaklanın.", final_t2:"Evrak işine değil.",
     final_p:"AutoTax.Cloud gerisini halleder. 14 gün ücretsiz. Taahhütsüz.",
     final_small:"Kredi kartı gerekmez · İstediğiniz zaman iptal",
