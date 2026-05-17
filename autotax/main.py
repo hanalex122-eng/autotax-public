@@ -277,9 +277,9 @@ async def security_guard(request, call_next):
 #     All paid plans still feel unlimited to humans (hundreds/day capacity),
 #     but the caps block scripted bulk abuse that would rack up OCR.space
 #     and AI API charges for the operator.
-_DAILY_CAP = {"free": 25, "early": 100, "pro": 1000}   # uploads per user per 24h
-_MINUTE_CAP = {"free": 10, "early": 20, "pro": 30}     # uploads per user per 60s
-_CHAT_DAILY_CAP = {"free": 10, "early": 30, "pro": 100}
+_DAILY_CAP = {"free": 25, "early": 100, "starter": 250, "pro": 1000, "ai_steuer": 5000, "premium": 10000}   # uploads per user per 24h
+_MINUTE_CAP = {"free": 10, "early": 20, "starter": 25, "pro": 30, "ai_steuer": 60, "premium": 100}     # uploads per user per 60s
+_CHAT_DAILY_CAP = {"free": 10, "early": 30, "starter": 50, "pro": 100, "ai_steuer": 500, "premium": 1000}
 
 _user_window: dict[tuple[str, int], list[float]] = {}
 
@@ -348,7 +348,7 @@ def _check_disk_quota(user_id: int, new_file_size: int) -> tuple[bool, int, int]
         user = db.query(User).filter(User.id == user_id).first()
         plan = user.plan if user and user.plan else "free"
         # Plan-based quotas (MB)
-        quotas = {"free": 100, "early": 1000, "pro": 10000}
+        quotas = {"free": 100, "early": 1000, "starter": 2000, "pro": 10000, "ai_steuer": 50000, "premium": 100000}
         quota_mb = quotas.get(plan, 100)
         quota_bytes = quota_mb * 1024 * 1024
         # Sum current file_data sizes
@@ -1441,7 +1441,7 @@ def admin_page():
 </div>
 
 <div class="toolbar">
-  <input id="searchInput" placeholder="Email ara (free/early/pro yazarsan plan filtreler)..." style="flex:1;min-width:240px"/>
+  <input id="searchInput" placeholder="Email ara (free/starter/pro/ai_steuer yazarsan plan filtreler)..." style="flex:1;min-width:240px"/>
   <select id="planFilter" onchange="loadUsers()">
     <option value="">Tum planlar</option>
     <option value="free">Sadece Free</option>
@@ -1572,7 +1572,7 @@ async function loadStats() {
       <div class="card acc"><div class="label">Aylik Tahmini Gelir</div><div class="val">€${s.monthly_revenue_estimate_eur}</div><div class="small" style="margin-top:4px">admin haric</div></div>
       <div class="card"><div class="label">Toplam Fis</div><div class="val">${s.total_invoices}</div></div>
       <div class="card warn"><div class="label">Son 7 Gun Yeni</div><div class="val">${s.new_users_7d}</div></div>
-      <div class="card"><div class="label">Free / Early / Pro</div><div class="val" style="font-size:18px">${s.users_by_plan.free} / ${s.users_by_plan.early} / ${s.users_by_plan.pro}</div></div>
+      <div class="card"><div class="label">Free / Starter / Pro / 🧠 AI</div><div class="val" style="font-size:16px">${s.users_by_plan.free||0} / ${s.users_by_plan.starter||0} / ${s.users_by_plan.pro||0} / ${s.users_by_plan.ai_steuer||0}</div></div>
       <div class="card"><div class="label">Cloud Add-on</div><div class="val">${s.cloud_addon_users}</div></div>
     `;
   } catch (e) { console.error("stats", e); }
@@ -1582,8 +1582,8 @@ async function loadUsers() {
   try {
     let search = document.getElementById("searchInput").value.trim();
     let plan = document.getElementById("planFilter").value;
-    // Smart: 'free' / 'early' / 'pro' yazinca otomatik plan filter'a yonlendir
-    const smartPlan = ["free", "early", "pro"].find(p => p === search.toLowerCase());
+    // Smart: plan adi yazinca otomatik plan filter'a yonlendir
+    const smartPlan = ["free", "early", "starter", "pro", "ai_steuer", "premium"].find(p => p === search.toLowerCase());
     if (smartPlan && !plan) {
       plan = smartPlan;
       search = "";
@@ -1616,9 +1616,12 @@ async function loadUsers() {
                }
                <br>
                <select onchange="changePlan(${u.id}, this.value, this)" style="margin-top:4px">
-                 <option value="free" ${u.plan==='free'?'selected':''}>Free</option>
-                 <option value="early" ${u.plan==='early'?'selected':''}>Early €10</option>
-                 <option value="pro" ${u.plan==='pro'?'selected':''}>Pro €20</option>
+                 <option value="free" ${u.plan==='free'?'selected':''}>Free €0</option>
+                 <option value="early" ${u.plan==='early'?'selected':''}>Early €10 (legacy)</option>
+                 <option value="starter" ${u.plan==='starter'?'selected':''}>Starter €15</option>
+                 <option value="pro" ${u.plan==='pro'?'selected':''}>Pro €39</option>
+                 <option value="ai_steuer" ${u.plan==='ai_steuer'?'selected':''}>🧠 AI Steuer €89</option>
+                 <option value="premium" ${u.plan==='premium'?'selected':''}>Premium</option>
                </select>`
           }
         </td>
@@ -1684,7 +1687,7 @@ async function delUser(uid, email) {
 }
 
 async function downloadInvoice(uid, currentPlan) {
-  const plan = prompt("Plan (free / early / pro):", currentPlan === "free" ? "pro" : currentPlan);
+  const plan = prompt("Plan (free / starter / pro / ai_steuer / premium):", currentPlan === "free" ? "ai_steuer" : currentPlan);
   if (!plan) return;
   const months = prompt("Kac ay icin? (1-12)", "1");
   if (!months) return;
@@ -2044,7 +2047,7 @@ def admin_stats(user: dict = Depends(get_current_user)):
         total_users = db.query(User).count()
         # Plan dagilimi — admin'leri haric tut
         users_by_plan = {}
-        for plan_id in ("free", "early", "pro"):
+        for plan_id in ("free", "early", "starter", "pro", "ai_steuer", "premium"):
             q = db.query(User).filter(User.plan == plan_id)
             if _admin_set:
                 q = q.filter(~User.email.in_(_admin_set))
@@ -2059,10 +2062,13 @@ def admin_stats(user: dict = Depends(get_current_user)):
         ).count()
 
         # Aylik gelir tahmini (Stripe gelmeden once el ile takip)
-        # Ucretler: free=0, early=10, pro=20, cloud=+5
+        # Yeni fiyatlandirma: free=0, early=10 (legacy), starter=15, pro=39, ai_steuer=89, premium=149
         revenue_estimate = (
             users_by_plan.get("early", 0) * 10
-            + users_by_plan.get("pro", 0) * 20
+            + users_by_plan.get("starter", 0) * 15
+            + users_by_plan.get("pro", 0) * 39
+            + users_by_plan.get("ai_steuer", 0) * 89
+            + users_by_plan.get("premium", 0) * 149
             + cloud_users * 5
         )
 
@@ -2900,7 +2906,7 @@ def admin_subscription_invoice(
     except ImportError:
         err(501, "PDF generation not available")
 
-    PLAN_PRICES = {"free": 0, "early": 10, "pro": 20}
+    PLAN_PRICES = {"free": 0, "early": 10, "starter": 15, "pro": 39, "ai_steuer": 89, "premium": 149}
     CLOUD_PRICE = 5
 
     db = SessionLocal()
@@ -2987,7 +2993,7 @@ def admin_subscription_invoice(
         c.setFont("Helvetica", 10)
         c.setFillColor(HexColor("#0f172a"))
         # Plan line
-        plan_label = {"free": "Free", "early": "Early Adopter", "pro": "Pro"}.get(plan, plan)
+        plan_label = {"free": "Free", "early": "Early Adopter", "starter": "Starter", "pro": "Pro", "ai_steuer": "AI Steuer", "premium": "Premium"}.get(plan, plan)
         period = f"{months} Monat" if months == 1 else f"{months} Monate"
         y -= 0.7*cm
         c.drawString(2*cm, y, f"AutoTax-HUB {plan_label} ({period})")
@@ -5241,7 +5247,7 @@ def get_account_me(user: dict = Depends(get_current_user)):
             "email": u.email,
             "full_name": u.full_name or "",
             "plan": u.plan or "free",
-            "plan_name": {"free":"Free","early":"Early Adopter","pro":"Pro"}.get(u.plan or "free", "Free"),
+            "plan_name": {"free":"Free","early":"Early Adopter","starter":"Starter","pro":"Pro","ai_steuer":"AI Steuer","premium":"Premium"}.get(u.plan or "free", "Free"),
             "registered_at": u.registered_at.isoformat() if u.registered_at else "",
             "is_kleinunternehmer": getattr(u, 'is_kleinunternehmer', False),
             "has_cloud_addon": getattr(u, 'has_cloud_addon', False),
