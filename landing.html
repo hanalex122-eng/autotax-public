@@ -48,17 +48,17 @@ a { color:inherit; text-decoration:none; }
 }
 
 .navbar {
-  position:fixed; top:0; left:0; right:0; z-index:100; padding:14px 0;
-  background: rgba(11,16,32,0.6); backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  position:fixed; top:0; left:0; right:0; z-index:100; padding:20px 0;
+  background: rgba(11,16,32,0.5); backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   border-bottom:1px solid transparent;
   transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
 }
-.navbar.scrolled { padding:10px 0; background: rgba(11,16,32,0.85); border-bottom:1px solid var(--border); }
-.navbar-inner { display:flex; align-items:center; justify-content:space-between; gap:32px; }
-.logo { font-size:18px; font-weight:800; letter-spacing:-0.5px; display:flex; align-items:center; gap:8px; }
-.logo-icon { width:28px; height:28px; background: linear-gradient(135deg, var(--accent), var(--blue)); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; box-shadow: 0 4px 12px var(--accent-glow); }
-.nav-links { display:flex; gap:32px; }
+.navbar.scrolled { padding:14px 0; background: rgba(11,16,32,0.85); border-bottom:1px solid var(--border); }
+.navbar-inner { display:flex; align-items:center; justify-content:space-between; gap:40px; }
+.logo { font-size:20px; font-weight:800; letter-spacing:-0.5px; display:flex; align-items:center; gap:10px; }
+.logo-icon { width:34px; height:34px; background: linear-gradient(135deg, var(--accent), var(--blue)); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:17px; box-shadow: 0 6px 18px var(--accent-glow); }
+.nav-links { display:flex; gap:36px; }
 .nav-links a { font-size:14px; color:var(--text-muted); font-weight:500; position:relative; padding:4px 0; transition:color 0.2s; }
 .nav-links a::after { content:''; position:absolute; left:0; right:0; bottom:-2px; height:2px; background: linear-gradient(90deg, var(--accent), var(--blue)); transform:scaleX(0); transform-origin:left; transition: transform 0.3s cubic-bezier(0.4,0,0.2,1); }
 .nav-links a:hover { color:var(--text); }
@@ -96,6 +96,44 @@ section { position:relative; z-index:1; padding:120px 0; }
 .trust-row span { display:inline-flex; align-items:center; gap:6px; font-weight:500; }
 .trust-row .check { color: var(--green); font-size:14px; }
 .cta-row { display:flex; gap:12px; flex-wrap:wrap; }
+.social-proof { margin-top:32px; padding-top:24px; border-top:1px solid var(--border); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.social-proof .stars { font-size:16px; color:#facc15; letter-spacing:2px; }
+.social-proof .proof-text { font-size:13px; color:var(--text-muted); line-height:1.55; max-width:480px; }
+.social-proof .proof-text strong { color:var(--text); }
+
+/* Live mockup typing & Telegram popup */
+.mockup-live-status {
+  display:flex; align-items:center; gap:8px;
+  padding:8px 12px; background:rgba(139,92,246,0.08);
+  border:1px solid rgba(139,92,246,0.25); border-radius:8px;
+  margin-bottom:12px; font-size:11.5px; font-weight:600;
+}
+.mockup-live-status .live-dot {
+  width:8px; height:8px; border-radius:50%;
+  background:var(--accent); box-shadow:0 0 8px var(--accent);
+  animation:livePulse 1.5s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%,100% { transform:scale(1); opacity:1; }
+  50% { transform:scale(1.3); opacity:0.6; }
+}
+.live-text { color:var(--accent); }
+.tg-popup {
+  position:absolute; bottom:18px; right:18px;
+  padding:10px 14px; max-width:200px;
+  background:rgba(0,194,255,0.12); border:1px solid rgba(0,194,255,0.3);
+  border-radius:10px; backdrop-filter:blur(10px);
+  font-size:11px; color:var(--text); line-height:1.4;
+  transform:translateX(120%); opacity:0;
+  animation:tgSlide 10s ease-in-out infinite; animation-delay:3s;
+  box-shadow:0 8px 20px rgba(0,0,0,0.3);
+}
+.tg-popup-title { font-weight:700; color:#00c2ff; font-size:10px; letter-spacing:0.5px; margin-bottom:3px; }
+@keyframes tgSlide {
+  0% { transform:translateX(120%); opacity:0; }
+  8%,30% { transform:translateX(0); opacity:1; }
+  40%,100% { transform:translateX(120%); opacity:0; }
+}
 
 .dashboard-mockup { position:relative; border-radius:18px; overflow:hidden; border:1px solid var(--border-strong); background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%); backdrop-filter: blur(20px); box-shadow: 0 30px 80px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05); animation: floatY 6s ease-in-out infinite; padding:22px; }
 @keyframes floatY { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-10px); } }
@@ -130,10 +168,17 @@ section { position:relative; z-index:1; padding:120px 0; }
 
 .steuerlogik { text-align:center; }
 .ai-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:18px; margin-top:48px; }
-.ai-card { padding:28px 24px; border-radius:18px; background: var(--surface); border:1px solid var(--border); text-align:left; position:relative; overflow:hidden; transition: all 0.3s; }
-.ai-card::before { content:''; position:absolute; inset:0; background: linear-gradient(135deg, transparent, var(--accent-color, var(--accent))); opacity:0; transition:opacity 0.3s; mix-blend-mode:overlay; pointer-events:none; }
-.ai-card:hover { transform:translateY(-4px); border-color: var(--accent-color, var(--accent)); }
+.ai-card { padding:28px 24px; border-radius:18px; background: var(--surface); border:1px solid var(--border); text-align:left; position:relative; overflow:hidden; transition: all 0.4s cubic-bezier(0.4,0,0.2,1); }
+.ai-card::before { content:''; position:absolute; inset:0; background: linear-gradient(135deg, transparent, var(--accent-color, var(--accent))); opacity:0; transition:opacity 0.3s; mix-blend-mode:overlay; pointer-events:none; z-index:1; }
+.ai-card::after {
+  content:''; position:absolute; top:0; left:-100%; width:60%; height:100%;
+  background: linear-gradient(120deg, transparent, rgba(255,255,255,0.08), transparent);
+  transition: left 0.7s cubic-bezier(0.4,0,0.2,1); pointer-events:none; z-index:2;
+}
+.ai-card:hover { transform:translateY(-6px) scale(1.02); border-color: var(--accent-color, var(--accent)); box-shadow: 0 16px 40px rgba(0,0,0,0.3), 0 0 30px var(--accent-color, var(--accent-glow)); }
 .ai-card:hover::before { opacity:0.15; }
+.ai-card:hover::after { left:130%; }
+.ai-card > * { position:relative; z-index:3; }
 .ai-card-icon { font-size:32px; margin-bottom:14px; display:inline-block; }
 .ai-card-title { font-size:16px; font-weight:700; margin-bottom:6px; }
 .ai-card-text { font-size:13px; color:var(--text-muted); line-height:1.5; }
@@ -150,29 +195,81 @@ section { position:relative; z-index:1; padding:120px 0; }
 .how-result { margin-top:48px; padding:20px; font-size:18px; font-weight:700; background: linear-gradient(135deg, rgba(16,185,129,0.1), rgba(59,130,246,0.05)); border:1px solid rgba(16,185,129,0.3); border-radius:14px; max-width:600px; margin-left:auto; margin-right:auto; }
 .how-result .acc { color: var(--green); font-family:'JetBrains Mono'; }
 
-.demo { background: rgba(0,0,0,0.2); }
-.demo-grid { display:grid; grid-template-columns: 1fr 1fr; gap:40px; align-items:center; margin-top:48px; }
-.demo-receipt { padding:24px; border-radius:18px; background: #fff; color:#1a1a1a; box-shadow: 0 20px 60px rgba(0,0,0,0.5); transform: rotate(-2deg); position:relative; }
-.demo-receipt::before { content:''; position:absolute; top:-10px; right:20px; width:60px; height:20px; background:rgba(0,0,0,0.1); border-radius:0 0 8px 8px; }
-.receipt-logo { font-family:'JetBrains Mono'; font-size:22px; font-weight:900; letter-spacing:2px; color:#003399; text-align:center; margin-bottom:6px; }
-.receipt-addr { font-size:11px; color:#666; text-align:center; margin-bottom:14px; font-family:'JetBrains Mono'; }
-.receipt-line { display:flex; justify-content:space-between; font-size:12px; padding:4px 0; font-family:'JetBrains Mono'; }
-.receipt-line.sep { border-top:1px dashed #ccc; margin-top:8px; padding-top:8px; }
-.receipt-total { display:flex; justify-content:space-between; padding:10px 0; font-weight:700; font-size:14px; border-top:2px solid #1a1a1a; margin-top:8px; font-family:'JetBrains Mono'; }
-.demo-ai { display:flex; flex-direction:column; gap:14px; }
-.demo-ai-card { padding:16px 18px; border-radius:14px; background: var(--surface); border:1px solid var(--border); opacity:0; transform:translateY(20px); animation: demoFadeIn 0.6s ease-out forwards; }
-.demo-ai-card:nth-child(1) { animation-delay:0.5s; }
-.demo-ai-card:nth-child(2) { animation-delay:1.2s; }
-.demo-ai-card:nth-child(3) { animation-delay:1.9s; }
-@keyframes demoFadeIn { to { opacity:1; transform:translateY(0); } }
-.demo-ai-card.warn { border-color: rgba(245,158,11,0.4); background: linear-gradient(135deg, rgba(245,158,11,0.08), transparent); }
-.demo-ai-card.tip { border-color: rgba(59,130,246,0.4); background: linear-gradient(135deg, rgba(59,130,246,0.08), transparent); }
-.demo-ai-card.miss { border-color: rgba(239,68,68,0.4); background: linear-gradient(135deg, rgba(239,68,68,0.08), transparent); }
-.demo-ai-header { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; }
-.demo-ai-card.warn .demo-ai-header { color:var(--amber); }
-.demo-ai-card.tip .demo-ai-header { color:var(--blue); }
-.demo-ai-card.miss .demo-ai-header { color:#ef4444; }
-.demo-ai-text { font-size:14px; font-weight:500; }
+/* Enterprise AI Dashboard — replaces ALDI receipt */
+.enterprise-kpis { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; }
+.ent-kpi { padding:11px 13px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; }
+.ent-kpi-label { font-size:9.5px; color:var(--text-dim); font-weight:700; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:5px; }
+.ent-kpi-value { font-size:20px; font-weight:800; letter-spacing:-0.5px; line-height:1; }
+.ent-kpi-spark { font-size:10px; color:var(--text-dim); margin-top:4px; font-weight:600; }
+.ai-mini-feed { padding:12px 14px; background:rgba(0,0,0,0.25); border:1px solid var(--border); border-radius:10px; display:flex; flex-direction:column; gap:5px; margin-bottom:10px; }
+.ai-mini-row { font-size:11.5px; display:flex; align-items:center; gap:8px; color:var(--text-muted); opacity:0; transform:translateX(-10px); animation:miniFeedIn 0.5s cubic-bezier(0.4,0,0.2,1) forwards; }
+.ai-mini-row:nth-child(1) { animation-delay:0.6s; }
+.ai-mini-row:nth-child(2) { animation-delay:1.0s; }
+.ai-mini-row:nth-child(3) { animation-delay:1.4s; }
+.ai-mini-row:nth-child(4) { animation-delay:1.8s; }
+@keyframes miniFeedIn { to { opacity:1; transform:translateX(0); } }
+.ai-opus-badge { display:inline-flex; align-items:center; gap:6px; font-size:10px; color:var(--text-dim); padding:5px 10px; background:rgba(139,92,246,0.06); border:1px solid rgba(139,92,246,0.2); border-radius:20px; }
+.opus-dot { width:6px; height:6px; border-radius:50%; background:var(--accent); box-shadow:0 0 6px var(--accent); animation:livePulse 2s ease-in-out infinite; }
+
+/* Premium AI panels section (replaces old demo) */
+.aipanels { background: rgba(0,0,0,0.15); }
+.panels-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; margin-top:48px; }
+.ai-panel {
+  padding:20px 22px; border-radius:16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
+  border:1px solid var(--border); position:relative; overflow:hidden;
+  transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
+}
+.ai-panel:hover { border-color:var(--border-strong); transform:translateY(-3px); box-shadow:0 12px 30px rgba(0,0,0,0.3); }
+.ai-panel-header { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+.ai-panel-icon { width:34px; height:34px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
+.ai-panel-title { font-size:13px; font-weight:700; }
+.ai-panel-stat { font-size:22px; font-weight:800; font-family:'JetBrains Mono'; letter-spacing:-0.5px; margin-bottom:4px; }
+.ai-panel-sub { font-size:11.5px; color:var(--text-dim); line-height:1.4; }
+.ai-panel-tag { display:inline-block; margin-top:10px; padding:3px 9px; border-radius:6px; font-size:10px; font-weight:700; letter-spacing:0.4px; }
+.tag-green { background:rgba(16,185,129,0.12); color:var(--green); border:1px solid rgba(16,185,129,0.25); }
+.tag-blue { background:rgba(59,130,246,0.12); color:var(--blue); border:1px solid rgba(59,130,246,0.25); }
+.tag-amber { background:rgba(245,158,11,0.12); color:var(--amber); border:1px solid rgba(245,158,11,0.25); }
+.tag-purple { background:rgba(139,92,246,0.12); color:var(--accent); border:1px solid rgba(139,92,246,0.25); }
+
+/* AI Thinking Panel — main centerpiece */
+.ai-thinking {
+  margin-top:24px; padding:32px 36px;
+  border-radius:20px;
+  background: linear-gradient(135deg, rgba(139,92,246,0.08), rgba(99,102,241,0.04));
+  border:1px solid rgba(139,92,246,0.3);
+  position:relative; overflow:hidden;
+}
+.ai-thinking::before {
+  content:''; position:absolute; top:-50px; right:-50px;
+  width:200px; height:200px;
+  background: radial-gradient(circle, rgba(139,92,246,0.15), transparent 70%);
+  pointer-events:none;
+}
+.ai-thinking-head { display:flex; align-items:center; gap:14px; margin-bottom:20px; position:relative; }
+.ai-thinking-icon { width:48px; height:48px; border-radius:14px; background: linear-gradient(135deg, var(--accent), #6366f1); display:flex; align-items:center; justify-content:center; font-size:22px; box-shadow:0 8px 20px var(--accent-glow); }
+.ai-thinking-title { font-size:18px; font-weight:800; letter-spacing:-0.3px; }
+.ai-thinking-sub { font-size:12px; color:var(--text-dim); margin-top:2px; }
+.ai-thinking-checks { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px 24px; position:relative; }
+.ai-check-row { display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--text-muted); opacity:0; transform:translateX(-10px); animation: miniFeedIn 0.5s cubic-bezier(0.4,0,0.2,1) forwards; }
+.ai-check-row .ai-check-mark { width:20px; height:20px; border-radius:50%; background:rgba(16,185,129,0.15); color:var(--green); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:800; flex-shrink:0; }
+.ai-check-row:nth-child(1) { animation-delay:0.3s; }
+.ai-check-row:nth-child(2) { animation-delay:0.5s; }
+.ai-check-row:nth-child(3) { animation-delay:0.7s; }
+.ai-check-row:nth-child(4) { animation-delay:0.9s; }
+.ai-check-row:nth-child(5) { animation-delay:1.1s; }
+.ai-check-row:nth-child(6) { animation-delay:1.3s; }
+.ai-result-banner {
+  margin-top:24px; padding:18px 22px;
+  background: linear-gradient(135deg, rgba(16,185,129,0.1), rgba(59,130,246,0.05));
+  border:1px solid rgba(16,185,129,0.3); border-radius:14px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  position:relative;
+}
+.ai-result-text { font-size:13px; color:var(--text-muted); font-weight:600; }
+.ai-result-value { font-size:30px; font-weight:900; letter-spacing:-1px; font-family:'JetBrains Mono'; color:var(--green); }
+.ai-thinking-foot { margin-top:18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; position:relative; }
+.ai-thinking-disclaimer { font-size:11px; color:var(--text-dim); font-style:italic; }
 
 .jahres { background: radial-gradient(ellipse at 50% 50%, rgba(139,92,246,0.08), transparent 60%); }
 .jahres-mockup { margin-top:48px; padding:32px; border-radius:24px; background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)); border:1px solid var(--border-strong); box-shadow: 0 30px 80px rgba(0,0,0,0.4); }
@@ -233,8 +330,11 @@ footer { padding:40px 0; border-top:1px solid var(--border); text-align:center; 
 footer .links { display:flex; justify-content:center; gap:24px; margin-bottom:14px; flex-wrap:wrap; }
 footer .links a:hover { color:var(--text); }
 
-.reveal { opacity:0; transform:translateY(40px); transition: all 0.8s cubic-bezier(0.16,1,0.3,1); }
+.reveal { opacity:0; transform:translateY(40px); transition: opacity 0.7s cubic-bezier(0.16,1,0.3,1), transform 0.7s cubic-bezier(0.16,1,0.3,1); }
 .reveal.visible { opacity:1; transform:translateY(0); }
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
 
 @media (max-width: 900px) {
   .nav-links { display:none; }
@@ -293,8 +393,8 @@ footer .links a:hover { color:var(--text); }
   <div class="container hero-grid">
     <div class="hero-left">
       <span class="section-tag" data-i18n="hero_tag">✨ KI-Steuerlogik · Powered by Claude Opus 4.7</span>
-      <h1><span data-i18n="hero_t1">Lassen Sie KI Ihre</span> <span class="gradient" data-i18n="hero_t2">Buchhaltung und Steuern</span> <span data-i18n="hero_t3">erledigen.</span></h1>
-      <p class="lead" data-i18n="hero_lead">AutoTax.Cloud analysiert Ihre Belege, erkennt automatisch Steuerpotenziale und erstellt fertige EÜR-Unterlagen — vollautomatisch.</p>
+      <h1><span data-i18n="hero_t1">Deutschlands</span> <span class="gradient" data-i18n="hero_t2">intelligenteste KI-Steuerplattform</span> <span data-i18n="hero_t3">für Selbstständige.</span></h1>
+      <p class="lead" data-i18n="hero_lead">Automatische Steuerlogik, EÜR-Erstellung und KI-gestützte Steueroptimierung — entwickelt für Deutschland.</p>
       <div class="trust-row">
         <span><span class="check">✓</span> <span data-i18n="trust_dsgvo">DSGVO-konform</span></span>
         <span><span class="check">✓</span> <span data-i18n="trust_datev">DATEV-kompatibel</span></span>
@@ -304,6 +404,10 @@ footer .links a:hover { color:var(--text); }
         <a href="/app?action=register" class="btn btn-primary btn-large"><span data-i18n="cta_trial_long">✨ 14 Tage kostenlos testen</span></a>
         <a href="#demo" class="btn btn-glass btn-large"><span data-i18n="cta_demo">▶ Demo ansehen</span></a>
       </div>
+      <div class="social-proof">
+        <div class="stars">★★★★★</div>
+        <div class="proof-text" data-i18n="social_proof">Bereits getestet von Selbstständigen, Gastronomie & Dienstleistern in Deutschland. <strong>Spart bis zu 6 Stunden Buchhaltung pro Monat.</strong></div>
+      </div>
     </div>
     <div class="hero-right">
       <div class="dashboard-mockup">
@@ -311,29 +415,42 @@ footer .links a:hover { color:var(--text); }
           <div class="mockup-title" data-i18n="mockup_title">📊 Dashboard 2026</div>
           <div class="mockup-dots"><span></span><span></span><span></span></div>
         </div>
-        <div class="mockup-receipt">
-          <div class="mockup-receipt-icon">🍽️</div>
-          <div class="mockup-receipt-text">
-            <div class="mockup-vendor">Da Nico Restaurant</div>
-            <div class="mockup-amount">€89,40 · <span data-i18n="mockup_cat">Bewirtung</span></div>
-          </div>
-          <div class="mockup-status">AI ✓</div>
+        <div class="mockup-live-status">
+          <span class="live-dot"></span>
+          <span class="live-text" data-i18n="live_status">KI analysiert Ihre Steuerdaten…</span>
         </div>
-        <div class="ai-insight">
-          <div class="ai-insight-header">
-            <span class="ai-badge" data-i18n="ai_detected">KI ERKANNT</span>
-            <span style="font-size:11px;color:var(--text-dim);">Confidence 92%</span>
+        <div class="enterprise-kpis">
+          <div class="ent-kpi">
+            <div class="ent-kpi-label" data-i18n="ek_profit">Monatsgewinn</div>
+            <div class="ent-kpi-value mono"><span class="count-up" data-target="18420">€0</span></div>
+            <div class="ent-kpi-spark" style="color:var(--green)">+18% ▲</div>
           </div>
-          <div class="ai-insight-text" data-i18n="mockup_insight">Bewirtungsaufwendung — <strong>70% absetzbar</strong> (§4 Abs.5 EStG)</div>
+          <div class="ent-kpi">
+            <div class="ent-kpi-label" data-i18n="ek_potential">Steuerpotenzial</div>
+            <div class="ent-kpi-value mono" style="color:var(--accent)"><span class="count-up" data-target="3260">€0</span></div>
+            <div class="ent-kpi-spark" style="color:var(--accent)" data-i18n="ek_potential_s">erkannt</div>
+          </div>
+          <div class="ent-kpi">
+            <div class="ent-kpi-label" data-i18n="ek_open">Offene Rechnungen</div>
+            <div class="ent-kpi-value mono" style="color:var(--amber)">3</div>
+            <div class="ent-kpi-spark" data-i18n="ek_open_s">€2.150 ausstehend</div>
+          </div>
+          <div class="ent-kpi">
+            <div class="ent-kpi-label" data-i18n="ek_deadline">Nächste Frist</div>
+            <div class="ent-kpi-value mono" style="color:var(--blue)">12<span style="font-size:14px;opacity:0.7;margin-left:4px;" data-i18n="ek_days">Tage</span></div>
+            <div class="ent-kpi-spark" data-i18n="ek_deadline_s">UStVA Q1</div>
+          </div>
         </div>
-        <div class="mockup-chart">
-          <div class="bar" style="height:40%;animation-delay:0.3s"></div>
-          <div class="bar" style="height:65%;animation-delay:0.5s"></div>
-          <div class="bar" style="height:50%;animation-delay:0.7s"></div>
-          <div class="bar" style="height:80%;animation-delay:0.9s"></div>
-          <div class="bar" style="height:90%;animation-delay:1.1s"></div>
-          <div class="bar" style="height:75%;animation-delay:1.3s"></div>
-          <div class="bar" style="height:100%;animation-delay:1.5s"></div>
+        <div class="ai-mini-feed">
+          <div class="ai-mini-row"><span style="color:var(--green)">✓</span> <span data-i18n="ai_feed_1">248 Belege geprüft</span></div>
+          <div class="ai-mini-row"><span style="color:var(--green)">✓</span> <span data-i18n="ai_feed_2">Vorsteuer berechnet · €4.218</span></div>
+          <div class="ai-mini-row"><span style="color:var(--green)">✓</span> <span data-i18n="ai_feed_3">Privatanteil KFZ erkannt</span></div>
+          <div class="ai-mini-row"><span style="color:var(--amber)">⚠</span> <span data-i18n="ai_feed_4">Homeoffice-Pauschale fehlt</span></div>
+        </div>
+        <div class="ai-opus-badge"><span class="opus-dot"></span> Powered by Claude Opus 4.7</div>
+        <div class="tg-popup">
+          <div class="tg-popup-title">📱 Telegram</div>
+          <div data-i18n="tg_msg">EÜR Q1 bereit · €38.420 Gewinn</div>
         </div>
       </div>
     </div>
@@ -450,41 +567,98 @@ footer .links a:hover { color:var(--text); }
   </div>
 </section>
 
-<!-- DEMO -->
-<section class="demo reveal" id="demo">
+<!-- PREMIUM AI FINANCE DASHBOARD (replaces ALDI demo) -->
+<section class="aipanels reveal" id="demo">
   <div class="container">
-    <span class="section-tag" data-i18n="demo_tag">🎬 Live Demo</span>
-    <h2 class="section-title" data-i18n="demo_title">Sehen Sie die KI in Aktion.</h2>
-    <p class="section-sub" style="margin:0 auto;" data-i18n="demo_sub">Beispiel: ein ALDI-Beleg wird hochgeladen. Die KI prüft sofort.</p>
-    <div class="demo-grid">
-      <div class="demo-receipt">
-        <div class="receipt-logo">ALDI SÜD</div>
-        <div class="receipt-addr">Hauptstr. 47 · 60311 Frankfurt</div>
-        <div class="receipt-line"><span>BANANEN 1KG</span><span>1,29 €</span></div>
-        <div class="receipt-line"><span>MILCH 1L</span><span>0,99 €</span></div>
-        <div class="receipt-line"><span>BROT TOAST</span><span>2,19 €</span></div>
-        <div class="receipt-line"><span>SCHOKOLADE</span><span>1,49 €</span></div>
-        <div class="receipt-line sep"><span>NETTO</span><span>5,38 €</span></div>
-        <div class="receipt-line"><span>USt 7%</span><span>0,38 €</span></div>
-        <div class="receipt-total"><span>SUMME</span><span>5,76 €</span></div>
-        <div style="font-size:10px;color:#999;text-align:center;margin-top:10px;font-family:'JetBrains Mono';">12.05.2026 · 14:32 · BAR</div>
+    <span class="section-tag" data-i18n="panels_tag">🧠 AI Finance Dashboard</span>
+    <h2 class="section-title" data-i18n="panels_title">Mehr als OCR. Echte Steuerintelligenz.</h2>
+    <p class="section-sub" style="margin:0 auto;" data-i18n="panels_sub">Deutschlands erste KI-Plattform, die nicht nur Belege liest — sondern Steuerlogik versteht. Hier sehen Sie, was die KI für ein typisches Unternehmen erkennt.</p>
+
+    <!-- 6 Live AI Panels -->
+    <div class="panels-grid">
+      <div class="ai-panel">
+        <div class="ai-panel-header">
+          <div class="ai-panel-icon" style="background:rgba(245,158,11,0.15);">🏢</div>
+          <div><div class="ai-panel-title" data-i18n="panel1_t">Büro-Miete</div></div>
+        </div>
+        <div class="ai-panel-stat">€1.850 <span style="font-size:13px;color:var(--text-dim);font-weight:500;">/ Monat</span></div>
+        <div class="ai-panel-sub" data-i18n="panel1_s">Festkostenvertrag erkannt · Wiederkehrend gebucht</div>
+        <span class="ai-panel-tag tag-green">100% Betriebsausgabe</span>
       </div>
-      <div class="demo-ai">
-        <div class="demo-ai-card warn">
-          <div class="demo-ai-header"><span>⚠️</span> <span data-i18n="demo_card1_h">KI-Einschätzung</span></div>
-          <div class="demo-ai-text" data-i18n="demo_card1_t">Wahrscheinlich <strong>privater Lebensmitteleinkauf</strong>.</div>
+      <div class="ai-panel">
+        <div class="ai-panel-header">
+          <div class="ai-panel-icon" style="background:rgba(59,130,246,0.15);">🚗</div>
+          <div><div class="ai-panel-title" data-i18n="panel2_t">Firmenfahrzeug</div></div>
         </div>
-        <div class="demo-ai-card miss">
-          <div class="demo-ai-header"><span>💡</span> <span data-i18n="demo_card2_h">Warum?</span></div>
-          <div class="demo-ai-text" data-i18n="demo_card2_t">Beleg enthält Bananen, Milch, Schokolade — kein Bewirtungskontext.</div>
+        <div class="ai-panel-stat" style="color:var(--blue)">€472 <span style="font-size:13px;color:var(--text-dim);font-weight:500;">/ Monat</span></div>
+        <div class="ai-panel-sub" data-i18n="panel2_s">Privatanteil erkannt — KI berechnet 1%-Regelung automatisch</div>
+        <span class="ai-panel-tag tag-blue">1%-Regel aktiv</span>
+      </div>
+      <div class="ai-panel">
+        <div class="ai-panel-header">
+          <div class="ai-panel-icon" style="background:rgba(236,72,153,0.15);">👥</div>
+          <div><div class="ai-panel-title" data-i18n="panel3_t">Mitarbeiterkosten</div></div>
         </div>
-        <div class="demo-ai-card tip">
-          <div class="demo-ai-header"><span>🎯</span> <span data-i18n="demo_card3_h">Empfehlung</span></div>
-          <div class="demo-ai-text" data-i18n="demo_card3_t">Falls für Kundenbewirtung: Anlass & Teilnehmer dokumentieren — dann 70% absetzbar.</div>
+        <div class="ai-panel-stat" style="color:var(--pink)">€8.420 <span style="font-size:13px;color:var(--text-dim);font-weight:500;">/ Monat</span></div>
+        <div class="ai-panel-sub" data-i18n="panel3_s">3 Angestellte synchronisiert · Lohn + Sozialabgaben erkannt</div>
+        <span class="ai-panel-tag tag-green">DATEV-bereit</span>
+      </div>
+      <div class="ai-panel">
+        <div class="ai-panel-header">
+          <div class="ai-panel-icon" style="background:rgba(16,185,129,0.15);">📈</div>
+          <div><div class="ai-panel-title" data-i18n="panel4_t">Umsatzentwicklung</div></div>
         </div>
-        <div style="font-size:11px;color:var(--text-dim);text-align:center;margin-top:8px;">
-          <em data-i18n="demo_disclaimer">Keine rechtsverbindliche Steuerberatung — Hinweis nur.</em>
+        <div class="ai-panel-stat" style="color:var(--green)">+18% <span style="font-size:13px;color:var(--text-dim);font-weight:500;" data-i18n="panel4_vs">vs. Vormonat</span></div>
+        <div class="ai-panel-sub" data-i18n="panel4_s">Trend stabil über 6 Monate · 4 neue Kunden erkannt</div>
+        <span class="ai-panel-tag tag-green">Wachstum</span>
+      </div>
+      <div class="ai-panel">
+        <div class="ai-panel-header">
+          <div class="ai-panel-icon" style="background:rgba(99,102,241,0.15);">📥</div>
+          <div><div class="ai-panel-title" data-i18n="panel5_t">EÜR bereit</div></div>
         </div>
+        <div class="ai-panel-stat" style="color:#6366f1">Q1 2026</div>
+        <div class="ai-panel-sub" data-i18n="panel5_s">Vollständige Anlage EÜR · Exportierbar als PDF für Steuerberater</div>
+        <span class="ai-panel-tag tag-purple">Steuerberater-ready</span>
+      </div>
+      <div class="ai-panel" style="border-color:rgba(245,158,11,0.3); background: linear-gradient(180deg, rgba(245,158,11,0.05), transparent);">
+        <div class="ai-panel-header">
+          <div class="ai-panel-icon" style="background:rgba(245,158,11,0.15);">⚠️</div>
+          <div><div class="ai-panel-title" data-i18n="panel6_t">KI-Hinweis</div></div>
+        </div>
+        <div class="ai-panel-stat" style="color:var(--amber);font-size:17px;line-height:1.3;" data-i18n="panel6_stat">Homeoffice-Pauschale fehlt</div>
+        <div class="ai-panel-sub" data-i18n="panel6_s">Bis zu 1.260€ jährlich nicht genutzt — 6€/Tag, §4 Abs.5 Nr.6b EStG</div>
+        <span class="ai-panel-tag tag-amber">+1.260€ möglich</span>
+      </div>
+    </div>
+
+    <!-- AI THINKING PANEL — Live analysis centerpiece -->
+    <div class="ai-thinking">
+      <div class="ai-thinking-head">
+        <div class="ai-thinking-icon">🧠</div>
+        <div>
+          <div class="ai-thinking-title" data-i18n="thinking_title">KI analysiert Ihre Steuerdaten…</div>
+          <div class="ai-thinking-sub" data-i18n="thinking_sub">Echtzeit-Analyse · 248 Belege · 6 Monate Historie</div>
+        </div>
+      </div>
+      <div class="ai-thinking-checks">
+        <div class="ai-check-row"><div class="ai-check-mark">✓</div><span data-i18n="check1">248 Belege geprüft</span></div>
+        <div class="ai-check-row"><div class="ai-check-mark">✓</div><span data-i18n="check2">Vorsteuer berechnet · €4.218</span></div>
+        <div class="ai-check-row"><div class="ai-check-mark">✓</div><span data-i18n="check3">Privatanteil KFZ erkannt</span></div>
+        <div class="ai-check-row"><div class="ai-check-mark">✓</div><span data-i18n="check4">AfA-Tabelle abgeglichen</span></div>
+        <div class="ai-check-row"><div class="ai-check-mark">✓</div><span data-i18n="check5">Homeoffice-Pauschale möglich</span></div>
+        <div class="ai-check-row"><div class="ai-check-mark">✓</div><span data-i18n="check6">2 fehlende Bewirtungsnachweise erkannt</span></div>
+      </div>
+      <div class="ai-result-banner">
+        <div>
+          <div class="ai-result-text" data-i18n="result_label">Potenzielle Steuerersparnis (Schätzung)</div>
+          <div class="ai-result-value">+€3.240</div>
+        </div>
+        <a href="/app?action=register" class="btn btn-primary"><span data-i18n="result_cta">🧠 KI Jahresreview starten</span></a>
+      </div>
+      <div class="ai-thinking-foot">
+        <div class="ai-opus-badge"><span class="opus-dot"></span> Powered by Claude Opus 4.7</div>
+        <div class="ai-thinking-disclaimer" data-i18n="thinking_disclaimer">Keine rechtsverbindliche Steuerberatung — KI-gestützte Hinweise.</div>
       </div>
     </div>
   </div>
@@ -686,8 +860,32 @@ const i18n = {
     nav_features:"Features", nav_steuerlogik:"Steuerlogik", nav_how:"So funktioniert's",
     nav_pricing:"Preise", nav_demo:"Demo", login:"Login", cta_trial:"Kostenlos testen",
     hero_tag:"✨ KI-Steuerlogik · Powered by Claude Opus 4.7",
-    hero_t1:"Lassen Sie KI Ihre", hero_t2:"Buchhaltung und Steuern", hero_t3:"erledigen.",
-    hero_lead:"AutoTax.Cloud analysiert Ihre Belege, erkennt automatisch Steuerpotenziale und erstellt fertige EÜR-Unterlagen — vollautomatisch.",
+    hero_t1:"Deutschlands", hero_t2:"intelligenteste KI-Steuerplattform", hero_t3:"für Selbstständige.",
+    hero_lead:"Automatische Steuerlogik, EÜR-Erstellung und KI-gestützte Steueroptimierung — entwickelt für Deutschland.",
+    social_proof:"Bereits getestet von Selbstständigen, Gastronomie & Dienstleistern in Deutschland. <strong>Spart bis zu 6 Stunden Buchhaltung pro Monat.</strong>",
+    live_status:"KI analysiert Ihre Steuerdaten…",
+    ek_profit:"Monatsgewinn", ek_potential:"Steuerpotenzial", ek_potential_s:"erkannt",
+    ek_open:"Offene Rechnungen", ek_open_s:"€2.150 ausstehend",
+    ek_deadline:"Nächste Frist", ek_days:"Tage", ek_deadline_s:"UStVA Q1",
+    ai_feed_1:"248 Belege geprüft", ai_feed_2:"Vorsteuer berechnet · €4.218",
+    ai_feed_3:"Privatanteil KFZ erkannt", ai_feed_4:"Homeoffice-Pauschale fehlt",
+    tg_msg:"EÜR Q1 bereit · €38.420 Gewinn",
+    panels_tag:"🧠 AI Finance Dashboard",
+    panels_title:"Mehr als OCR. Echte Steuerintelligenz.",
+    panels_sub:"Deutschlands erste KI-Plattform, die nicht nur Belege liest — sondern Steuerlogik versteht. Hier sehen Sie, was die KI für ein typisches Unternehmen erkennt.",
+    panel1_t:"Büro-Miete", panel1_s:"Festkostenvertrag erkannt · Wiederkehrend gebucht",
+    panel2_t:"Firmenfahrzeug", panel2_s:"Privatanteil erkannt — KI berechnet 1%-Regelung automatisch",
+    panel3_t:"Mitarbeiterkosten", panel3_s:"3 Angestellte synchronisiert · Lohn + Sozialabgaben erkannt",
+    panel4_t:"Umsatzentwicklung", panel4_vs:"vs. Vormonat", panel4_s:"Trend stabil über 6 Monate · 4 neue Kunden erkannt",
+    panel5_t:"EÜR bereit", panel5_s:"Vollständige Anlage EÜR · Exportierbar als PDF für Steuerberater",
+    panel6_t:"KI-Hinweis", panel6_stat:"Homeoffice-Pauschale fehlt", panel6_s:"Bis zu 1.260€ jährlich nicht genutzt — 6€/Tag, §4 Abs.5 Nr.6b EStG",
+    thinking_title:"KI analysiert Ihre Steuerdaten…",
+    thinking_sub:"Echtzeit-Analyse · 248 Belege · 6 Monate Historie",
+    check1:"248 Belege geprüft", check2:"Vorsteuer berechnet · €4.218", check3:"Privatanteil KFZ erkannt",
+    check4:"AfA-Tabelle abgeglichen", check5:"Homeoffice-Pauschale möglich", check6:"2 fehlende Bewirtungsnachweise erkannt",
+    result_label:"Potenzielle Steuerersparnis (Schätzung)",
+    result_cta:"🧠 KI Jahresreview starten",
+    thinking_disclaimer:"Keine rechtsverbindliche Steuerberatung — KI-gestützte Hinweise.",
     trust_dsgvo:"DSGVO-konform", trust_datev:"DATEV-kompatibel", trust_logik:"Deutsche Steuerlogik 2026",
     cta_trial_long:"✨ 14 Tage kostenlos testen", cta_demo:"▶ Demo ansehen",
     mockup_title:"📊 Dashboard 2026", mockup_cat:"Bewirtung", ai_detected:"KI ERKANNT",
@@ -771,8 +969,32 @@ const i18n = {
     nav_features:"Features", nav_steuerlogik:"Tax Logic", nav_how:"How it works",
     nav_pricing:"Pricing", nav_demo:"Demo", login:"Login", cta_trial:"Try free",
     hero_tag:"✨ AI Tax Logic · Powered by Claude Opus 4.7",
-    hero_t1:"Let AI handle your", hero_t2:"bookkeeping and taxes", hero_t3:".",
-    hero_lead:"AutoTax.Cloud analyzes your receipts, automatically detects tax savings, and produces ready-to-file documents — fully automated.",
+    hero_t1:"Germany's", hero_t2:"smartest AI tax platform", hero_t3:"for self-employed.",
+    hero_lead:"Automatic tax logic, EÜR preparation and AI-powered tax optimization — built for Germany.",
+    social_proof:"Already trusted by self-employed, gastronomy & service providers in Germany. <strong>Saves up to 6 hours of bookkeeping per month.</strong>",
+    live_status:"AI analyzing your tax data…",
+    ek_profit:"Monthly Profit", ek_potential:"Tax Potential", ek_potential_s:"detected",
+    ek_open:"Open Invoices", ek_open_s:"€2,150 outstanding",
+    ek_deadline:"Next Deadline", ek_days:"days", ek_deadline_s:"VAT return Q1",
+    ai_feed_1:"248 receipts reviewed", ai_feed_2:"Input VAT calculated · €4,218",
+    ai_feed_3:"Vehicle private share detected", ai_feed_4:"Home office allowance missing",
+    tg_msg:"EÜR Q1 ready · €38,420 profit",
+    panels_tag:"🧠 AI Finance Dashboard",
+    panels_title:"More than OCR. Real tax intelligence.",
+    panels_sub:"Germany's first AI platform that doesn't just read receipts — it understands tax logic. Here's what the AI detects for a typical business.",
+    panel1_t:"Office Rent", panel1_s:"Fixed contract detected · Recurring booked",
+    panel2_t:"Company Vehicle", panel2_s:"Private share detected — AI calculates 1%-rule automatically",
+    panel3_t:"Personnel Costs", panel3_s:"3 employees synchronized · Salary + social contributions detected",
+    panel4_t:"Revenue Growth", panel4_vs:"vs. last month", panel4_s:"Stable trend over 6 months · 4 new customers detected",
+    panel5_t:"EÜR Ready", panel5_s:"Complete Anlage EÜR · Exportable as PDF for tax advisor",
+    panel6_t:"AI Hint", panel6_stat:"Home office allowance missing", panel6_s:"Up to €1,260 yearly unused — €6/day, §4 Abs.5 Nr.6b EStG",
+    thinking_title:"AI analyzing your tax data…",
+    thinking_sub:"Real-time analysis · 248 receipts · 6 months history",
+    check1:"248 receipts reviewed", check2:"Input VAT calculated · €4,218", check3:"Vehicle private share detected",
+    check4:"Depreciation table checked", check5:"Home office allowance possible", check6:"2 missing entertainment receipts detected",
+    result_label:"Potential tax savings (estimate)",
+    result_cta:"🧠 Start AI Yearly Review",
+    thinking_disclaimer:"Not legal tax advice — AI-powered hints.",
     trust_dsgvo:"GDPR-compliant", trust_datev:"DATEV-compatible", trust_logik:"German Tax Logic 2026",
     cta_trial_long:"✨ 14 days free trial", cta_demo:"▶ Watch demo",
     mockup_title:"📊 Dashboard 2026", mockup_cat:"Entertainment", ai_detected:"AI DETECTED",
@@ -856,8 +1078,32 @@ const i18n = {
     nav_features:"Özellikler", nav_steuerlogik:"Vergi Mantığı", nav_how:"Nasıl Çalışır",
     nav_pricing:"Fiyatlar", nav_demo:"Demo", login:"Giriş", cta_trial:"Ücretsiz Deneyin",
     hero_tag:"✨ KI Vergi Mantığı · Claude Opus 4.7 destekli",
-    hero_t1:"Muhasebenizi ve vergilerinizi", hero_t2:"yapay zekaya bırakın", hero_t3:".",
-    hero_lead:"AutoTax.Cloud faturalarınızı analiz eder, vergi avantajlarını otomatik tespit eder ve hazır EÜR dosyaları üretir — tam otomatik.",
+    hero_t1:"Almanya'nın", hero_t2:"en akıllı KI vergi platformu", hero_t3:"serbest çalışanlar için.",
+    hero_lead:"Otomatik vergi mantığı, EÜR hazırlama ve KI destekli vergi optimizasyonu — Almanya için tasarlandı.",
+    social_proof:"Almanya'da serbest çalışanlar, gastronomi & hizmet sağlayıcılar tarafından test edildi. <strong>Aylık 6 saat muhasebe tasarrufu sağlar.</strong>",
+    live_status:"KI vergi verilerinizi analiz ediyor…",
+    ek_profit:"Aylık Kazanç", ek_potential:"Vergi Potansiyeli", ek_potential_s:"tespit edildi",
+    ek_open:"Açık Faturalar", ek_open_s:"€2.150 ödenmemiş",
+    ek_deadline:"Sonraki Vade", ek_days:"gün", ek_deadline_s:"UStVA Q1",
+    ai_feed_1:"248 fatura incelendi", ai_feed_2:"İndirilen KDV · €4.218",
+    ai_feed_3:"KFZ özel pay tespit edildi", ai_feed_4:"Ev ofis harcı eksik",
+    tg_msg:"EÜR Q1 hazır · €38.420 kazanç",
+    panels_tag:"🧠 AI Finance Dashboard",
+    panels_title:"OCR'dan fazlası. Gerçek vergi zekası.",
+    panels_sub:"Sadece fatura okumakla kalmayan — vergi mantığını anlayan Almanya'nın ilk KI platformu. Tipik bir işletme için KI'nın neyi tespit ettiğini görün.",
+    panel1_t:"Ofis Kirası", panel1_s:"Sabit sözleşme tespit edildi · Tekrarlı kayıt",
+    panel2_t:"Şirket Aracı", panel2_s:"Özel pay tespit edildi — KI %1 kuralını otomatik hesaplar",
+    panel3_t:"Personel Maliyeti", panel3_s:"3 çalışan senkronize · Maaş + sosyal yükler tespit edildi",
+    panel4_t:"Ciro Gelişimi", panel4_vs:"geçen aya göre", panel4_s:"6 ayda istikrarlı trend · 4 yeni müşteri tespit edildi",
+    panel5_t:"EÜR Hazır", panel5_s:"Tam Anlage EÜR · Mali müşavir için PDF dışa aktarılabilir",
+    panel6_t:"KI Uyarısı", panel6_stat:"Ev ofis harcı eksik", panel6_s:"Yıllık 1.260€'ya kadar kullanılmamış — günlük 6€, §4 Abs.5 Nr.6b EStG",
+    thinking_title:"KI vergi verilerinizi analiz ediyor…",
+    thinking_sub:"Gerçek zamanlı analiz · 248 fatura · 6 ay geçmiş",
+    check1:"248 fatura incelendi", check2:"İndirilen KDV hesaplandı · €4.218", check3:"KFZ özel pay tespit edildi",
+    check4:"AfA tablosu karşılaştırıldı", check5:"Ev ofis harcı mümkün", check6:"2 eksik iş yemeği belgesi tespit edildi",
+    result_label:"Potansiyel vergi tasarrufu (tahmin)",
+    result_cta:"🧠 KI Yıllık İnceleme Başlat",
+    thinking_disclaimer:"Hukuki bağlayıcı vergi danışmanlığı değildir — KI destekli ipuçları.",
     trust_dsgvo:"GDPR uyumlu", trust_datev:"DATEV uyumlu", trust_logik:"Alman Vergi Mantığı 2026",
     cta_trial_long:"✨ 14 gün ücretsiz deneyin", cta_demo:"▶ Demoyu izle",
     mockup_title:"📊 Pano 2026", mockup_cat:"İş yemeği", ai_detected:"YZ ALGILADI",
@@ -982,6 +1228,27 @@ const observer = new IntersectionObserver(entries => {
   });
 }, { threshold: 0.12, rootMargin: '0px 0px -60px 0px' });
 document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Count-up animation for KPIs
+function animateCountUp(el) {
+  const target = parseInt(el.dataset.target);
+  const duration = 1800;
+  const start = performance.now();
+  function step(now) {
+    const p = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    const val = Math.floor(target * eased);
+    el.textContent = '€' + val.toLocaleString('de-DE');
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+const countObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) { animateCountUp(e.target); countObserver.unobserve(e.target); }
+  });
+}, { threshold: 0.3 });
+document.querySelectorAll('.count-up').forEach(el => countObserver.observe(el));
 
 // Smooth scroll
 document.querySelectorAll('a[href^="#"]').forEach(a => {
