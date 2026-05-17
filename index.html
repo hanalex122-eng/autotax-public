@@ -2080,6 +2080,7 @@ function PricingView(){
   useEffect(()=>{api("/account/plan").then(setPlan).catch(()=>{});},[]);
   const _l=getLang();
   const tr=(de,en)=>_l==="de"?de:en;
+  const tr3=(de,en,trText)=>_l==="de"?de:_l==="tr"?trText:en;
   const startCheckout=async(planId)=>{
     setBusy(planId);
     try{
@@ -2126,11 +2127,12 @@ function PricingView(){
     </div>}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))",gap:16}}>
       {[
-        {id:"free",name:"Free",price:"0",features:[tr("30 Belege / Monat","30 receipts / month"),tr("1 Firma","1 company"),tr("OCR + QR-Reader","OCR + QR reader"),"CSV Export",tr("E-Mail-Import (1)","Email import (1)")],current:plan?.plan==="free"},
-        {id:"starter",name:"Starter",price:"9",features:[tr("250 Belege / Monat","250 receipts / month"),tr("3 Firmen","3 companies"),"DATEV + Excel Export",tr("ZIP-Upload","ZIP upload"),tr("Handschrift-OCR","Handwriting OCR"),tr("Mahnung & Reminder","Dunning & reminders"),tr("E-Mail-Import (3)","Email import (3)")],current:plan?.plan==="starter",popular:true},
-        {id:"pro",name:"Pro",price:"29",features:[tr("1.500 Belege / Monat","1,500 receipts / month"),tr("Unbegrenzte Firmen","Unlimited companies"),"Scanner Watcher Agent",tr("Steuerberater-Zugang","Tax advisor access"),tr("KI-Analyse (Claude AI)","AI analysis (Claude)"),tr("Wiederkehrende Rechnungen","Recurring invoices"),tr("E-Mail-Import unbegrenzt","Email import unlimited"),"Premium Support"],current:plan?.plan==="pro"},
-      ].map(p=><div key={p.id} style={{...css.card,border:p.current?"2px solid "+theme.accent:(p.popular?"2px solid #f59e0b":"1px solid "+theme.border),position:"relative"}}>
-        {p.popular&&!p.current&&<div style={{position:"absolute",top:-10,left:"50%",transform:"translateX(-50%)",background:"#f59e0b",color:"#000",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:12}}>{tr("Beliebt","Popular")}</div>}
+        {id:"free",name:"Free",price:"0",features:[tr3("30 Belege / Monat","30 receipts / month","30 belge / ay"),tr3("1 Firma","1 company","1 Firma"),tr3("OCR + QR-Reader","OCR + QR reader","OCR + QR okuyucu"),tr3("CSV Export","CSV export","CSV dışa aktarım"),tr3("E-Mail-Import (1)","Email import (1)","E-posta içe aktarım (1)")],current:plan?.plan==="free"},
+        {id:"starter",name:"Starter",price:"15",features:[tr3("250 Belege / Monat","250 receipts / month","250 belge / ay"),tr3("3 Firmen","3 companies","3 Firma"),tr3("DATEV + Excel Export","DATEV + Excel export","DATEV + Excel dışa aktarım"),tr3("ZIP-Upload","ZIP upload","ZIP yükleme"),tr3("Handschrift-OCR","Handwriting OCR","El yazısı OCR"),tr3("E-Rechnung (XRechnung/ZUGFeRD)","E-Invoice (XRechnung/ZUGFeRD)","E-Fatura (XRechnung/ZUGFeRD)"),tr3("Mahnung & Reminder","Dunning & reminders","İhtarname & hatırlatıcı"),tr3("E-Mail-Import (3)","Email import (3)","E-posta içe aktarım (3)")],current:plan?.plan==="starter"},
+        {id:"pro",name:"Pro",price:"39",features:[tr3("1.500 Belege / Monat","1,500 receipts / month","1.500 belge / ay"),tr3("Unbegrenzte Firmen","Unlimited companies","Sınırsız firma"),tr3("Scanner Watcher Agent","Scanner Watcher Agent","Tarayıcı Watcher Ajanı"),tr3("Steuerberater-Zugang","Tax advisor access","Mali müşavir erişimi"),tr3("KI-Analyse (Claude AI)","AI analysis (Claude)","YZ analizi (Claude)"),tr3("Wiederkehrende Rechnungen","Recurring invoices","Tekrarlanan faturalar"),tr3("E-Mail-Import unbegrenzt","Email import unlimited","Sınırsız e-posta içe aktarım"),tr3("Premium Support","Premium support","Öncelikli destek")],current:plan?.plan==="pro"},
+        {id:"ai_steuer",name:"🧠 AI Steuer",price:"89",features:[tr3("Bis zu 5.000 KI-analysierte Belege","Up to 5,000 AI-analyzed receipts","5.000 YZ-analizli belgeye kadar"),tr3("KI-Steuerlogik Engine","AI tax logic engine","YZ vergi mantığı motoru"),tr3("KI Jahresreview + EÜR PDF","AI yearly review + EÜR PDF","YZ yıllık inceleme + EÜR PDF"),tr3("AI Steuerberater-Chat","AI tax advisor chat","YZ mali müşavir sohbeti"),tr3("Vision OCR Fallback (Opus 4.7)","Vision OCR fallback (Opus 4.7)","Vision OCR yedeği (Opus 4.7)"),tr3("Wiederkehrende Kosten","Recurring costs tracking","Tekrarlanan giderler"),tr3("Priorisierte KI-Verarbeitung","Priority AI processing","Öncelikli YZ işleme"),tr3("Alles aus Pro","Everything in Pro","Pro'daki her şey")],current:plan?.plan==="ai_steuer",popular:true},
+      ].map(p=><div key={p.id} style={{...css.card,border:p.current?"2px solid "+theme.accent:(p.popular?"2px solid #8b5cf6":"1px solid "+theme.border),position:"relative"}}>
+        {p.popular&&!p.current&&<div style={{position:"absolute",top:-10,left:"50%",transform:"translateX(-50%)",background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:12,whiteSpace:"nowrap"}}>⭐ {tr3("Beliebteste Wahl","Most popular","En popüler seçim")}</div>}
         {p.current&&<div style={{position:"absolute",top:-10,right:16,background:theme.accent,color:"#fff",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:12}}>✓ {tr("Aktiv","Active")}</div>}
         <div style={{fontSize:18,fontWeight:700,color:theme.text}}>{p.name}</div>
         <div style={{fontSize:32,fontWeight:800,color:theme.accent,margin:"8px 0"}}>€{p.price}<span style={{fontSize:13,fontWeight:400,color:theme.textMuted}}>/Monat</span></div>
@@ -3873,7 +3875,34 @@ function AuditView(){
 function HelpView(){
   const[openFaq,setOpenFaq]=useState(null);
   const[openGuide,setOpenGuide]=useState(null);
+  const _hl=getLang();
+  const h3=(de,en,tr)=>_hl==="de"?de:_hl==="tr"?tr:en;
   const features=[
+    {icon:"🚀",
+      title:h3("Watcher v2.2.0 — Neu (17.05.2026)","Watcher v2.2.0 — What's New (May 17, 2026)","Watcher v2.2.0 — Yenilikler (17.05.2026)"),
+      desc:h3("Drei neue Funktionen im Scanner Watcher Agent","Three new features in the Scanner Watcher Agent","Tarayıcı Watcher Ajanı'nda üç yeni özellik"),
+      details:[
+        h3(
+          "🔔 Tray-Toast-Benachrichtigung — Nach jedem erfolgreichen oder fehlgeschlagenen Upload erscheint eine Windows-Benachrichtigung im Tray (mit Throttle, kein Spam bei Batch-Scans).",
+          "🔔 Tray toast notification — After each successful or failed upload a Windows notification appears in the tray (throttled, no spam during batch scans).",
+          "🔔 Tray toast bildirimi — Her başarılı veya başarısız yüklemeden sonra tray'de Windows bildirimi görünür (sınırlı sıklıkta, toplu taramalarda spam yok)."
+        ),
+        h3(
+          "📑 Mehrseitige PDF-Auto-Merge — Wenn dein Scanner Belege als getrennte Seiten ausgibt (z.B. scan_001.pdf, scan_002.pdf, Document (1).pdf), erkennt der Watcher die Reihenfolge und führt sie automatisch zu einem einzigen PDF zusammen, das hochgeladen wird.",
+          "📑 Multi-page PDF auto-merge — When your scanner outputs receipts as separate pages (e.g. scan_001.pdf, scan_002.pdf, Document (1).pdf), the Watcher detects the order and merges them into a single PDF before upload.",
+          "📑 Çok sayfalı PDF otomatik birleştirme — Tarayıcın belgeleri ayrı sayfalar halinde çıkarırsa (örn. scan_001.pdf, scan_002.pdf, Document (1).pdf), Watcher sıralarını anlar ve yükleme öncesi tek bir PDF'e birleştirir."
+        ),
+        h3(
+          "📁 Hot-Folder-Routing — Lege im überwachten Ordner Unterordner 'expense/' (oder 'ausgabe/') und 'income/' (oder 'einnahme/') an. Belege darin werden automatisch dem richtigen Typ (Ausgabe oder Einnahme) zugeordnet. Uploaded/Failed bleiben weiterhin im Hauptordner.",
+          "📁 Hot-folder routing — Create subfolders 'expense/' (or 'ausgabe/') and 'income/' (or 'einnahme/') inside your watched folder. Receipts inside are auto-tagged with the correct invoice type. Uploaded/Failed stays in the root folder.",
+          "📁 Hot-folder yönlendirme — İzlenen klasörün içine 'expense/' (veya 'ausgabe/') ve 'income/' (veya 'einnahme/') alt klasörleri oluştur. İçindeki belgeler otomatik olarak doğru tipe (gider veya gelir) atanır. Uploaded/Failed ana klasörde kalır."
+        ),
+        h3(
+          "⬇ Update: Auto-Update lädt v2.2.0 beim nächsten Start automatisch. Manuell: AutoTax → Tray → 'Update auf v2.2.0 verfügbar' oder unter Preise → Watcher herunterladen.",
+          "⬇ Update: Auto-Update will fetch v2.2.0 on next launch. Manual: AutoTax → Tray → 'Update to v2.2.0 available' or under Pricing → Download Watcher.",
+          "⬇ Güncelleme: Otomatik güncelleme v2.2.0'ı bir sonraki açılışta indirir. Manuel: AutoTax → Tray → 'v2.2.0 güncellemesi mevcut' veya Fiyatlar → Watcher indir."
+        ),
+      ]},
     {icon:"🆕",title:getLang()==="de"?"Neu im Mai 2026":"What's New — May 2026",desc:getLang()==="de"?"Die wichtigsten Funktionen der letzten Woche":"The biggest features added this past week",
       details:[
         getLang()==="de"
