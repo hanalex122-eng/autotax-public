@@ -374,7 +374,7 @@ footer .links a:hover { color:var(--text); }
       <a href="#steuerlogik" data-i18n="nav_steuerlogik">Steuerlogik</a>
       <a href="#how" data-i18n="nav_how">So funktioniert's</a>
       <a href="#pricing" data-i18n="nav_pricing">Preise</a>
-      <a href="#demo" data-i18n="nav_demo">Demo</a>
+      <a href="#watcher" data-i18n="nav_watcher">Watcher</a>
     </div>
     <div class="nav-right">
       <div class="lang-switch">
@@ -840,6 +840,32 @@ footer .links a:hover { color:var(--text); }
   </div>
 </section>
 
+<!-- WATCHER DOWNLOAD -->
+<section class="reveal" id="watcher" style="padding:80px 0;">
+  <div class="container">
+    <div style="padding:36px 40px;border-radius:22px;background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(99,102,241,0.04));border:1px solid rgba(59,130,246,0.3);display:grid;grid-template-columns:1fr auto;gap:32px;align-items:center;">
+      <div>
+        <span class="section-tag" style="margin-bottom:14px;" data-i18n="watcher_tag">🖥 Scanner Watcher Agent</span>
+        <h2 style="font-size:32px;font-weight:800;letter-spacing:-1px;margin-bottom:10px;color:var(--text);" data-i18n="watcher_title">Scanner automatisch hochladen.</h2>
+        <p style="font-size:15px;color:var(--text-muted);line-height:1.6;margin-bottom:18px;max-width:560px;" data-i18n="watcher_sub">Kleine Windows-App: Ordner überwachen → Belege automatisch in AutoTax.Cloud. Login einmal, läuft im Hintergrund.</p>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--text-dim);">
+          <span><strong style="color:var(--green);">✓</strong> <span data-i18n="w_feat1">Windows 10/11</span></span>
+          <span><strong style="color:var(--green);">✓</strong> <span data-i18n="w_feat2">Auto-Update integriert</span></span>
+          <span><strong style="color:var(--green);">✓</strong> <span data-i18n="w_feat3">Auto-Start mit Windows</span></span>
+          <span><strong style="color:var(--green);">✓</strong> <span data-i18n="w_feat4">Offline-Queue</span></span>
+        </div>
+      </div>
+      <a href="/watcher/download" class="btn btn-primary btn-large" style="padding:18px 30px;font-size:16px;white-space:nowrap;display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">⬇</span>
+        <div style="text-align:left;line-height:1.25;">
+          <div style="font-size:11px;opacity:0.85;font-weight:500;letter-spacing:0.4px;text-transform:uppercase;" data-i18n="w_btn_top">Kostenlos für Windows</div>
+          <div data-i18n="w_btn">Watcher herunterladen</div>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
 <!-- FINAL CTA -->
 <section class="final-cta reveal">
   <div class="container">
@@ -870,7 +896,12 @@ footer .links a:hover { color:var(--text); }
 const i18n = {
   de: {
     nav_features:"Features", nav_steuerlogik:"Steuerlogik", nav_how:"So funktioniert's",
-    nav_pricing:"Preise", nav_demo:"Demo", login:"Login", cta_trial:"Kostenlos testen",
+    nav_pricing:"Preise", nav_demo:"Demo", nav_watcher:"Watcher", login:"Login", cta_trial:"Kostenlos testen",
+    watcher_tag:"🖥 Scanner Watcher Agent",
+    watcher_title:"Scanner automatisch hochladen.",
+    watcher_sub:"Kleine Windows-App: Ordner überwachen → Belege automatisch in AutoTax.Cloud. Login einmal, läuft im Hintergrund.",
+    w_feat1:"Windows 10/11", w_feat2:"Auto-Update integriert", w_feat3:"Auto-Start mit Windows", w_feat4:"Offline-Queue",
+    w_btn_top:"Kostenlos für Windows", w_btn:"Watcher herunterladen",
     hero_tag:"✨ KI-Steuerlogik · Powered by Claude Opus 4.7",
     hero_t1:"Deutschlands", hero_t2:"intelligenteste KI-Steuerplattform", hero_t3:"für Selbstständige.",
     hero_lead:"Automatische Steuerlogik, EÜR-Erstellung und KI-gestützte Steueroptimierung — entwickelt für Deutschland.",
@@ -986,7 +1017,12 @@ const i18n = {
   },
   en: {
     nav_features:"Features", nav_steuerlogik:"Tax Logic", nav_how:"How it works",
-    nav_pricing:"Pricing", nav_demo:"Demo", login:"Login", cta_trial:"Try free",
+    nav_pricing:"Pricing", nav_demo:"Demo", nav_watcher:"Watcher", login:"Login", cta_trial:"Try free",
+    watcher_tag:"🖥 Scanner Watcher Agent",
+    watcher_title:"Auto-upload from your scanner.",
+    watcher_sub:"Small Windows app: watch a folder → receipts auto-upload to AutoTax.Cloud. Login once, runs in background.",
+    w_feat1:"Windows 10/11", w_feat2:"Auto-update built-in", w_feat3:"Auto-start with Windows", w_feat4:"Offline queue",
+    w_btn_top:"Free for Windows", w_btn:"Download Watcher",
     hero_tag:"✨ AI Tax Logic · Powered by Claude Opus 4.7",
     hero_t1:"Germany's", hero_t2:"smartest AI tax platform", hero_t3:"for self-employed.",
     hero_lead:"Automatic tax logic, EÜR preparation and AI-powered tax optimization — built for Germany.",
@@ -1102,7 +1138,12 @@ const i18n = {
   },
   tr: {
     nav_features:"Özellikler", nav_steuerlogik:"Vergi Mantığı", nav_how:"Nasıl Çalışır",
-    nav_pricing:"Fiyatlar", nav_demo:"Demo", login:"Giriş", cta_trial:"Ücretsiz Deneyin",
+    nav_pricing:"Fiyatlar", nav_demo:"Demo", nav_watcher:"Watcher", login:"Giriş", cta_trial:"Ücretsiz Deneyin",
+    watcher_tag:"🖥 Scanner Watcher Ajan",
+    watcher_title:"Tarayıcı otomatik yükleme.",
+    watcher_sub:"Küçük Windows uygulaması: klasörü izler → belgeleri otomatik AutoTax.Cloud'a yükler. Tek seferlik login, arka planda çalışır.",
+    w_feat1:"Windows 10/11", w_feat2:"Otomatik güncelleme", w_feat3:"Windows ile birlikte başlar", w_feat4:"Çevrimdışı kuyruk",
+    w_btn_top:"Windows için ücretsiz", w_btn:"Watcher İndir",
     hero_tag:"✨ KI Vergi Mantığı · Claude Opus 4.7 destekli",
     hero_t1:"Almanya'nın", hero_t2:"en akıllı KI vergi platformu", hero_t3:"serbest çalışanlar için.",
     hero_lead:"Otomatik vergi mantığı, EÜR hazırlama ve KI destekli vergi optimizasyonu — Almanya için tasarlandı.",

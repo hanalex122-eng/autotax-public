@@ -1147,6 +1147,22 @@ def api_config():
 # --- AutoTax Watcher (desktop agent) update channel ---
 # tools/autotax_watcher/updater.py polls this every startup. Values come
 # from env so a release can be cut without redeploying the API.
+@app.get("/watcher/download")
+def watcher_download():
+    """Direkt indirme — landing'deki 'Indir' butonu bunu cagirir.
+    /watcher/version.json'daki download_url'e 302 redirect.
+    Boylece URL degisirse kullaniciya yansimaz (autotax.cloud/watcher/download stabil).
+    """
+    from fastapi.responses import RedirectResponse
+    version = os.environ.get("WATCHER_LATEST_VERSION", "2.1.0").strip()
+    default_dl = (
+        "https://github.com/hanalex122-eng/autotax-public/releases/download/"
+        f"watcher-v{version}/AutoTaxWatcher-Setup-{version}.exe"
+    )
+    url = (os.environ.get("WATCHER_DOWNLOAD_URL") or default_dl).strip()
+    return RedirectResponse(url=url, status_code=302)
+
+
 @app.get("/watcher/version.json")
 def watcher_version():
     """Latest desktop watcher version + download URL.

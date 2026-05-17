@@ -1666,8 +1666,18 @@ function UploadView({triggerRefresh,onNav,showToast}){
       <button style={{...css.btnOutline,background:"#a855f7",border:"none",color:"#fff",fontSize:14,padding:"10px 22px",fontWeight:600}} onClick={()=>document.getElementById("erechnungInput")?.click()}>Import E-Invoice (XML / ZUGFeRD-PDF)</button>
       <span style={{fontSize:11,color:"#c4b5fd"}}>XRechnung, ZUGFeRD, Factur-X</span>
     </div>
-    <details style={{background:"rgba(0,194,255,0.06)",border:"2px solid #00c2ff",borderRadius:12,padding:"10px 14px",cursor:"pointer"}}>
-      <summary style={{fontSize:13,fontWeight:600,color:"#00c2ff",userSelect:"none"}}>🖨️ Scanner otomatik upload — Watcher Agent</summary>
+    <div style={{background:"linear-gradient(135deg,rgba(0,194,255,0.10),rgba(99,102,241,0.05))",border:"2px solid #00c2ff",borderRadius:14,padding:"16px 20px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+      <div style={{width:54,height:54,borderRadius:12,background:"linear-gradient(135deg,#00c2ff,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,boxShadow:"0 6px 18px rgba(0,194,255,0.4)",flexShrink:0}}>🖨️</div>
+      <div style={{flex:1,minWidth:200}}>
+        <div style={{fontSize:14,fontWeight:700,color:"#00c2ff",marginBottom:3}}>Scanner Watcher Agent v2.1</div>
+        <div style={{fontSize:12,color:theme.textMuted,lineHeight:1.4}}>{getLang()==="de"?"Windows-App: Scanner-Ordner überwachen → Belege automatisch hochladen. Auto-Update, Auto-Start, Offline-Queue.":"Windows app: watch scanner folder → auto-upload receipts. Auto-update, auto-start, offline queue."}</div>
+      </div>
+      <a href="/watcher/download" style={{background:"linear-gradient(135deg,#00c2ff,#3b82f6)",color:"#fff",padding:"12px 22px",borderRadius:10,textDecoration:"none",fontSize:14,fontWeight:700,boxShadow:"0 6px 18px rgba(0,194,255,0.4)",display:"inline-flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}>
+        <span style={{fontSize:18}}>⬇</span> {getLang()==="de"?"Watcher herunterladen":"Download Watcher"}
+      </a>
+    </div>
+    <details style={{background:"rgba(0,194,255,0.06)",border:"1px solid rgba(0,194,255,0.3)",borderRadius:12,padding:"10px 14px",cursor:"pointer"}}>
+      <summary style={{fontSize:13,fontWeight:600,color:"#00c2ff",userSelect:"none"}}>📖 Kurulum talimatları + Token kopyala</summary>
       <div style={{marginTop:10,fontSize:12,color:theme.text,lineHeight:1.6}}>
         <p style={{margin:"0 0 8px"}}>Scanner'ın <b>çıktı klasörünü</b> izleyen küçük bir Windows agent. Tarama biter bitmez fatura otomatik AutoTax-Cloud'a yüklenir — manuel upload'a gerek yok.</p>
         <ul style={{margin:"0 0 10px",paddingLeft:20,color:theme.textMuted,fontSize:11.5}}>
@@ -1677,7 +1687,7 @@ function UploadView({triggerRefresh,onNav,showToast}){
           <li>Tarama yap → otomatik upload, dosya <code style={{background:theme.surfaceAlt,padding:"1px 6px",borderRadius:4}}>Uploaded/</code> alt klasörüne taşınır</li>
         </ul>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
-          <a href="https://github.com/hanalex122-eng/autotax-public/raw/main/tools/autotax_watcher/release/AutoTaxWatcher.exe" target="_blank" rel="noopener" style={{background:"#00c2ff",color:"#050a12",padding:"8px 14px",borderRadius:8,textDecoration:"none",fontSize:12,fontWeight:700,boxShadow:"0 0 16px rgba(0,194,255,0.3)"}}>⬇️ AutoTaxWatcher.exe indir (13 MB)</a>
+          <a href="/watcher/download" rel="noopener" style={{background:"#00c2ff",color:"#050a12",padding:"8px 14px",borderRadius:8,textDecoration:"none",fontSize:12,fontWeight:700,boxShadow:"0 0 16px rgba(0,194,255,0.3)"}}>⬇️ AutoTaxWatcher-Setup.exe indir</a>
           <a href="https://github.com/hanalex122-eng/autotax-public/raw/main/tools/autotax_watcher/config.example.json" target="_blank" rel="noopener" style={{...css.btnOutline,padding:"8px 14px",fontSize:12,textDecoration:"none",display:"inline-block"}}>📄 config.example.json</a>
           <button style={{...css.btnOutline,padding:"8px 14px",fontSize:12,borderColor:"rgba(0,194,255,0.4)",color:"#00c2ff"}} onClick={()=>{const tk=localStorage.getItem("atx_token")||"";if(!tk){alert("Önce giriş yap.");return;}navigator.clipboard.writeText(tk).then(()=>{if(showToast)showToast("Token panoya kopyalandı — config.json'daki api_token alanına yapıştır","success");}).catch(()=>{alert("Token: "+tk);});}}>🔑 Token kopyala</button>
           <a href="https://github.com/hanalex122-eng/autotax-public/blob/main/tools/autotax_watcher/README.md" target="_blank" rel="noopener" style={{fontSize:11,color:theme.textDim,padding:"8px 4px",textDecoration:"underline"}}>Kurulum talimatı</a>
