@@ -2897,6 +2897,120 @@ def get_mahnung_pdf(
         db.close()
 
 
+@app.post("/invoices/{invoice_id}/email")
+@limiter.limit("20/hour")
+async def email_invoice_attachment(
+    invoice_id: int,
+    request: Request,
+    body: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Bir faturayi (orijinal scan PDF/XML) email ile gonder.
+
+    body:
+      to (str, zorunlu): alici email
+      subject (str, ops.): konu (default 'Beleg: <vendor> · <date>')
+      note (str, ops.): mail govdesine eklenir
+      to_advisor (bool, ops.): True ise kullanicinin bagli Steuerberater'ine
+        gonderir, 'to' yok sayilir
+    """
+    import re as _re
+    from autotax.reminders import send_email as _send_email
+    from autotax.models import AdvisorRelationship as _AdvRel
+
+    to_addr = (body.get("to") or "").strip()
+    subject = (body.get("subject") or "").strip()
+    note = (body.get("note") or "").strip()
+    to_advisor = bool(body.get("to_advisor"))
+
+    db = SessionLocal()
+    try:
+        inv = db.query(Invoice).filter(
+            Invoice.id == invoice_id, Invoice.user_id == user["sub"]
+        ).first()
+        if not inv:
+            err(404, "Rechnung nicht gefunden")
+
+        if to_advisor:
+            # Bagli Steuerberater'in email'ini bul
+            rel = db.query(_AdvRel).filter(
+                _AdvRel.client_user_id == user["sub"], _AdvRel.status == "active"
+            ).first()
+            if not rel:
+                err(400, "Kein aktiver Steuerberater verknüpft — bitte zuerst einladen")
+            adv = db.query(User).filter(User.id == rel.advisor_user_id).first()
+            if not adv or not adv.email:
+                err(400, "Steuerberater hat keine gültige Email")
+            to_addr = adv.email
+
+        if not to_addr or not _re.match(r"[^@\s]+@[^@\s]+\.[^@\s]+", to_addr):
+            err(400, "Bitte gültige Email-Adresse angeben")
+
+        # Orijinal dosyayi yukle (disk veya legacy BLOB)
+        original_bytes = None
+        original_name = inv.filename or f"beleg-{inv.id}.pdf"
+        mime_type = inv.file_content_type or "application/pdf"
+        if inv.file_path:
+            from autotax import storage as _storage
+            if _storage.file_exists(inv.file_path):
+                original_bytes = _storage.read_file(inv.file_path)
+        if original_bytes is None and inv.file_data:
+            original_bytes = inv.file_data
+        if not original_bytes:
+            err(400, "Kein Original-Dokument zum Anhängen vorhanden")
+
+        # Konu + govde
+        if not subject:
+            subject = f"Beleg: {inv.vendor or 'Unbekannt'}"
+            if inv.date:
+                subject += f" · {inv.date}"
+
+        sender_user = db.query(User).filter(User.id == user["sub"]).first()
+        sender_email = sender_user.email if sender_user else ""
+        amt_line = ""
+        if inv.total_amount:
+            amt_line = f"<p><strong>Betrag:</strong> €{inv.total_amount:.2f}"
+            if inv.vat_rate:
+                amt_line += f" (MwSt {inv.vat_rate})"
+            amt_line += "</p>"
+        note_html = f"<p>{_re.sub('<', '&lt;', note)}</p>" if note else ""
+        body_html = f"""
+<div style="font-family:Arial,sans-serif;color:#0a0e17;max-width:600px;">
+  <p>Hallo,</p>
+  <p>im Anhang finden Sie einen Beleg, automatisch versendet aus
+     <strong>AutoTax-Cloud</strong>.</p>
+  {amt_line}
+  <p><strong>Lieferant:</strong> {inv.vendor or 'Unbekannt'}<br>
+     <strong>Datum:</strong> {inv.date or 'k.A.'}<br>
+     <strong>Kategorie:</strong> {inv.category or 'k.A.'}</p>
+  {note_html}
+  <p style="color:#64748b;font-size:12px;margin-top:24px;">
+     Absender: {sender_email}<br>
+     Diese Mail wurde aus AutoTax-Cloud generiert. Original-Datei im Anhang
+     ist unverändert wie ursprünglich hochgeladen.
+  </p>
+</div>
+"""
+        ok = _send_email(to_addr, subject, body_html,
+                         attachments=[(original_name, original_bytes, mime_type)])
+        if not ok:
+            err(500, "Email konnte nicht gesendet werden (Resend/SMTP nicht konfiguriert oder Fehler)")
+
+        try:
+            audit("invoice.emailed", user_id=user["sub"],
+                  resource_type="invoice", resource_id=inv.id,
+                  payload={"to": to_addr, "to_advisor": to_advisor,
+                           "size_bytes": len(original_bytes)},
+                  request=request)
+        except Exception:
+            pass
+
+        return {"success": True, "to": to_addr, "subject": subject,
+                "size_bytes": len(original_bytes)}
+    finally:
+        db.close()
+
+
 @app.post("/admin/reminders/run-now")
 async def admin_run_reminders_now(user: dict = Depends(get_current_user)):
     """Manuel olarak reminder cycle'ini calistir (test icin). Sadece admin."""

@@ -1398,6 +1398,29 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
               }else alert(_extractErr(d));
             }catch(e){alert(e.message);}
           }}>📨 Mahnung</button>}
+          {detailInv.has_original&&<button style={{...css.btnOutline,borderColor:"rgba(99,102,241,0.5)",color:"#6366f1"}} onClick={async()=>{
+            const _lng=getLang();
+            const _e3=(de,en,tr)=>_lng==="de"?de:_lng==="tr"?tr:en;
+            const promptTxt=_e3("Empfänger-Email (leer = an Steuerberater):","Recipient email (empty = send to tax advisor):","Alıcı e-posta (boş = mali müşavire):");
+            const to=window.prompt(promptTxt,"");
+            if(to===null)return;
+            const toAdvisor=!to||!to.trim();
+            const note=window.prompt(_e3("Optionale Notiz (z.B. 'siehe Anhang'):","Optional note (e.g. 'see attached'):","İsteğe bağlı not (örn. 'eki inceleyin'):"),"")||"";
+            const confirmTxt=toAdvisor
+              ?_e3("📧 Beleg an deinen Steuerberater senden?","📧 Send receipt to your tax advisor?","📧 Belgeyi mali müşavirine gönder?")
+              :_e3(`📧 Beleg an ${to} senden?`,`📧 Send receipt to ${to}?`,`📧 Belgeyi ${to} adresine gönder?`);
+            if(!window.confirm(confirmTxt))return;
+            try{
+              const body={note};
+              if(toAdvisor)body.to_advisor=true;else body.to=to.trim();
+              const r=await _authFetch(API+"/invoices/"+detailInv.id+"/email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+              const d=await r.json();
+              if(r.ok){
+                if(showToast)showToast(_e3(`✓ Beleg an ${d.to} gesendet`,`✓ Receipt sent to ${d.to}`,`✓ Belge ${d.to} adresine gönderildi`),"success");
+                setDetailInv(null);
+              }else alert(_extractErr(d));
+            }catch(e){alert(e.message);}
+          }} title={getLang()==="de"?"Original-Datei per Email versenden":"Send original file via email"}>📧 {getLang()==="de"?"Per Email senden":getLang()==="tr"?"E-posta ile gönder":"Send via email"}</button>}
           <button style={css.btnOutline} onClick={()=>setDetailInv(null)}>Close</button>
           <button style={css.btn()} onClick={()=>{startEdit(detailInv);setDetailInv(null);}}>Bearbeiten</button>
         </div>
@@ -3883,6 +3906,36 @@ function HelpView(){
   const _hl=getLang();
   const h3=(de,en,tr)=>_hl==="de"?de:_hl==="tr"?tr:en;
   const features=[
+    {icon:"⚡",
+      title:h3("App-Update — 17.05.2026","App Update — May 17, 2026","Uygulama Güncellemesi — 17.05.2026"),
+      desc:h3("Neue Funktionen in der Web-App","New features in the web app","Web uygulamasındaki yeni özellikler"),
+      details:[
+        h3(
+          "📧 Beleg per Email senden — Im Rechnungs-Detail (Beleg anklicken) gibt es jetzt einen Button '📧 Per Email senden'. Du kannst die Original-Datei (PDF/XML) direkt an deinen Steuerberater oder eine beliebige Email-Adresse weiterleiten — mit optionaler Notiz. Wenn ein Steuerberater verknüpft ist, einfach Email-Feld leer lassen.",
+          "📧 Send receipt via email — In the invoice detail (click a receipt) there's now a '📧 Send via email' button. You can forward the original file (PDF/XML) directly to your tax advisor or any email address — with optional note. If a tax advisor is linked, just leave the email field blank.",
+          "📧 Belgeyi e-posta ile gönder — Fatura detayında (belgeye tıkla) artık '📧 E-posta ile gönder' butonu var. Orijinal dosyayı (PDF/XML) mali müşavirine veya istediğin e-posta adresine iletebilirsin — isteğe bağlı not ile. Bağlı mali müşavir varsa e-posta alanını boş bırak."
+        ),
+        h3(
+          "🔍 Alle Mails durchsuchen — Email-Import hat einen neuen Button: ein einmaliger Tiefen-Scan der letzten 200 Mails (read + unread). Nützlich beim Erstmaligen-Setup oder wenn frühere Belege fehlen. Lese-Status der Mails bleibt unverändert.",
+          "🔍 Search all mails — Email Import has a new button: a one-off deep scan of the last 200 mails (read + unread). Useful for initial setup or when older receipts are missing. The read/unread state of your mails stays unchanged.",
+          "🔍 Tüm e-postaları tara — E-posta İçe Aktarım'da yeni buton var: son 200 mailin tek seferlik derin taraması (okunmuş + okunmamış). İlk kurulumda veya eski belgeler kayıpsa kullanışlı. E-postaların okundu durumu değişmez."
+        ),
+        h3(
+          "👆 Dashboard 'Kontrol' Karte klickbar — Wenn auf dem Dashboard 'Unverarbeitet N · Kontrol →' steht, kannst du jetzt direkt darauf klicken — wirst zur Rechnungs-Seite mit aktivem Filter 'Unverarbeitet' gebracht.",
+          "👆 Dashboard 'Check' card clickable — When the dashboard shows 'Unprocessed N · Check →' you can now click directly on it — you'll be taken to the invoices page with the 'Unprocessed' filter pre-applied.",
+          "👆 Dashboard 'Kontrol' kartı tıklanabilir — Dashboard'da 'İşlenmedi N · Kontrol →' yazısı görünüyorsa, artık üzerine tıklayabilirsin — Faturalar sayfasına 'İşlenmedi' filtresi açık olarak gidersin."
+        ),
+        h3(
+          "💎 Preise & Pläne — Neuer Tarif 'AI Steuer' für €89/Monat: 5.000 KI-analysierte Belege, KI-Steuerlogik-Engine, KI Jahresreview + EÜR PDF, AI Steuerberater-Chat, Vision OCR Fallback (Opus 4.7), priorisierte KI-Verarbeitung. Bestehende Tarife Starter (€15) und Pro (€39) aktualisiert.",
+          "💎 Pricing & Plans — New 'AI Steuer' tier at €89/month: 5,000 AI-analyzed receipts, AI tax logic engine, AI yearly review + EÜR PDF, AI tax advisor chat, Vision OCR fallback (Opus 4.7), priority AI processing. Existing tiers Starter (€15) and Pro (€39) updated.",
+          "💎 Fiyatlar & Planlar — Yeni 'AI Steuer' planı €89/ay: 5.000 YZ-analizli belge, YZ vergi mantığı motoru, YZ yıllık inceleme + EÜR PDF, YZ mali müşavir sohbeti, Vision OCR yedeği (Opus 4.7), öncelikli YZ işleme. Mevcut planlar Starter (€15) ve Pro (€39) güncellendi."
+        ),
+        h3(
+          "🌍 Mehrsprachige Hilfe — Diese Hilfe-Seite ist jetzt komplett auf Deutsch, English und Türkisch verfügbar (Sprachumschalter oben rechts).",
+          "🌍 Multilingual help — This help page is now fully available in German, English and Turkish (language switcher top-right).",
+          "🌍 Çok dilli yardım — Bu yardım sayfası artık Almanca, İngilizce ve Türkçe olarak tam destekleniyor (sağ üstte dil değiştirici)."
+        ),
+      ]},
     {icon:"🚀",
       title:h3("Watcher v2.2.0 — Neu (17.05.2026)","Watcher v2.2.0 — What's New (May 17, 2026)","Watcher v2.2.0 — Yenilikler (17.05.2026)"),
       desc:h3("Drei neue Funktionen im Scanner Watcher Agent","Three new features in the Scanner Watcher Agent","Tarayıcı Watcher Ajanı'nda üç yeni özellik"),
