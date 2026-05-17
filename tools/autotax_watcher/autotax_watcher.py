@@ -44,12 +44,33 @@ DEFAULT_API = "https://autotax.cloud"
 # Auto-update state — set by updater callback, read by tray menu
 _tray_icon = None
 _update_url: str | None = None
+_last_notify_ts: float = 0.0  # toast throttling — batch scan'de spam olmasin
+NOTIFY_MIN_INTERVAL = 4.0  # saniye — iki bildirim arasi minimum bosluk
 SUPPORTED_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
 POLL_INTERVAL = 5  # saniye — klasör tarama
 STABILITY_WAIT = 3  # saniye — dosya boyutu sabitleşene kadar bekle
 RETRY_INTERVAL = 30  # saniye — offline queue retry
 MAX_429_RETRIES = 3
 DEFAULT_BACKOFF = [15, 30, 60]  # Retry-After yoksa kullanılacak süreler
+
+
+def _tray_notify(title: str, message: str, force: bool = False) -> None:
+    """Tray balon bildirimi (Windows toast). Tray yoksa veya hata olursa sessizce yutar.
+
+    Throttle: ardisik bildirimleri NOTIFY_MIN_INTERVAL kadar bekletir; force=True
+    bildirim kritik (hata) ise atlanir.
+    """
+    global _last_notify_ts
+    if _tray_icon is None:
+        return
+    now = time.monotonic()
+    if not force and (now - _last_notify_ts) < NOTIFY_MIN_INTERVAL:
+        return
+    try:
+        _tray_icon.notify(message, title)
+        _last_notify_ts = now
+    except Exception:
+        pass  # bildirim hatasi watcher'i durdurmamali
 
 # ---------------------------------------------------------------------------
 # Bağımlılık kontrolü (kullanıcı dostu hata mesajı)
@@ -397,6 +418,7 @@ class Watcher:
         status, msg = self.uploader.upload(file_path)
         if status == "ok":
             logging.info("  ✓ %s", msg)
+            _tray_notify("Fatura yüklendi", file_path.name)
             self._dispose_success(file_path, processed)
         elif status == "duplicate":
             logging.info("  ↻ %s", msg)
@@ -407,6 +429,7 @@ class Watcher:
             self.queue.add(str(file_path))
         else:  # fail
             logging.error("  ✗ %s", msg)
+            _tray_notify("Yükleme başarısız", f"{file_path.name}\n{msg}", force=True)
             self._move(file_path, failed)
 
     def _dispose_success(self, file_path: Path, processed: Path) -> None:
@@ -436,10 +459,13 @@ class Watcher:
             status, msg = self.uploader.upload(file_path)
             if status in ("ok", "duplicate"):
                 logging.info("Kuyruktan başarılı: %s — %s", file_path.name, msg)
+                if status == "ok":
+                    _tray_notify("Fatura yüklendi", f"{file_path.name} (kuyruktan)")
                 self.queue.remove(path_str)
                 self._dispose_success(file_path, processed)
             elif status == "fail":
                 logging.error("Kuyruktan kalıcı hata: %s — %s", file_path.name, msg)
+                _tray_notify("Yükleme başarısız", f"{file_path.name}\n{msg}", force=True)
                 self.queue.remove(path_str)
                 self._move(file_path, failed)
             # retry → kuyruğda kalsın
