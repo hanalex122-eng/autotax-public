@@ -97,6 +97,7 @@ input::placeholder { color: #475569; }
       <button class="btn btn-primary" id="btnSave">Speichern</button>
       <button class="btn btn-secondary" id="btnTest">Verbindung testen</button>
       <button class="btn btn-ghost" id="btnSync">Jetzt synchronisieren</button>
+      <button class="btn btn-ghost" id="btnSyncAll" title="Auch bereits gelesene Mails durchsuchen (letzte 200) — Lese-Status bleibt unverändert">🔍 Alle Mails durchsuchen</button>
       <button class="btn btn-danger" id="btnDelete" style="display:none">Konfiguration löschen</button>
     </div>
 
@@ -110,9 +111,10 @@ input::placeholder { color: #475569; }
       1. App-Passwort bei deinem Anbieter erstellen.<br>
       2. Hier eintragen und <strong>Speichern</strong>.<br>
       3. Mit <strong>Verbindung testen</strong> prüfen, ob Login klappt.<br>
-      4. <strong>Jetzt synchronisieren</strong> zieht ungelesene Mails und importiert PDF/XML-Anhänge als Belege.<br>
+      4. <strong>Jetzt synchronisieren</strong> zieht <em>ungelesene</em> Mails und importiert PDF/XML-Anhänge als Belege.<br>
+      5. <strong>🔍 Alle Mails durchsuchen</strong> einmaliger Scan der letzten 200 Mails (read + unread) — nützlich beim Erstmaligen-Setup oder wenn frühere Belege fehlen. Lese-Status bleibt unverändert.<br>
       <br>
-      <span style="color:#64748b">Nur XML (XRechnung) und PDF (inkl. ZUGFeRD) werden verarbeitet. Duplikate werden anhand des Datei-Hashes übersprungen.</span>
+      <span style="color:#64748b">Nur XML (XRechnung) und PDF (inkl. ZUGFeRD) werden verarbeitet. Duplikate werden anhand des Datei-Hashes übersprungen — du kannst 'Alle Mails durchsuchen' beliebig oft ausführen, ohne doppelte Belege zu erzeugen.</span>
     </div>
   </div>
 </div>
@@ -235,25 +237,46 @@ async function test() {
   }
 }
 
-async function sync() {
+async function sync(allMode) {
   hide();
-  const btn = $("btnSync"); btn.disabled = true; btn.textContent = "Synchronisiere…";
-  show("Synchronisierung läuft — kann bis zu einer Minute dauern…", "info");
+  const btnId = allMode ? "btnSyncAll" : "btnSync";
+  const btn = $(btnId);
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = allMode ? "Scanne alle Mails…" : "Synchronisiere…";
+  show(
+    allMode
+      ? "Tiefen-Scan läuft — durchsucht bis zu 200 Mails (read + unread). Dauert 1-3 Minuten…"
+      : "Synchronisierung läuft — kann bis zu einer Minute dauern…",
+    "info"
+  );
   try {
-    const d = await apiCall("/email/sync", { method: "POST" });
-    if (d.message && d.processed === 0) {
+    const url = "/email/sync" + (allMode ? "?all=1" : "");
+    const d = await apiCall(url, { method: "POST" });
+    if (d.message && (d.processed || 0) === 0) {
       show(d.message, "info");
     } else {
-      show("✓ " + (d.processed || 0) + " Rechnungen importiert · "
-           + (d.skipped || 0) + " übersprungen (Duplikate) · "
-           + (d.errors || 0) + " Fehler", "ok");
+      const scanned = d.scanned != null ? (" · " + d.scanned + " Mails gescannt") : "";
+      show(
+        "✓ " + (d.processed || 0) + " Rechnungen importiert · "
+        + (d.skipped || 0) + " übersprungen (Duplikate) · "
+        + (d.errors || 0) + " Fehler"
+        + scanned,
+        "ok"
+      );
     }
     setMeta("Letzte Sync: " + new Date().toLocaleString("de-DE"));
   } catch (e) {
     show("Sync fehlgeschlagen: " + e.message, "err");
   } finally {
-    btn.disabled = false; btn.textContent = "Jetzt synchronisieren";
+    btn.disabled = false;
+    btn.textContent = origText;
   }
+}
+
+async function syncAll() {
+  if (!confirm("Tiefen-Scan: bis zu 200 Mails (read + unread) werden durchsucht.\n\nLese-Status bleibt unverändert. Duplikate werden übersprungen.\n\nFortfahren?")) return;
+  return sync(true);
 }
 
 async function del() {
@@ -280,7 +303,8 @@ async function del() {
 
 $("btnSave").addEventListener("click", save);
 $("btnTest").addEventListener("click", test);
-$("btnSync").addEventListener("click", sync);
+$("btnSync").addEventListener("click", () => sync(false));
+$("btnSyncAll").addEventListener("click", syncAll);
 $("btnDelete").addEventListener("click", del);
 
 loadConfig();

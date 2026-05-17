@@ -244,11 +244,16 @@ async def _ocr_parse_pdf(pdf_bytes: bytes, filename: str) -> Optional[dict]:
 
 # ------------------------------- sync ----------------------------------
 
-async def sync_user_inbox(user_id: int, max_messages: int = 20) -> dict:
+async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bool = False) -> dict:
     """Connect to the user's configured IMAP inbox, pull UNSEEN messages,
     extract PDF/XML attachments, run them through the invoice pipeline,
     and mark the messages as SEEN. Never raises on bad email — logs and
-    continues. Returns counts."""
+    continues. Returns counts.
+
+    all_messages=True: One-off mode triggered by user. Searches ALL messages
+    (not just UNSEEN) and does NOT mark them as SEEN — preserves the user's
+    read/unread state in their email client. Duplicate protection via file
+    hash prevents reimport. Caps max_messages at 200."""
     from autotax.db import SessionLocal, save_invoice
     from autotax.duplicate_service import generate_file_hash, find_hard_duplicate
     from autotax.models import EmailConfig, Invoice
@@ -299,14 +304,16 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20) -> dict:
             if typ != "OK":
                 return {"processed": 0, "skipped": 0, "errors": 0, "message": "Posteingang nicht verfügbar"}
 
-            typ, data = M.search(None, "UNSEEN")
+            search_query = "ALL" if all_messages else "UNSEEN"
+            typ, data = M.search(None, search_query)
             if typ != "OK" or not data or not data[0]:
                 cfg.last_sync = datetime.now(timezone.utc)
                 db.commit()
-                return {"processed": 0, "skipped": 0, "errors": 0}
+                return {"processed": 0, "skipped": 0, "errors": 0, "mode": search_query}
 
             ids = data[0].split()
-            ids = ids[-max_messages:]
+            cap = 200 if all_messages else max_messages
+            ids = ids[-cap:]  # son N mesaj (en yeniler — IMAP UID artarak gider)
 
             for msg_id in ids:
                 try:
@@ -388,18 +395,21 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20) -> dict:
 
                         processed += 1
 
-                    # Mark seen after handling attachments (even if no attachments matched)
-                    try:
-                        M.store(msg_id, "+FLAGS", "\\Seen")
-                    except Exception:
-                        logger.warning("Failed to mark message %s as seen", msg_id)
+                    # Mark seen after handling attachments (even if no attachments matched).
+                    # all_messages mode (manuel tum-tarama): okundu/okunmadi durumunu
+                    # kullanicinin email istemcisi acisindan degistirmiyoruz.
+                    if not all_messages:
+                        try:
+                            M.store(msg_id, "+FLAGS", "\\Seen")
+                        except Exception:
+                            logger.warning("Failed to mark message %s as seen", msg_id)
                 except Exception:
                     errors += 1
                     logger.exception("Email processing failed for msg %s", msg_id)
 
             cfg.last_sync = datetime.now(timezone.utc)
             db.commit()
-            return {"processed": processed, "skipped": skipped, "errors": errors}
+            return {"processed": processed, "skipped": skipped, "errors": errors, "mode": search_query, "scanned": len(ids)}
         finally:
             if M is not None:
                 try:

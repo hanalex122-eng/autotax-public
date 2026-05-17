@@ -5013,9 +5013,14 @@ def delete_email_config(user: dict = Depends(get_current_user)):
 @app.post("/email/sync")
 @limiter.limit("6/hour")
 async def email_sync(request: Request, user: dict = Depends(get_current_user)):
-    """Pull UNSEEN inbox messages, process PDF/XML attachments into invoices."""
+    """Pull inbox messages, process PDF/XML attachments into invoices.
+
+    ?all=1 -> tum mesajlari (read + unread, son 200 tane) tara,
+    SEEN bayragini degistirme. Duplicate protection file hash uzerinden.
+    """
+    all_flag = request.query_params.get("all", "").lower() in ("1", "true", "yes")
     from autotax.email_sync import sync_user_inbox
-    return await sync_user_inbox(user["sub"])
+    return await sync_user_inbox(user["sub"], all_messages=all_flag)
 
 
 @app.post("/email/test")
