@@ -39,7 +39,7 @@ from typing import Any, Callable
 # Sabitler
 # ---------------------------------------------------------------------------
 APP_NAME = "AutoTaxWatcher"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 DEFAULT_API = "https://autotax.cloud"
 
 # Auto-update state — set by updater callback, read by tray menu
