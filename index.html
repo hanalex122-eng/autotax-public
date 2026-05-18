@@ -572,7 +572,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     const iv=setInterval(refreshOverdue, 60000); // her 60 sn yenile
     return ()=>clearInterval(iv);
   },[]);
-  const CLOUD_URL="https://autotax-cloud.vercel.app";
+  const CLOUD_URL="https://autotax.cloud";
   const onCloudClick=()=>{
     if(hasCloudAddon){window.open(CLOUD_URL,"_blank");}
     else{setShowCloudModal(true);}
