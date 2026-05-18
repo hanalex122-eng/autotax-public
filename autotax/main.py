@@ -2994,7 +2994,9 @@ async def email_invoice_attachment(
         ok = _send_email(to_addr, subject, body_html,
                          attachments=[(original_name, original_bytes, mime_type)])
         if not ok:
-            err(500, "Email konnte nicht gesendet werden (Resend/SMTP nicht konfiguriert oder Fehler)")
+            from autotax.reminders import last_send_error as _last_err
+            detail = _last_err or "Resend/SMTP nicht konfiguriert oder Fehler"
+            err(500, f"Email konnte nicht gesendet werden: {detail}")
 
         try:
             audit("invoice.emailed", user_id=user["sub"],

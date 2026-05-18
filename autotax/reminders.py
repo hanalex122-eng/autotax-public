@@ -234,6 +234,11 @@ async def send_telegram(text: str, *, user_id: Optional[int] = None,
     return False
 
 
+# En son send_email hatasi — caller'lar UI'a yansitmak icin okuyabilir.
+# Thread-safe degil ama tek-istek-icinde-tek-yazim olduğu icin pratikte sorun yok.
+last_send_error: str = ""
+
+
 def send_email(to_addr: str, subject: str, body_html: str,
                attachments: Optional[list] = None) -> bool:
     """Email gonderir. Iki yol:
@@ -242,9 +247,16 @@ def send_email(to_addr: str, subject: str, body_html: str,
 
     attachments: opsiyonel liste, her oge (filename, bytes, mime_type) tuple.
                  Mahnung PDF'i icin kullanilir.
+
+    Hata olursa modul-level last_send_error degiskeni doldurulur (caller
+    UI'a yansitmak icin okuyabilir).
     """
+    global last_send_error
+    last_send_error = ""
+
     if not to_addr:
         logger.debug("[REMINDER] email skipped — no recipient")
+        last_send_error = "no recipient"
         return False
 
     # YOL 1: Resend API (oncelikli, kullanici bunu set etmis)
@@ -276,13 +288,23 @@ def send_email(to_addr: str, subject: str, body_html: str,
                 logger.info("[REMINDER] Resend email sent to %s (subject: %s)",
                             to_addr, subject[:60])
                 return True
-            logger.warning("[REMINDER] Resend API %s: %s", r.status_code, r.text[:300])
+            # Resend non-success — gercek hata mesajini yakala
+            try:
+                err_body = r.json()
+                err_msg = err_body.get("message") or err_body.get("error") or r.text[:200]
+            except Exception:
+                err_msg = r.text[:200] or f"HTTP {r.status_code}"
+            last_send_error = f"Resend API {r.status_code}: {err_msg}"
+            logger.warning("[REMINDER] Resend API %s: %s", r.status_code, err_msg)
             # Hata varsa SMTP'ye dusme dene
         except Exception as e:
+            last_send_error = f"Resend exception: {e}"
             logger.warning("[REMINDER] Resend error: %s, falling back to SMTP", e)
 
     # YOL 2: SMTP fallback
     if not (SMTP_HOST and SMTP_USER and SMTP_PASS):
+        if not last_send_error:
+            last_send_error = "neither Resend nor SMTP configured"
         logger.warning("[REMINDER] email skipped — neither Resend nor SMTP configured")
         return False
     try:
@@ -314,6 +336,7 @@ def send_email(to_addr: str, subject: str, body_html: str,
             s.send_message(msg)
         return True
     except Exception as e:
+        last_send_error = f"SMTP error: {e}"
         logger.warning("[REMINDER] email error to %s: %s", to_addr, e)
         return False
 
