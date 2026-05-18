@@ -1150,7 +1150,7 @@ def api_config():
 # --- AutoTax Watcher (desktop agent) update channel ---
 # tools/autotax_watcher/updater.py polls this every startup. Values come
 # from env so a release can be cut without redeploying the API.
-_WATCHER_DEFAULT_VERSION = "2.2.0"
+_WATCHER_DEFAULT_VERSION = "2.3.0"
 _WATCHER_RELEASES_BASE = "https://github.com/hanalex122-eng/autotax-public/releases/download"
 
 
