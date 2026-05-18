@@ -964,6 +964,9 @@ def health():
             os.getenv("AI_REVIEWER_WEBHOOK_URL") and os.getenv("AI_REVIEWER_SECRET")
         ),
         "anthropic_configured": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "resend_configured": bool(os.getenv("RESEND_API_KEY")),
+        "resend_from": (os.getenv("RESEND_FROM") or os.getenv("SMTP_FROM") or "").split("<")[0].strip() or "(default)",
+        "smtp_configured": bool(os.getenv("SMTP_HOST") and os.getenv("SMTP_USER") and os.getenv("SMTP_PASS")),
         "disk_ok": disk_ok,
     }
 
