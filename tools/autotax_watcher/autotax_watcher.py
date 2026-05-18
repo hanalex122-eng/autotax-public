@@ -55,6 +55,124 @@ MAX_429_RETRIES = 3
 DEFAULT_BACKOFF = [15, 30, 60]  # Retry-After yoksa kullanılacak süreler
 
 
+# ---------------------------------------------------------------------------
+# Scanner Profile Presets — yaygin scanner markalarinin default ciktilari
+# ---------------------------------------------------------------------------
+# Her preset, ilgili scanner'in Windows'taki varsayilan output klasorlerini
+# listeler (USERPROFILE'a gore). Ilk varolan klasor secilir.
+SCANNER_PRESETS: dict[str, dict] = {
+    "scansnap": {
+        "label": "Fujitsu ScanSnap",
+        "paths": [
+            r"%USERPROFILE%\Documents\ScanSnap",
+            r"%USERPROFILE%\Pictures\ScanSnap",
+            r"%USERPROFILE%\Desktop\ScanSnap",
+        ],
+        "filename_hint": "Scan_YYYY-MM-DD-HHMMSS.pdf",
+        "notes": "ScanSnap Home / ScanSnap Manager varsayilan ciktilari.",
+    },
+    "brother": {
+        "label": "Brother ControlCenter / iPrint",
+        "paths": [
+            r"%USERPROFILE%\Documents\Brother",
+            r"%USERPROFILE%\Pictures\ControlCenter4\Scan",
+            r"%USERPROFILE%\Pictures\Brother",
+        ],
+        "filename_hint": "BR-Scan-NN.pdf",
+        "notes": "ControlCenter4 / iPrint&Scan default save folder.",
+    },
+    "hp": {
+        "label": "HP Smart / HP Scan",
+        "paths": [
+            r"%USERPROFILE%\Documents\HP",
+            r"%USERPROFILE%\Documents\HP Smart",
+            r"%USERPROFILE%\Pictures\HP Scans",
+            r"%USERPROFILE%\OneDrive\Documents\HP Smart",
+        ],
+        "filename_hint": "HP-Scan-NNNN.pdf",
+        "notes": "HP Smart / HP Scan / OneDrive senkron klasoru.",
+    },
+    "canon": {
+        "label": "Canon IJ Scan Utility",
+        "paths": [
+            r"%USERPROFILE%\Pictures\IJ Scan Utility",
+            r"%USERPROFILE%\Documents\IJ Scan Utility",
+            r"%USERPROFILE%\Pictures\Canon",
+        ],
+        "filename_hint": "IMG_NNNN.pdf",
+        "notes": "CanoScan IJ Scan Utility varsayilanlari.",
+    },
+    "epson": {
+        "label": "Epson Smart Panel / ScanSmart",
+        "paths": [
+            r"%USERPROFILE%\Pictures\Epson Smart Panel",
+            r"%USERPROFILE%\Documents\Epson",
+            r"%USERPROFILE%\Pictures\Epson",
+        ],
+        "filename_hint": "epson_NNN.pdf",
+        "notes": "Epson Smart Panel / ScanSmart default save.",
+    },
+    "generic": {
+        "label": "Generic Scans/ Klasoru",
+        "paths": [
+            r"%USERPROFILE%\Documents\Scans",
+            r"%USERPROFILE%\Scans",
+            r"C:\Scans",
+            r"C:\AutoTaxInbox",
+        ],
+        "filename_hint": "scan_NNN.pdf",
+        "notes": "Genel Scans/ klasoru, manuel kurulan scanner'lar.",
+    },
+}
+
+
+def _expand_preset_paths(preset_name: str) -> list[Path]:
+    """Bir preset'in path listesini expand eder. Varolanlari Path objesi olarak doner."""
+    preset = SCANNER_PRESETS.get(preset_name.lower())
+    if not preset:
+        return []
+    found: list[Path] = []
+    for raw in preset["paths"]:
+        try:
+            expanded = os.path.expandvars(raw)
+            p = Path(expanded)
+            if p.exists() and p.is_dir():
+                found.append(p)
+        except Exception:
+            continue
+    return found
+
+
+def _detect_scanner_preset() -> tuple[str, list[Path]] | None:
+    """Sistemde hangi preset'in path'leri varsa onu tespit eder.
+    Birden fazla preset eslesirse en cok PDF/JPG iceren secilir."""
+    best: tuple[str, list[Path], int] | None = None  # (name, paths, file_count)
+    for name in SCANNER_PRESETS:
+        if name == "generic":
+            continue  # generic'i sadece son care olarak don
+        paths = _expand_preset_paths(name)
+        if not paths:
+            continue
+        total_files = 0
+        for p in paths:
+            try:
+                total_files += sum(
+                    1 for f in p.iterdir()
+                    if f.is_file() and f.suffix.lower() in SUPPORTED_EXTS
+                )
+            except OSError:
+                pass
+        if best is None or total_files > best[2]:
+            best = (name, paths, total_files)
+    if best:
+        return best[0], best[1]
+    # generic fallback
+    paths = _expand_preset_paths("generic")
+    if paths:
+        return "generic", paths
+    return None
+
+
 _PAGE_PATTERNS = [
     re.compile(r"^(.+)_page_?(\d+)$", re.IGNORECASE),  # scan_page_1, doc_pageN
     re.compile(r"^(.+)_p(\d+)$", re.IGNORECASE),       # scan_p1, scan_p01
@@ -163,6 +281,7 @@ class Config:
     merge_multi_page: bool = True  # scan_001/scan_002 → tek PDF merge
     merge_idle_seconds: int = 10  # son sayfa yazildiktan sonra bekleme suresi
     hot_folder_routing: bool = True  # watch/expense/, watch/income/ subfolder routing
+    scanner_preset: str = ""  # scansnap|brother|hp|canon|epson|generic — info amacli
     routing_map: dict[str, str] = field(default_factory=lambda: {
         "expense": "expense",
         "income": "income",
@@ -845,15 +964,42 @@ def show_login_dialog(cfg: Config, auth: AuthClient) -> bool:
 
 
 def show_folder_picker(cfg: Config) -> bool:
-    """İlk kurulumda izlenecek klasörü seç."""
+    """İlk kurulumda izlenecek klasörü seç.
+
+    Akilli akis:
+    1. Sistemde bilinen scanner output klasoru var mi? (_detect_scanner_preset)
+    2. Varsa: 'X scanner tespit edildi, kullanilsin mi?' dialog goster.
+    3. Hayir/yok ise: klasik filedialog ile manuel sec.
+    """
     import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
+    from tkinter import filedialog, messagebox
 
     if cfg.folders:
         return True
 
     root = tk.Tk()
     root.withdraw()
+
+    # Otomatik tespit
+    detected = _detect_scanner_preset()
+    if detected:
+        preset_name, paths = detected
+        label = SCANNER_PRESETS[preset_name]["label"]
+        first_path = str(paths[0])
+        use_it = messagebox.askyesno(
+            APP_NAME,
+            f"Scanner tespit edildi:\n\n"
+            f"{label}\n{first_path}\n\n"
+            f"Bu klasör izlensin mi? (Hayir = manuel sec)",
+        )
+        if use_it:
+            cfg.folders = [first_path]
+            cfg.scanner_preset = preset_name
+            logging.info("Scanner preset auto-applied: %s -> %s", preset_name, first_path)
+            root.destroy()
+            return True
+
+    # Manuel secim
     messagebox.showinfo(
         APP_NAME,
         "Wählen Sie den Ordner, in den Ihr Scanner gescannt — z. B. C:\\Scans",
@@ -863,6 +1009,7 @@ def show_folder_picker(cfg: Config) -> bool:
     if not folder:
         return False
     cfg.folders = [folder]
+    cfg.scanner_preset = ""  # manuel
     return True
 
 
@@ -1010,7 +1157,28 @@ def main() -> None:
     ap.add_argument("--config", help="config.json yolu (varsayılan: %LOCALAPPDATA%\\AutoTax\\Watcher\\config.json)")
     ap.add_argument("--no-tray", action="store_true", help="Tray ikonu olmadan, konsolda çalış")
     ap.add_argument("--reset", action="store_true", help="Mevcut girişi sıfırla, tekrar login iste")
+    ap.add_argument(
+        "--scanner-preset",
+        choices=list(SCANNER_PRESETS.keys()),
+        help="Scanner preset uygula (scansnap/brother/hp/canon/epson/generic) — config'i otomatik doldur",
+    )
+    ap.add_argument(
+        "--list-presets",
+        action="store_true",
+        help="Tanimli scanner preset'lerini listele ve cik",
+    )
     args = ap.parse_args()
+
+    if args.list_presets:
+        print(f"\n{APP_NAME} v{APP_VERSION} — Scanner Presets\n")
+        for name, p in SCANNER_PRESETS.items():
+            found = _expand_preset_paths(name)
+            marker = f" [tespit edildi: {found[0]}]" if found else " [bulunamadi]"
+            print(f"  {name:10s} — {p['label']}{marker}")
+            print(f"             {p['notes']}")
+            print(f"             Dosya pattern: {p['filename_hint']}")
+        print()
+        return
 
     base_dir = _config_dir()
     cfg_path = Path(args.config) if args.config else base_dir / "config.json"
@@ -1039,6 +1207,18 @@ def main() -> None:
             logging.info("Giriş iptal edildi — kapatılıyor")
             return
         cfg.save(cfg_path)
+
+    # CLI ile preset belirtildiyse manuel uygula
+    if args.scanner_preset:
+        paths = _expand_preset_paths(args.scanner_preset)
+        if not paths:
+            logging.error("--scanner-preset '%s' icin sistemde varsayilan klasor bulunamadi", args.scanner_preset)
+            logging.info("  Beklenen yollar: %s", SCANNER_PRESETS[args.scanner_preset]["paths"])
+            return
+        cfg.folders = [str(paths[0])]
+        cfg.scanner_preset = args.scanner_preset
+        cfg.save(cfg_path)
+        logging.info("Preset uygulandi: %s -> %s", args.scanner_preset, paths[0])
 
     # İlk kurulumda klasör seç
     if not cfg.folders:
