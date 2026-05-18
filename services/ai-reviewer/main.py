@@ -43,7 +43,11 @@ logger = logging.getLogger("ai-reviewer")
 
 app = FastAPI(title="AutoTax AI Reviewer", version="1.0.0")
 
-WEBHOOK_SECRET = (os.environ.get("WEBHOOK_SECRET") or "").strip()
+WEBHOOK_SECRET = (
+    os.environ.get("WEBHOOK_SECRET")
+    or os.environ.get("AI_REVIEWER_SECRET")   # autotax-public ile ayni isim
+    or ""
+).strip()
 ANTHROPIC_API_KEY = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 MODEL = (os.environ.get("MODEL") or "claude-sonnet-4-6").strip()
 
