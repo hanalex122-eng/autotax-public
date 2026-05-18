@@ -258,29 +258,57 @@ class AuthClient:
 
 
 # ---------------------------------------------------------------------------
-# UploadQueue — JSON-disk persisted retry queue
+# UploadQueue — JSON-disk persisted retry queue (v2: smart backoff + attempts)
 # ---------------------------------------------------------------------------
-class UploadQueue:
-    """Yüklenmeyi bekleyen dosyaların kalıcı kuyruğu.
+# Exponential backoff: dosya basina basarisiz upload sonrasi N. denemede
+# kac saniye bekleyecegimizi soyler. Liste sonu MAX_ATTEMPTS limitini de
+# verir (8 -> 2 saat sonra son deneme, sonra Failed/'e tasinir).
+BACKOFF_SCHEDULE = [30, 60, 120, 300, 600, 1800, 3600, 7200]  # 30s..2h
 
-    Dosya yolu listesini bir JSON'a yazar. Internet kesintisi veya server
-    hatası sonrasında yeniden başlatma sonrası bile dosyalar kaybolmaz.
+
+class UploadQueue:
+    """Yüklenmeyi bekleyen dosyaların kalıcı, akıllı kuyruğu.
+
+    v2 davranis:
+    - Her item bir dict: {path, attempts, next_retry_at, last_error}
+    - Exponential backoff (BACKOFF_SCHEDULE)
+    - MAX_ATTEMPTS = len(BACKOFF_SCHEDULE) -> astı mı `give_up` cagrisi
+    - Eski JSON (liste of str) backward-compat ile yuklenir
     """
+
+    MAX_ATTEMPTS = len(BACKOFF_SCHEDULE)
 
     def __init__(self, path: Path):
         self.path = path
         self.lock = threading.Lock()
-        self.items: list[str] = []
+        self.items: list[dict] = []  # her ogesi {path, attempts, next_retry_at, last_error}
         self._load()
 
     def _load(self) -> None:
-        if self.path.exists():
-            try:
-                data = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(data, list):
-                    self.items = [str(x) for x in data if isinstance(x, str)]
-            except (json.JSONDecodeError, OSError):
-                self.items = []
+        if not self.path.exists():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            self.items = []
+            return
+        if not isinstance(data, list):
+            self.items = []
+            return
+        out: list[dict] = []
+        now = time.time()
+        for x in data:
+            if isinstance(x, str):
+                # v1 format: sadece path string. attempts=0, hemen denenebilir.
+                out.append({"path": x, "attempts": 0, "next_retry_at": now, "last_error": ""})
+            elif isinstance(x, dict) and isinstance(x.get("path"), str):
+                out.append({
+                    "path": x["path"],
+                    "attempts": int(x.get("attempts") or 0),
+                    "next_retry_at": float(x.get("next_retry_at") or now),
+                    "last_error": str(x.get("last_error") or ""),
+                })
+        self.items = out
 
     def _save(self) -> None:
         try:
@@ -289,25 +317,82 @@ class UploadQueue:
         except OSError:
             logging.exception("Queue kaydedilemedi")
 
-    def add(self, file_path: str) -> None:
+    def _find(self, file_path: str) -> dict | None:
+        for it in self.items:
+            if it["path"] == file_path:
+                return it
+        return None
+
+    def add(self, file_path: str, error: str = "") -> None:
+        """Dosyayi kuyruga ekle (zaten varsa dokunma)."""
         with self.lock:
-            if file_path not in self.items:
-                self.items.append(file_path)
+            if self._find(file_path) is None:
+                self.items.append({
+                    "path": file_path, "attempts": 0,
+                    "next_retry_at": time.time(), "last_error": error,
+                })
                 self._save()
 
     def remove(self, file_path: str) -> None:
         with self.lock:
-            if file_path in self.items:
-                self.items.remove(file_path)
+            before = len(self.items)
+            self.items = [it for it in self.items if it["path"] != file_path]
+            if len(self.items) != before:
                 self._save()
 
-    def snapshot(self) -> list[str]:
+    def bump_failure(self, file_path: str, error: str = "") -> bool:
+        """Bir denemenin daha basarisiz oldugunu kaydet. Sonraki retry zamanini
+        exponential backoff'a gore hesaplar.
+
+        Returns:
+            True  -> daha denenecek (max'a ulasilmadi)
+            False -> max ulasildi, kullanici Failed/'e tasimali
+        """
         with self.lock:
-            return list(self.items)
+            it = self._find(file_path)
+            if it is None:
+                return False
+            it["attempts"] = int(it.get("attempts", 0)) + 1
+            it["last_error"] = error[:200] if error else ""
+            if it["attempts"] >= self.MAX_ATTEMPTS:
+                self._save()
+                return False
+            wait = BACKOFF_SCHEDULE[min(it["attempts"] - 1, len(BACKOFF_SCHEDULE) - 1)]
+            it["next_retry_at"] = time.time() + wait
+            self._save()
+            return True
+
+    def ready_paths(self) -> list[str]:
+        """next_retry_at zamanı gelmiş dosyaların yollarını döner."""
+        now = time.time()
+        with self.lock:
+            return [it["path"] for it in self.items if it["next_retry_at"] <= now]
+
+    def snapshot(self) -> list[str]:
+        """Tum dosyalarin yollarini doner (zaman gozetmez). Geri-uyumluluk."""
+        with self.lock:
+            return [it["path"] for it in self.items]
 
     def __len__(self) -> int:
         with self.lock:
             return len(self.items)
+
+
+def _check_network_reachable(api_url: str, timeout: float = 3.0) -> bool:
+    """Hizli reachability check — api_url'e HEAD/GET atip 2xx/3xx geliyor mu.
+
+    Donus:
+        True  -> sunucu erisilebilir veya kontrol sirasinda kesin emin
+                degiliz (default: True; queue drain'i bloklamasin)
+        False -> sunucu erisilmez (timeout veya connection error)
+    """
+    if not api_url:
+        return True
+    try:
+        r = requests.head(api_url.rstrip("/") + "/", timeout=timeout, allow_redirects=False)
+        return r.status_code < 500
+    except requests.RequestException:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -596,8 +681,22 @@ class Watcher:
             self._move(file_path, processed)
 
     def _drain_queue(self) -> None:
-        """Kuyruktaki dosyaları yeniden dene."""
-        for path_str in self.queue.snapshot():
+        """Kuyruktaki dosyaları yeniden dene.
+
+        Smart davranis:
+        1. Kuyrukta is var ise, network reachability check yap (3s timeout).
+           Sunucu erisilmezse drain'i atla — spam'leme.
+        2. Sadece next_retry_at zamani gelmis dosyalar denenir.
+        3. Basarisiz olursa bump_failure() ile attempts++ ve backoff hesapla.
+        4. MAX_ATTEMPTS asilirsa Failed/'e tasi.
+        """
+        if len(self.queue) == 0:
+            return
+        if not _check_network_reachable(self.cfg.api_url):
+            logging.debug("Network erisilmez — queue drain atlandi (%d dosya bekliyor)", len(self.queue))
+            return
+
+        for path_str in self.queue.ready_paths():
             file_path = Path(path_str)
             if not file_path.exists():
                 self.queue.remove(path_str)
@@ -621,7 +720,20 @@ class Watcher:
                 _tray_notify("Yükleme başarısız", f"{file_path.name}\n{msg}", force=True)
                 self.queue.remove(path_str)
                 self._move(file_path, failed)
-            # retry → kuyruğda kalsın
+            else:  # status == "retry" — gecici hata, backoff uygula
+                should_retry = self.queue.bump_failure(path_str, msg)
+                item = self.queue._find(path_str)
+                attempts_now = item["attempts"] if item else self.queue.MAX_ATTEMPTS
+                if should_retry:
+                    wait_idx = min(attempts_now - 1, len(BACKOFF_SCHEDULE) - 1)
+                    wait_s = BACKOFF_SCHEDULE[wait_idx]
+                    logging.warning("Kuyrukta retry (%d/%d, %ds bekle): %s — %s",
+                                    attempts_now, self.queue.MAX_ATTEMPTS, wait_s, file_path.name, msg)
+                else:
+                    logging.error("Max retry asildi (%d) — Failed/: %s", self.queue.MAX_ATTEMPTS, file_path.name)
+                    _tray_notify("Yükleme başarısız (kalıcı)", f"{file_path.name}\n{msg}", force=True)
+                    self.queue.remove(path_str)
+                    self._move(file_path, failed)
 
     def _find_watch_root(self, file_path: Path) -> Path | None:
         for folder in self.cfg.folders:
