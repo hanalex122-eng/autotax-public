@@ -2956,8 +2956,61 @@ async def email_invoice_attachment(
                 original_bytes = _storage.read_file(inv.file_path)
         if original_bytes is None and inv.file_data:
             original_bytes = inv.file_data
+
+        # Orijinal yoksa (kendi yazdigi income fatura) -> PDF generate et
         if not original_bytes:
-            err(400, "Kein Original-Dokument zum Anhängen vorhanden")
+            try:
+                from autotax.mahnung import _generate_invoice_pdf_bytes
+                original_bytes = _generate_invoice_pdf_bytes(inv, db)
+                original_name = f"Rechnung-{inv.invoice_number or inv.id}.pdf"
+                mime_type = "application/pdf"
+            except (ImportError, AttributeError):
+                # Fallback: ayni endpoint generate_invoice_pdf'i cagir
+                try:
+                    from reportlab.lib.pagesizes import A4
+                    from reportlab.pdfgen import canvas as pdf_canvas
+                    from reportlab.lib.units import cm
+                    from reportlab.lib.colors import HexColor
+                    companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
+                    company_name = companies[0].company_name if companies else "Meine Firma"
+                    u = db.query(User).filter(User.id == user["sub"]).first()
+                    buf = io.BytesIO()
+                    c = pdf_canvas.Canvas(buf, pagesize=A4)
+                    w, h = A4
+                    c.setFillColor(HexColor("#1a2d4a"))
+                    c.setFont("Helvetica-Bold", 22)
+                    c.drawString(2*cm, h-2.5*cm, company_name)
+                    c.setFillColor(HexColor("#00e5a0"))
+                    c.setFont("Helvetica", 9)
+                    c.drawString(2*cm, h-3*cm, f"E-Mail: {u.email if u else ''}")
+                    c.setFillColor(HexColor("#1a2d4a"))
+                    c.setFont("Helvetica-Bold", 16)
+                    typ = "RECHNUNG" if inv.invoice_type == "income" else "BELEG"
+                    c.drawString(2*cm, h-4.5*cm, typ)
+                    c.setFont("Helvetica", 11)
+                    c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or f'RE-{inv.id}'}")
+                    c.drawString(12*cm, h-5.1*cm, f"Datum: {inv.date or 'k.A.'}")
+                    c.setFont("Helvetica-Bold", 11)
+                    c.drawString(2*cm, h-6*cm, "An:" if inv.invoice_type == "income" else "Von:")
+                    c.setFont("Helvetica", 11)
+                    c.drawString(2*cm, h-6.6*cm, inv.vendor or "Unbekannt")
+                    c.setFont("Helvetica", 11)
+                    c.drawString(2*cm, h-9*cm, inv.category or "Leistung")
+                    c.drawString(13*cm, h-9*cm, inv.vat_rate or "0%")
+                    c.drawString(16*cm, h-9*cm, f"€{(inv.total_amount or 0):.2f}")
+                    c.setFont("Helvetica-Bold", 13)
+                    c.drawString(13*cm, h-12*cm, "Gesamt:")
+                    c.setFillColor(HexColor("#00e5a0"))
+                    c.drawString(16*cm, h-12*cm, f"€{(inv.total_amount or 0):.2f}")
+                    c.showPage()
+                    c.save()
+                    original_bytes = buf.getvalue()
+                    original_name = f"Rechnung-{inv.invoice_number or inv.id}.pdf"
+                    mime_type = "application/pdf"
+                except Exception as e:
+                    err(500, f"PDF generation fehlgeschlagen: {e}")
+        if not original_bytes:
+            err(400, "Kein Dokument zum Anhängen — weder Original noch generiert")
 
         # Konu + govde
         if not subject:

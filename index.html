@@ -1398,7 +1398,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
               }else alert(_extractErr(d));
             }catch(e){alert(e.message);}
           }}>📨 Mahnung</button>}
-          {detailInv.has_original&&<button style={{...css.btnOutline,borderColor:"rgba(99,102,241,0.5)",color:"#6366f1"}} onClick={async()=>{
+          {<button style={{...css.btnOutline,borderColor:"rgba(99,102,241,0.5)",color:"#6366f1"}} onClick={async()=>{
             const _lng=getLang();
             const _e3=(de,en,tr)=>_lng==="de"?de:_lng==="tr"?tr:en;
             const promptTxt=_e3("Empfänger-Email (leer = an Steuerberater):","Recipient email (empty = send to tax advisor):","Alıcı e-posta (boş = mali müşavire):");
