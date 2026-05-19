@@ -568,6 +568,12 @@ _SKIP_PATTERNS = re.compile(
     r"|.*@.*\.\w{2,4}"  # email
     r"|vielen\s+dank|merci|thank"  # thank you lines
     r"|zone\s+commerciale"  # FR shopping zone
+    # Digital PDF (Stripe/Anthropic/Resend/Verdent) ortak artiklari
+    r"|page\s+\d|seite\s+\d|of\s+\d+"
+    r"|invoice\s+(number|date|due|to)|date\s+of\s+issue|date\s+due"
+    r"|bill\s+to|ship\s+to|sold\s+to|payable\s+to|pay\s+online|pay\s+to|amount\s+due"
+    r"|description|qty|unit\s+price|subtotal|total\s+excluding"
+    r"|please|dear\s+|hallo\s+|sehr\s+geehrte"
     r")",
     re.IGNORECASE
 )
@@ -1067,7 +1073,12 @@ def _first_line_vendor_guess(raw_text: str) -> str:
         r"ust|mwst|steuer|str\.|straße|strasse|\d{4,5}\s|\d{2}\.\d{2}\.\d{2,4}|"
         r"summe|gesamt|total|betrag|brutto|netto|eur|euro|"
         r"kunde|mitarbeiter|bediener|kassierer|kassiererin|verkauf|vielen\s+dank|"
-        r"ticket|beleg\s*nr|rechnung\s*nr|trans(?:aktion)?|tse|zahlbetrag"
+        r"ticket|beleg\s*nr|rechnung\s*nr|trans(?:aktion)?|tse|zahlbetrag|"
+        # Digital PDF (Stripe/Resend/Anthropic) ortak artiklari — bunlar gercek vendor degil
+        r"page\s+\d|seite\s+\d|invoice\s*$|invoice\s+(number|date|due|to)|receipt\s*$|"
+        r"bill\s+to|ship\s+to|sold\s+to|payable\s+to|pay\s+online|pay\s+to|amount\s+due|"
+        r"date\s+of\s+issue|date\s+due|description|qty|unit\s+price|tax|subtotal|"
+        r"please\s|thank\s+you|dear\s+|hallo\s+|sehr\s+geehrte"
         r")",
         re.IGNORECASE,
     )
@@ -2378,6 +2389,37 @@ def parse_invoice(raw_text: str) -> dict:
         if merchant_cat != "other" and category == "other":
             category = merchant_cat
 
+    # Vendor sanity check — eger generic PDF artigi yakaladiysak (Page, Invoice, Receipt,
+    # vs.) VEYA hala Unbekannt ise vendor_email domain'inden vendor adi turet.
+    # Ornek: support@anthropic.com -> 'Anthropic'
+    _generic_vendor_re = re.compile(
+        r"^(unbekannt|page\s|seite\s|invoice|receipt|bill\s|description|date\b|"
+        r"summary|customer|kunde|order|amount|total|please|hello|hallo)",
+        re.IGNORECASE
+    )
+    # entities["emails"] order-preserving list -> ilk email genelde vendor (text basinda),
+    # sonrakiler musteri/bill-to. Generic provider'lari atla.
+    _free_providers = {"gmail.com", "googlemail.com", "outlook.com", "hotmail.com",
+                        "yahoo.com", "live.com", "icloud.com", "web.de", "gmx.de",
+                        "gmx.com", "gmx.net", "t-online.de", "aol.com", "mail.com"}
+    _vendor_email = ""
+    if isinstance(entities, dict) and entities.get("emails"):
+        # Vendor email = ilk non-free-provider email (text sirasi korunmus)
+        for _e in entities["emails"]:
+            _d = (_e.split("@", 1)[-1] if "@" in _e else "").strip().lower()
+            if _d and _d not in _free_providers:
+                _vendor_email = _e
+                break
+        if not _vendor_email:
+            _vendor_email = entities["emails"][0]  # fallback
+    if (vendor in ("Unbekannt", "", None) or _generic_vendor_re.match(str(vendor or ""))) and _vendor_email:
+        _domain = _vendor_email.split("@", 1)[-1].strip().lower()
+        if _domain and _domain not in _free_providers:
+            _name = _domain.split(".")[0]
+            if _name and len(_name) >= 2:
+                vendor = _name.capitalize() if _name.islower() else _name
+                vendor_source = "email_domain"
+
     return {
         "total_amount": total,
         "vat_amount": vat_amount,
@@ -2484,15 +2526,19 @@ def extract_entities(text: str) -> dict:
     domain_pat = r"(?i)\b(?:www\.)?([a-z0-9\-]{2,}\.(?:de|com|at|ch|eu|net|org|shop))\b"
     domains = [d.lower() for d in _re.findall(domain_pat, text)]
 
+    # NOT: dict.fromkeys() ile siralamayi koruyarak unique yapariz —
+    # set() kullanmak vendor email yerine musteri email'ini secebilir
+    # (Anthropic invoice: support@anthropic.com ilk, hanalex122@gmail.com sonra;
+    # set'le hash siralamasi musteri email'ini one alabiliyordu).
     return {
-        "ibans": list(set(ibans)),
-        "emails": list(set(emails)),
-        "phones": list(set(phones)),
-        "faxes": list(set(faxes)),
-        "addresses": list(set(addresses)),
-        "ust_ids": list(set(ust_ids)),
-        "hrbs": list(set(hrbs)),
-        "domains": list(set(domains)),
+        "ibans": list(dict.fromkeys(ibans)),
+        "emails": list(dict.fromkeys(emails)),
+        "phones": list(dict.fromkeys(phones)),
+        "faxes": list(dict.fromkeys(faxes)),
+        "addresses": list(dict.fromkeys(addresses)),
+        "ust_ids": list(dict.fromkeys(ust_ids)),
+        "hrbs": list(dict.fromkeys(hrbs)),
+        "domains": list(dict.fromkeys(domains)),
         "steuernrs": list(set(steuernrs)),
     }
 
