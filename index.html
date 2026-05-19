@@ -1445,6 +1445,22 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
           </div>}
         </div>
         <div style={{padding:"16px 24px",borderTop:"1px solid "+theme.border,display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
+          {/* AI-OCR direkt Anthropic — yerel OCR zayifsa bu butonla Claude Haiku tum
+              PDF'i tekrar okur, eksik field'lari doldurur. Mevcut alanlari EZMEZ. */}
+          {detailInv.has_original&&<button style={{...css.btnOutline,borderColor:"rgba(168,85,247,0.5)",color:"#a855f7"}} onClick={async()=>{
+            if(!confirm("🤖 "+(getLang()==="de"?"AI-OCR: Claude liest die PDF noch einmal und fullt fehlende Felder (Vendor, Betrag, Datum…). Manuelle Korrekturen bleiben erhalten. Fortfahren?":getLang()==="tr"?"AI-OCR: Claude PDF'i tekrar okur, eksik alanlari (Vendor, Tutar, Tarih…) doldurur. Elle duzelttigin yerler korunur. Devam?":"AI-OCR: Claude re-reads the PDF and fills missing fields (vendor, amount, date…). Manual edits are preserved. Continue?")))return;
+            try{
+              if(showToast)showToast("🤖 "+(getLang()==="de"?"AI liest die PDF… (5-15s)":getLang()==="tr"?"AI PDF'i okuyor… (5-15s)":"AI reading PDF… (5-15s)"),"info");
+              const r=await api("/invoices/"+detailInv.id+"/ai-extract",{method:"POST"});
+              const fields=(r.applied_fields||[]).length;
+              if(fields===0){
+                if(showToast)showToast("ℹ️ "+(getLang()==="de"?"AI hat keine neuen Daten gefunden — alle Felder waren schon gefullt":getLang()==="tr"?"AI yeni veri bulamadi — tum alanlar zaten doluydu":"AI found no new data — all fields already filled"),"info");
+              }else{
+                if(showToast)showToast("✓ "+fields+" "+(getLang()==="de"?"Felder aktualisiert: ":getLang()==="tr"?"alan guncellendi: ":"fields updated: ")+(r.applied_fields||[]).join(", "),"success");
+              }
+              setDetailInv(null);triggerRefresh&&triggerRefresh();
+            }catch(e){alert(_extractErr(e)||e.message);}
+          }} title={getLang()==="de"?"Anthropic Claude Haiku direkt (~$0.005-0.01)":"Anthropic Claude Haiku direct (~$0.005-0.01)"}>🤖 {getLang()==="de"?"AI-OCR (Claude)":getLang()==="tr"?"AI-OCR (Claude)":"AI-OCR (Claude)"}</button>}
           {detailInv.has_original&&<button style={{...css.btnOutline,borderColor:"rgba(59,130,246,0.5)",color:"#3b82f6"}} onClick={async()=>{
             if(!confirm("👁 "+(getLang()==="de"?"Datei mit Claude Vision neu lesen? Ersetzt aktuelle Daten.":"Re-read file with Claude Vision? Replaces current data.")))return;
             try{

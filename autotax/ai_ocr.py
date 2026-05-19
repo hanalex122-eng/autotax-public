@@ -1,0 +1,258 @@
+"""AI-powered OCR fallback: Anthropic Claude Haiku extracts invoice data
+from PDF when local OCR (pypdf + OCR.space) + parse_invoice yields weak
+results (vendor=Unbekannt, amount=0, etc.).
+
+DESIGN PRINCIPLE (kullanici talebi):
+- AI invoice OCR pipeline'inin DEFAULT akisi DEGIL.
+- Yerel OCR ve parse_invoice once dener (deterministik, hizli, ucuz).
+- Sonuc ZAYIF ise (veya kullanici 'AI ile dene' butonuna basarsa) AI cagrilir.
+- AI bu modul icinde izole — main code'a baglanmaz, bu sayede istenirse
+  ENV ile tamamen kapatilabilir.
+
+CONFIG:
+- ANTHROPIC_API_KEY env zorunlu. Yoksa is_configured() False, fonksiyon None
+  doner — caller'lar bu durumu graceful handle eder.
+- AI_OCR_FALLBACK=0 ile manuel olarak kapat (default: 1 = acik).
+- AI_OCR_MODEL env override (default: 'claude-haiku-4-5-20251001').
+"""
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import os
+import re
+from typing import Optional
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+
+_PROMPT = """You are an invoice/receipt parser. Extract structured data from this German/English/French invoice.
+
+Return ONLY a valid JSON object matching this exact schema. Use null for unknown fields:
+
+{
+  "vendor": "Official company name (e.g. 'Anthropic, PBC', 'Adobe Inc.', 'Lidl', 'Stripe'). NOT 'Page 1', 'Invoice', or generic labels.",
+  "total_amount": 107.10,
+  "vat_amount": 17.10,
+  "vat_rate": "19%",
+  "date": "YYYY-MM-DD",
+  "due_date": "YYYY-MM-DD or null",
+  "invoice_number": "R9AMD1LM",
+  "currency": "EUR",
+  "category": "software|hosting|office|travel|fuel|restaurant|telecom|insurance|advertising|professional|hardware|other",
+  "vendor_email": "support@anthropic.com or null",
+  "vendor_domain": "anthropic.com or null",
+  "vendor_address": "street + city or null",
+  "vendor_iban": "IBAN or null",
+  "vendor_ust_id": "DE123456789 or null",
+  "invoice_type": "expense or income (expense unless clearly outgoing invoice you sent)"
+}
+
+Rules:
+- total_amount = GROSS (Brutto, incl. VAT). vat_amount separate. If VAT not visible, vat_amount=0.
+- date in ISO format YYYY-MM-DD always.
+- currency: EUR, USD, GBP, CHF, TRY only. Default EUR if symbol unclear.
+- category: pick best fit from list above. AI/SaaS subscriptions -> "software".
+- vendor: prefer the entity that issued the invoice (not "Bill to" recipient).
+- Return ONLY JSON. No markdown fences, no commentary. Empty result -> {"vendor": null, "total_amount": null, ...}
+
+OCR text (may be incomplete, use as supplement to PDF):
+"""
+
+
+def is_configured() -> bool:
+    """True if Anthropic API key is set AND fallback not explicitly disabled."""
+    if not (os.getenv("ANTHROPIC_API_KEY") or "").strip():
+        return False
+    if (os.getenv("AI_OCR_FALLBACK") or "1").strip() == "0":
+        return False
+    return True
+
+
+def _strip_json_fences(text: str) -> str:
+    """LLM bazen ```json ... ``` ile sariyor. Soyalim."""
+    text = text.strip()
+    # Leading fence
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    # Trailing fence
+    text = re.sub(r"\s*```\s*$", "", text)
+    return text.strip()
+
+
+async def ai_extract_invoice(
+    pdf_bytes: Optional[bytes] = None,
+    ocr_text: str = "",
+    filename: str = "",
+) -> Optional[dict]:
+    """Anthropic API'sine PDF + OCR text gondererek invoice data extract et.
+
+    Args:
+        pdf_bytes: Original PDF bytes (Anthropic supports up to ~32 MB via
+            document block). 5 MB ustu eklenmez (cost/latency icin).
+        ocr_text: Local OCR'in cikardigi text — AI'a context olarak verilir.
+        filename: Log icin.
+
+    Returns:
+        dict with keys: vendor, total_amount, vat_amount, vat_rate, date,
+        due_date, invoice_number, currency, category, vendor_email,
+        vendor_domain, vendor_address, vendor_iban, vendor_ust_id,
+        invoice_type. Bilinmeyen alanlar null.
+
+        None doner: API key yok, API hatasi, JSON parse fail, vs.
+
+    Maliyet (Haiku 4.5, Jan 2026 fiyatlari): tipik 1-sayfa PDF parse
+    ~$0.005-0.01 — kullanici tarafindan manuel cagrildiginda ucuz.
+    """
+    api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        logger.debug("AI OCR skip: ANTHROPIC_API_KEY not set")
+        return None
+    if (os.getenv("AI_OCR_FALLBACK") or "1").strip() == "0":
+        logger.debug("AI OCR skip: AI_OCR_FALLBACK=0")
+        return None
+
+    model = (os.getenv("AI_OCR_MODEL") or "claude-haiku-4-5-20251001").strip()
+    # OCR text cap — prompt cok uzun olmasin
+    ocr_text = (ocr_text or "")[:4000]
+
+    content: list[dict] = []
+
+    # PDF document block — Anthropic vision direkt PDF okur (sayfa sayfa).
+    # 5 MB ustu skip (latency + maliyet). Boyle PDF'leri zaten local OCR
+    # handle ediyor, AI'a gerek yok genelde.
+    if pdf_bytes and len(pdf_bytes) <= 5 * 1024 * 1024:
+        try:
+            content.append({
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": base64.b64encode(pdf_bytes).decode(),
+                },
+            })
+        except Exception as e:
+            logger.warning("AI OCR: PDF attach failed: %s", e)
+    elif pdf_bytes:
+        logger.info("AI OCR: PDF too large (%d bytes), using OCR text only", len(pdf_bytes))
+
+    content.append({
+        "type": "text",
+        "text": _PROMPT + (ocr_text or "[no OCR text available]"),
+    })
+
+    payload = {
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": content}],
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                json=payload,
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+            )
+            if r.status_code != 200:
+                logger.warning(
+                    "AI OCR Anthropic API %d for %s: %s",
+                    r.status_code, filename, r.text[:300],
+                )
+                return None
+            data = r.json()
+            # Response: { content: [{ type:"text", text:"..." }], ... }
+            blocks = data.get("content") or []
+            if not blocks:
+                logger.warning("AI OCR empty response for %s", filename)
+                return None
+            text = ""
+            for b in blocks:
+                if b.get("type") == "text":
+                    text += b.get("text") or ""
+            text = _strip_json_fences(text)
+            if not text:
+                logger.warning("AI OCR no text content for %s", filename)
+                return None
+            try:
+                result = json.loads(text)
+            except json.JSONDecodeError as je:
+                # Belki LLM ekstra metin yazdi — JSON'i regex'le cikar
+                m = re.search(r"\{[\s\S]*\}", text)
+                if m:
+                    try:
+                        result = json.loads(m.group(0))
+                    except Exception:
+                        logger.warning("AI OCR JSON parse failed for %s: %s", filename, je)
+                        return None
+                else:
+                    logger.warning("AI OCR no JSON found in response for %s: %s", filename, text[:200])
+                    return None
+            if not isinstance(result, dict):
+                logger.warning("AI OCR returned non-dict for %s: %r", filename, type(result))
+                return None
+            # Normalize: total_amount/vat_amount sayisal olsun
+            for k in ("total_amount", "vat_amount"):
+                v = result.get(k)
+                if v is None:
+                    continue
+                try:
+                    result[k] = float(v)
+                except (TypeError, ValueError):
+                    result[k] = None
+            logger.info(
+                "AI OCR extracted for %s: vendor=%r total=%s date=%s",
+                filename, result.get("vendor"), result.get("total_amount"),
+                result.get("date"),
+            )
+            return result
+    except httpx.TimeoutException:
+        logger.warning("AI OCR timeout for %s", filename)
+        return None
+    except Exception:
+        logger.exception("AI OCR fallback failed for %s", filename)
+        return None
+
+
+# ─── Merge helper (caller'lar icin kolaylik) ──────────────────────────
+
+# 'Empty' kabul edilen degerler — bunlardan biri varsa AI degeri ile uzersine yaz.
+_EMPTY_VALUES = (None, "", 0, 0.0, "Unbekannt", "unknown", "0%")
+
+
+def merge_ai_into_parsed(parsed: dict, ai_result: dict) -> dict:
+    """parse_invoice'in ciktisina AI sonucunu merge eder.
+
+    Politika: AI degeri SADECE local degeri bos/zayif ise ustune yazar.
+    Boylece guvenilir local extractions korunur, AI sadece bosluklari doldurur.
+    """
+    if not parsed or not isinstance(parsed, dict):
+        parsed = {}
+    if not ai_result or not isinstance(ai_result, dict):
+        return parsed
+    mergeable = (
+        "vendor", "total_amount", "vat_amount", "vat_rate",
+        "date", "due_date", "invoice_number", "currency",
+        "category", "vendor_email", "vendor_domain",
+        "vendor_address", "vendor_iban", "vendor_ust_id",
+        "invoice_type",
+    )
+    changed = []
+    for k in mergeable:
+        ai_v = ai_result.get(k)
+        if ai_v in _EMPTY_VALUES:
+            continue
+        local_v = parsed.get(k)
+        if local_v in _EMPTY_VALUES:
+            parsed[k] = ai_v
+            changed.append(k)
+    if changed:
+        parsed["ai_fallback_used"] = True
+        parsed["ai_fields_filled"] = changed
+    return parsed

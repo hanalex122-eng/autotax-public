@@ -6861,6 +6861,119 @@ def patch_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: 
     return result
 
 
+@app.post("/invoices/{invoice_id}/ai-extract")
+@limiter.limit("30/hour")
+async def invoice_ai_extract(
+    invoice_id: int,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Tek invoice icin AI-OCR yeniden cikartim — kullanici manuel
+    'AI ile dene' butonuna basinca cagrilir.
+
+    Akis:
+    1. Invoice'u DB'den oku (sahiplik kontrolu).
+    2. Original PDF bytes'i fetch et (storage path -> file_data BLOB fallback).
+    3. autotax.ai_ocr.ai_extract_invoice() Anthropic'e gonderir.
+    4. Donen alanlari invoice'a uygula (sadece sahibi olan field'lari).
+    5. Audit log + guncellenmis dict don.
+
+    Acting mode advisor'lara izinli DEGIL — write islem (middleware blocklayacak).
+    """
+    from autotax.ai_ocr import ai_extract_invoice, is_configured, _EMPTY_VALUES
+    if not is_configured():
+        err(503, "AI-OCR Fallback nicht konfiguriert (ANTHROPIC_API_KEY fehlt oder AI_OCR_FALLBACK=0)")
+
+    db = SessionLocal()
+    try:
+        inv = db.query(Invoice).filter(
+            Invoice.id == invoice_id, Invoice.user_id == user["sub"]
+        ).first()
+        if not inv:
+            err(404, "Rechnung nicht gefunden")
+
+        # Original PDF/XML bytes — once storage path, sonra legacy BLOB
+        pdf_bytes: bytes | None = None
+        if inv.file_path:
+            try:
+                from autotax import storage as _storage
+                if _storage.file_exists(inv.file_path):
+                    pdf_bytes = _storage.read_file(inv.file_path)
+            except Exception:
+                logger.exception("AI extract: storage read failed for invoice %s", invoice_id)
+        if pdf_bytes is None and inv.file_data:
+            pdf_bytes = bytes(inv.file_data)
+
+        if not pdf_bytes:
+            err(400, "Original-PDF nicht verfügbar (Beleg ohne Anhang oder gelöscht)")
+
+        # Local raw_text varsa AI'a context olarak ver (yoksa sorun degil)
+        ocr_text = inv.raw_text or ""
+        filename = inv.filename or f"invoice-{invoice_id}.pdf"
+
+        ai_result = await ai_extract_invoice(pdf_bytes=pdf_bytes, ocr_text=ocr_text, filename=filename)
+        if not ai_result:
+            err(502, "AI-OCR konnte den Beleg nicht verarbeiten (siehe Server-Logs)")
+
+        # Apply: bos olan Invoice field'larini AI degerleriyle doldur
+        # (kullanicinin manuel duzelttigi alanlar varsa USTUNE YAZMA — _EMPTY_VALUES kontrolu)
+        applied: dict[str, object] = {}
+        def _maybe_set(attr: str, val):
+            current = getattr(inv, attr, None)
+            if val in _EMPTY_VALUES:
+                return
+            if current in _EMPTY_VALUES:
+                setattr(inv, attr, val)
+                applied[attr] = val
+
+        _maybe_set("vendor", ai_result.get("vendor"))
+        # total_amount/vat_amount float'a cast
+        for fld in ("total_amount", "vat_amount"):
+            v = ai_result.get(fld)
+            if v is not None:
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    v = None
+                if v is not None:
+                    _maybe_set(fld, v)
+        _maybe_set("vat_rate", ai_result.get("vat_rate"))
+        _maybe_set("date", ai_result.get("date"))
+        _maybe_set("due_date", ai_result.get("due_date"))
+        _maybe_set("invoice_number", ai_result.get("invoice_number"))
+        _maybe_set("category", ai_result.get("category"))
+        _maybe_set("vendor_email", ai_result.get("vendor_email"))
+        _maybe_set("vendor_address", ai_result.get("vendor_address"))
+        _maybe_set("vendor_iban", ai_result.get("vendor_iban"))
+        _maybe_set("vendor_ust_id", ai_result.get("vendor_ust_id"))
+        if ai_result.get("invoice_type") in ("expense", "income"):
+            _maybe_set("invoice_type", ai_result["invoice_type"])
+
+        if applied:
+            db.commit()
+
+        try:
+            audit("invoice.ai_extract", user_id=user["sub"], resource_type="invoice",
+                  resource_id=invoice_id, payload={"applied": list(applied.keys()),
+                                                   "ai_result": ai_result},
+                  request=request)
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "invoice_id": invoice_id,
+            "applied_fields": list(applied.keys()),
+            "ai_result": ai_result,
+            "vendor": inv.vendor,
+            "total_amount": inv.total_amount,
+            "vat_amount": inv.vat_amount,
+            "date": inv.date,
+        }
+    finally:
+        db.close()
+
+
 @app.put("/invoices/{invoice_id}")
 def put_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: dict = Depends(get_acting_context)):
     require_owner_or_export(user, "write")
