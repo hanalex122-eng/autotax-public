@@ -2900,6 +2900,252 @@ def get_mahnung_pdf(
         db.close()
 
 
+def _fetch_invoice_pdf_bytes(inv, db, user_sub: int) -> tuple[bytes | None, str, str]:
+    """Bir fatura icin PDF bytes + filename + mime_type doner.
+    Onceligi orijinal scan PDF/XML. Yoksa reportlab ile fatura PDF'i uretir.
+    Hata olursa (None, name, mime) doner."""
+    # Onceligi: orijinal disk dosyasi -> legacy BLOB
+    original_bytes = None
+    original_name = inv.filename or f"beleg-{inv.id}.pdf"
+    mime_type = inv.file_content_type or "application/pdf"
+    if inv.file_path:
+        from autotax import storage as _storage
+        if _storage.file_exists(inv.file_path):
+            try:
+                original_bytes = _storage.read_file(inv.file_path)
+            except Exception:
+                logger.exception("storage read failed for invoice %s", inv.id)
+    if original_bytes is None and inv.file_data:
+        original_bytes = inv.file_data
+
+    if original_bytes:
+        return original_bytes, original_name, mime_type
+
+    # Orijinal yoksa -> reportlab ile basit fatura PDF'i
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas as pdf_canvas
+        from reportlab.lib.units import cm
+        from reportlab.lib.colors import HexColor
+        companies = db.query(UserCompany).filter(UserCompany.user_id == user_sub).all()
+        company_name = companies[0].company_name if companies else "Meine Firma"
+        u = db.query(User).filter(User.id == user_sub).first()
+        buf = io.BytesIO()
+        c = pdf_canvas.Canvas(buf, pagesize=A4)
+        w, h = A4
+        c.setFillColor(HexColor("#1a2d4a"))
+        c.setFont("Helvetica-Bold", 22)
+        c.drawString(2*cm, h-2.5*cm, company_name)
+        c.setFillColor(HexColor("#00e5a0"))
+        c.setFont("Helvetica", 9)
+        c.drawString(2*cm, h-3*cm, f"E-Mail: {u.email if u else ''}")
+        c.setFillColor(HexColor("#1a2d4a"))
+        c.setFont("Helvetica-Bold", 16)
+        typ = "RECHNUNG" if inv.invoice_type == "income" else "BELEG"
+        c.drawString(2*cm, h-4.5*cm, typ)
+        c.setFont("Helvetica", 11)
+        c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or f'RE-{inv.id}'}")
+        c.drawString(12*cm, h-5.1*cm, f"Datum: {inv.date or 'k.A.'}")
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(2*cm, h-6*cm, "An:" if inv.invoice_type == "income" else "Von:")
+        c.setFont("Helvetica", 11)
+        c.drawString(2*cm, h-6.6*cm, inv.vendor or "Unbekannt")
+        c.setFont("Helvetica", 11)
+        c.drawString(2*cm, h-9*cm, inv.category or "Leistung")
+        c.drawString(13*cm, h-9*cm, inv.vat_rate or "0%")
+        c.drawString(16*cm, h-9*cm, f"€{(inv.total_amount or 0):.2f}")
+        c.setFont("Helvetica-Bold", 13)
+        c.drawString(13*cm, h-12*cm, "Gesamt:")
+        c.setFillColor(HexColor("#00e5a0"))
+        c.drawString(16*cm, h-12*cm, f"€{(inv.total_amount or 0):.2f}")
+        c.showPage()
+        c.save()
+        generated_name = f"Rechnung-{inv.invoice_number or inv.id}.pdf"
+        return buf.getvalue(), generated_name, "application/pdf"
+    except Exception:
+        logger.exception("PDF generation failed for invoice %s", inv.id)
+        return None, original_name, mime_type
+
+
+# Bulk email limits
+_BULK_EMAIL_MAX_INVOICES = 25
+_BULK_EMAIL_MAX_TOTAL_BYTES = 25 * 1024 * 1024  # 25 MB toplam (Resend limit ~40 MB)
+
+
+@app.post("/invoices/email-bulk")
+@limiter.limit("10/hour")
+async def email_invoices_bulk(
+    request: Request,
+    body: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Birden cok fatura PDF'ini tek mail icinde attachment olarak gonder.
+
+    body:
+      invoice_ids (list[int], zorunlu): gonderilecek fatura ID'leri
+      to (str): alici email
+      subject (str, ops.)
+      note (str, ops.)
+      to_advisor (bool, ops.): True ise bagli Steuerberater'e gider
+
+    Donus:
+      {success, sent: N, failed: [{id, name, reason}], skipped: [{id, name, reason}],
+       total, subject, to, total_size_bytes}
+    """
+    import re as _re
+    from autotax.reminders import send_email as _send_email
+    from autotax.models import AdvisorRelationship as _AdvRel
+
+    invoice_ids = body.get("invoice_ids") or []
+    if not isinstance(invoice_ids, list) or not invoice_ids:
+        err(400, "invoice_ids zorunlu (en az 1 fatura ID)")
+    if len(invoice_ids) > _BULK_EMAIL_MAX_INVOICES:
+        err(400, f"Maximum {_BULK_EMAIL_MAX_INVOICES} fatura tek mail'de gonderilebilir")
+    try:
+        invoice_ids = [int(x) for x in invoice_ids]
+    except (TypeError, ValueError):
+        err(400, "invoice_ids list of int olmali")
+
+    to_addr = (body.get("to") or "").strip()
+    subject = (body.get("subject") or "").strip()
+    note = (body.get("note") or "").strip()
+    to_advisor = bool(body.get("to_advisor"))
+
+    db = SessionLocal()
+    try:
+        if to_advisor:
+            rel = db.query(_AdvRel).filter(
+                _AdvRel.client_user_id == user["sub"], _AdvRel.status == "active"
+            ).first()
+            if not rel:
+                err(400, "Kein aktiver Steuerberater verknüpft — bitte zuerst einladen")
+            adv = db.query(User).filter(User.id == rel.advisor_user_id).first()
+            if not adv or not adv.email:
+                err(400, "Steuerberater hat keine gültige Email")
+            to_addr = adv.email
+
+        if not to_addr or not _re.match(r"[^@\s]+@[^@\s]+\.[^@\s]+", to_addr):
+            err(400, "Bitte gültige Email-Adresse angeben")
+
+        # Faturalari topla
+        invoices = db.query(Invoice).filter(
+            Invoice.id.in_(invoice_ids), Invoice.user_id == user["sub"]
+        ).all()
+        found_ids = {inv.id for inv in invoices}
+        missing_ids = [i for i in invoice_ids if i not in found_ids]
+
+        attachments: list[tuple] = []
+        failed: list[dict] = []
+        skipped: list[dict] = []
+        total_size = 0
+
+        # Bulunamayan ID'ler -> skipped
+        for mid in missing_ids:
+            skipped.append({"id": mid, "name": f"#{mid}", "reason": "Rechnung nicht gefunden"})
+
+        for inv in invoices:
+            pdf_bytes, fname, mime = _fetch_invoice_pdf_bytes(inv, db, user["sub"])
+            if not pdf_bytes:
+                failed.append({"id": inv.id, "name": inv.vendor or fname, "reason": "PDF konnte nicht erstellt werden"})
+                continue
+            if total_size + len(pdf_bytes) > _BULK_EMAIL_MAX_TOTAL_BYTES:
+                skipped.append({
+                    "id": inv.id, "name": inv.vendor or fname,
+                    "reason": f"Größenlimit überschritten (max {_BULK_EMAIL_MAX_TOTAL_BYTES // (1024*1024)} MB)",
+                })
+                continue
+            attachments.append((fname, pdf_bytes, mime))
+            total_size += len(pdf_bytes)
+
+        if not attachments:
+            return {
+                "success": False,
+                "sent": 0,
+                "failed": failed,
+                "skipped": skipped,
+                "total": len(invoice_ids),
+                "message": "Keine Anhänge — alle Rechnungen fehlgeschlagen oder übersprungen",
+            }
+
+        if not subject:
+            subject = f"{len(attachments)} Belege — AutoTax-Cloud"
+
+        sender_user = db.query(User).filter(User.id == user["sub"]).first()
+        sender_email = sender_user.email if sender_user else ""
+
+        # Liste body'sini hazirla
+        rows_html = ""
+        for inv in invoices:
+            if inv.id not in {inv2.id for inv2 in invoices if any(a[0].endswith(f"-{inv2.id}.pdf") or a[0] == (inv2.filename or "") for a in attachments)}:
+                continue
+            amt = f"€{inv.total_amount:.2f}" if inv.total_amount else "—"
+            rows_html += (
+                f"<tr style='border-bottom:1px solid #e2e8f0;'>"
+                f"<td style='padding:8px 12px;'>{inv.vendor or 'Unbekannt'}</td>"
+                f"<td style='padding:8px 12px;'>{inv.date or '—'}</td>"
+                f"<td style='padding:8px 12px;font-family:monospace;text-align:right;'>{amt}</td>"
+                f"</tr>"
+            )
+
+        note_html = ""
+        if note:
+            safe_note = _re.sub("<", "&lt;", note)
+            safe_note = safe_note.replace("\n", "<br>")
+            note_html = f"<p style='background:#f1f5f9;padding:12px;border-left:3px solid #00e5a0;margin:16px 0;'>{safe_note}</p>"
+
+        body_html = f"""
+<div style="font-family:Arial,sans-serif;color:#0a0e17;max-width:680px;">
+  <p>Hallo,</p>
+  <p>im Anhang finden Sie <strong>{len(attachments)} Belege</strong>, automatisch versendet aus <strong>AutoTax-Cloud</strong>.</p>
+  {note_html}
+  <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px;">
+    <thead>
+      <tr style="background:#0a0e17;color:#ffffff;">
+        <th style="padding:8px 12px;text-align:left;">Lieferant</th>
+        <th style="padding:8px 12px;text-align:left;">Datum</th>
+        <th style="padding:8px 12px;text-align:right;">Betrag</th>
+      </tr>
+    </thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+  <p style="color:#64748b;font-size:12px;margin-top:24px;">
+    Absender: {sender_email}<br>
+    Gesamtgröße: {total_size / 1024:.1f} KB · {len(attachments)} Datei(en)<br>
+    Originaldateien im Anhang sind unverändert wie hochgeladen.
+  </p>
+</div>
+"""
+        ok = _send_email(to_addr, subject, body_html, attachments=attachments)
+        if not ok:
+            from autotax.reminders import last_send_error as _last_err
+            detail = _last_err or "Resend/SMTP error"
+            err(500, f"Email konnte nicht gesendet werden: {detail}")
+
+        try:
+            audit("invoice.emailed_bulk", user_id=user["sub"],
+                  resource_type="invoice", resource_id=None,
+                  payload={
+                      "to": to_addr, "to_advisor": to_advisor,
+                      "sent": len(attachments), "failed": len(failed),
+                      "skipped": len(skipped), "total_size": total_size,
+                  }, request=request)
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "sent": len(attachments),
+            "failed": failed,
+            "skipped": skipped,
+            "total": len(invoice_ids),
+            "subject": subject,
+            "to": to_addr,
+            "total_size_bytes": total_size,
+        }
+    finally:
+        db.close()
+
+
 @app.post("/invoices/{invoice_id}/email")
 @limiter.limit("20/hour")
 async def email_invoice_attachment(

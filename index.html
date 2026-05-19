@@ -581,6 +581,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     {id:"dashboard",icon:I.dashboard,label:_t("dashboard")},
     ...(F.email_import!==false?[{id:"email-import",icon:I.chat,label:"Email-Import",href:"/email-settings"}]:[]),
     {id:"invoices",icon:I.invoice,label:_t("invoices"),badge:overdueCount>0?overdueCount:null},
+    {id:"send-invoices",icon:I.export,label:getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices",onClick:()=>{try{sessionStorage.setItem("atx_invoices_send","1");}catch(e){}onNav("invoices");}},
     ...(F.upload!==false?[{id:"upload",icon:I.upload,label:_t("upload")}]:[]),
     ...(F.tableimport!==false?[{id:"tableimport",icon:I.upload,label:_t("tableimport")}]:[]),
     ...(F.beleg_manual!==false?[{id:"beleg",icon:I.invoice,label:"Neuen Beleg erfassen",href:"/beleg"}]:[]),
@@ -988,9 +989,15 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
   const[syncing,setSyncing]=useState(false);
   const syncAll=async()=>{setSyncing(true);try{const r=await api("/bookkeeping/sync-invoices",{method:"POST"});if(showToast)showToast((r.synced||0)+" sync, "+(r.reverse_synced||0)+" synced from cash book","success");doSearch();}catch(e){if(showToast)showToast(_t("sync_failed"),"error");}setSyncing(false);};
   useEffect(()=>{load(filter,filterCat,dateFrom,dateTo);},[refreshKey]);
+  const[sendModeHint,setSendModeHint]=useState(false);
   useEffect(()=>{
-    const hint=typeof sessionStorage!=="undefined"&&sessionStorage.getItem("atx_invoices_status");
+    if(typeof sessionStorage==="undefined")return;
+    const hint=sessionStorage.getItem("atx_invoices_status");
     if(hint){setFilterStatus(hint);sessionStorage.removeItem("atx_invoices_status");}
+    if(sessionStorage.getItem("atx_invoices_send")){
+      setSendModeHint(true);
+      sessionStorage.removeItem("atx_invoices_send");
+    }
   },[]);
   const del=async(id)=>{
     if(_isActing){if(showToast)showToast(_readOnlyTip,"info");return;}
@@ -1006,6 +1013,54 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
       if(showToast)showToast((r.deleted||0)+" Invoice(s) deleted","info");
     }catch(e){if(showToast)showToast("Delete failed: "+e.message,"error");}
     setDeleting(false);doSearch();if(triggerRefresh)triggerRefresh();
+  };
+
+  // Bulk email — toplu mail gonderme (modal + form)
+  const[bulkEmail,setBulkEmail]=useState({open:false,to:"",subject:"",note:"",toAdvisor:false,sending:false});
+  const openBulkEmail=()=>{
+    if(selected.size===0)return;
+    const _l=getLang();
+    const defaultSub=_l==="de"?selected.size+" Belege — AutoTax-Cloud":_l==="tr"?selected.size+" Belge — AutoTax-Cloud":selected.size+" Receipts — AutoTax-Cloud";
+    setBulkEmail({open:true,to:"",subject:defaultSub,note:"",toAdvisor:false,sending:false});
+  };
+  const sendBulkEmail=async()=>{
+    if(bulkEmail.sending)return;
+    const _l=getLang();
+    const errTr=(de,en,tr)=>_l==="de"?de:_l==="tr"?tr:en;
+    if(!bulkEmail.toAdvisor){
+      if(!bulkEmail.to.trim()||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(bulkEmail.to.trim())){
+        alert(errTr("Bitte gültige Email-Adresse angeben","Please enter a valid email address","Lütfen geçerli bir e-posta adresi girin"));return;
+      }
+    }
+    setBulkEmail(b=>({...b,sending:true}));
+    try{
+      const r=await _authFetch(API+"/invoices/email-bulk",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        invoice_ids:[...selected],
+        to:bulkEmail.to.trim(),
+        subject:bulkEmail.subject.trim(),
+        note:bulkEmail.note.trim(),
+        to_advisor:bulkEmail.toAdvisor,
+      })});
+      const d=await r.json();
+      if(r.ok&&d.success){
+        const sent=d.sent||0,failed=(d.failed||[]).length,skipped=(d.skipped||[]).length;
+        let msg=errTr(`✓ ${sent} Belege gesendet an ${d.to}`,`✓ ${sent} receipts sent to ${d.to}`,`✓ ${sent} belge ${d.to} adresine gönderildi`);
+        if(failed>0||skipped>0)msg+=errTr(` (${failed} fehlgeschlagen, ${skipped} übersprungen)`,` (${failed} failed, ${skipped} skipped)`,` (${failed} başarısız, ${skipped} atlandı)`);
+        if(showToast)showToast(msg,"success");
+        if((failed>0||skipped>0)&&((d.failed||[]).length||(d.skipped||[]).length)){
+          const lines=[...(d.failed||[]).map(f=>`✗ ${f.name} (#${f.id}): ${f.reason}`),...(d.skipped||[]).map(s=>`⊘ ${s.name} (#${s.id}): ${s.reason}`)];
+          alert(errTr("Folgende Belege wurden nicht gesendet:","The following receipts were not sent:","Aşağıdaki belgeler gönderilmedi:")+"\n\n"+lines.join("\n"));
+        }
+        setBulkEmail({open:false,to:"",subject:"",note:"",toAdvisor:false,sending:false});
+        setSelected(new Set());
+      }else{
+        alert(_extractErr(d)||"Email failed");
+        setBulkEmail(b=>({...b,sending:false}));
+      }
+    }catch(e){
+      alert(e.message);
+      setBulkEmail(b=>({...b,sending:false}));
+    }
   };
 
   const toggleSelect=(id)=>{setSelected(p=>{const n=new Set(p);n.has(id)?n.delete(id):n.add(id);return n;});};
@@ -1066,10 +1121,20 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
   };
   const tc={income:{bg:theme.accentSoft,c:theme.accent,t:_t("income")},expense:{bg:theme.dangerSoft,c:theme.danger,t:_t("expense")}};
   return(<div style={{display:"flex",flexDirection:"column",gap:16}}>
+    {sendModeHint&&<div style={{padding:"12px 16px",background:"linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.10))",border:"1px solid rgba(99,102,241,0.4)",borderRadius:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+      <span style={{fontSize:22}}>📧</span>
+      <div style={{flex:1,minWidth:200}}>
+        <div style={{fontSize:13,fontWeight:700,color:theme.text}}>{getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"}</div>
+        <div style={{fontSize:12,color:theme.textMuted}}>{getLang()==="de"?"Wählen Sie unten Rechnungen aus (☑) und klicken Sie '📧 per Email' im Aktionsmenü.":getLang()==="tr"?"Aşağıdan faturaları seç (☑), sonra '📧 e-posta' butonuna bas.":"Select invoices below (☑) and click '📧 via email' in the toolbar."}</div>
+      </div>
+      <button style={{...css.btnOutline,borderColor:theme.border,fontSize:11,padding:"6px 12px"}} onClick={()=>setSendModeHint(false)}>{getLang()==="de"?"Schließen":getLang()==="tr"?"Kapat":"Close"}</button>
+    </div>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
       <div><h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>{_t("invoices")}</h2><p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{filtered.length}/{total} shown</p></div>
-      {selected.size>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+      {selected.size>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        <span style={{fontSize:12,fontWeight:700,padding:"6px 12px",borderRadius:8,background:theme.accentSoft,color:theme.accent,whiteSpace:"nowrap"}}>{getLang()==="de"?`${selected.size} Rechnung${selected.size===1?"":"en"} ausgewählt`:getLang()==="tr"?`${selected.size} fatura seçildi`:`${selected.size} invoice${selected.size===1?"":"s"} selected`}</span>
         <button style={css.btn(theme.danger)} onClick={deleteSelected} disabled={deleting}><Icon d={I.trash} size={16} color="#fff"/>{deleting?"...":selected.size+t("n_delete")}</button>
+        <button style={{...css.btnOutline,borderColor:"rgba(99,102,241,0.5)",color:"#6366f1"}} onClick={openBulkEmail}>📧 {selected.size} {getLang()==="de"?"per Email":getLang()==="tr"?"e-posta":"via email"}</button>
         <button style={{...css.btnOutline,borderColor:"rgba(0,194,255,0.4)",color:"#00c2ff"}} onClick={()=>downloadBulkPDF([...selected],showToast)}>🖨️ {selected.size} PDF</button>
         <button style={{...css.btnOutline,borderColor:"rgba(16,185,129,0.4)",color:theme.accent}} onClick={()=>downloadBulkOriginal([...selected],invoices,showToast)}>⬇ {selected.size} Originale</button>
         <button style={{...css.btnOutline,borderColor:"rgba(59,130,246,0.4)",color:theme.blue}} onClick={async()=>{if(!confirm(selected.size+" Copy invoices to Bookkeeping?"))return;let ok=0;for(const id of selected){const inv=invoices.find(i=>i.id===id);if(!inv)continue;try{await api("/bookkeeping",{method:"POST",body:JSON.stringify({description:inv.vendor||"Rechnung",vendor:inv.vendor,gross_amount:inv.total_amount,vat_rate:inv.vat_rate||"19%",entry_type:inv.invoice_type||"expense",category:inv.category||"other",date:inv.date||"",notes:"Aus Rechnungen ID:"+inv.id})});ok++;}catch(ex){}}alert(ok+" → copied to Bookkeeping");setSelected(new Set());doSearch();}}>→ Cash Book ({selected.size})</button>
@@ -1397,31 +1462,46 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
               }else alert(_extractErr(d));
             }catch(e){alert(e.message);}
           }}>📨 Mahnung</button>}
-          {<button style={{...css.btnOutline,borderColor:"rgba(99,102,241,0.5)",color:"#6366f1"}} onClick={async()=>{
-            const _lng=getLang();
-            const _e3=(de,en,tr)=>_lng==="de"?de:_lng==="tr"?tr:en;
-            const promptTxt=_e3("Empfänger-Email (leer = an Steuerberater):","Recipient email (empty = send to tax advisor):","Alıcı e-posta (boş = mali müşavire):");
-            const to=window.prompt(promptTxt,"");
-            if(to===null)return;
-            const toAdvisor=!to||!to.trim();
-            const note=window.prompt(_e3("Optionale Notiz (z.B. 'siehe Anhang'):","Optional note (e.g. 'see attached'):","İsteğe bağlı not (örn. 'eki inceleyin'):"),"")||"";
-            const confirmTxt=toAdvisor
-              ?_e3("📧 Beleg an deinen Steuerberater senden?","📧 Send receipt to your tax advisor?","📧 Belgeyi mali müşavirine gönder?")
-              :_e3(`📧 Beleg an ${to} senden?`,`📧 Send receipt to ${to}?`,`📧 Belgeyi ${to} adresine gönder?`);
-            if(!window.confirm(confirmTxt))return;
-            try{
-              const body={note};
-              if(toAdvisor)body.to_advisor=true;else body.to=to.trim();
-              const r=await _authFetch(API+"/invoices/"+detailInv.id+"/email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-              const d=await r.json();
-              if(r.ok){
-                if(showToast)showToast(_e3(`✓ Beleg an ${d.to} gesendet`,`✓ Receipt sent to ${d.to}`,`✓ Belge ${d.to} adresine gönderildi`),"success");
-                setDetailInv(null);
-              }else alert(_extractErr(d));
-            }catch(e){alert(e.message);}
-          }} title={getLang()==="de"?"Original-Datei per Email versenden":"Send original file via email"}>📧 {getLang()==="de"?"Per Email senden":getLang()==="tr"?"E-posta ile gönder":"Send via email"}</button>}
           <button style={css.btnOutline} onClick={()=>setDetailInv(null)}>Close</button>
           <button style={css.btn()} onClick={()=>{startEdit(detailInv);setDetailInv(null);}}>Bearbeiten</button>
+        </div>
+      </div>
+    </div>}
+    {bulkEmail.open&&<div onClick={()=>!bulkEmail.sending&&setBulkEmail(b=>({...b,open:false}))} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,overflowY:"auto"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:theme.surface,border:"1px solid "+theme.border,borderRadius:16,maxWidth:560,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",overflow:"hidden"}}>
+        <div style={{padding:"20px 24px",borderBottom:"1px solid "+theme.border,display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:44,height:44,borderRadius:12,background:"linear-gradient(135deg,#6366f1,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>📧</div>
+          <div style={{flex:1}}>
+            <h2 style={{margin:0,fontSize:18,fontWeight:700,color:theme.text}}>{getLang()==="de"?"Rechnungen per Email senden":getLang()==="tr"?"Faturaları e-posta ile gönder":"Send invoices via email"}</h2>
+            <div style={{fontSize:12,color:theme.textMuted,marginTop:2}}>{getLang()==="de"?`${selected.size} Beleg${selected.size===1?"":"e"} als PDF-Anhang`:getLang()==="tr"?`${selected.size} belge PDF eki olarak`:`${selected.size} receipt${selected.size===1?"":"s"} as PDF attachment${selected.size===1?"":"s"}`}</div>
+          </div>
+        </div>
+        <div style={{padding:"20px 24px",display:"flex",flexDirection:"column",gap:14}}>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:theme.text,cursor:"pointer"}}>
+            <input type="checkbox" checked={bulkEmail.toAdvisor} onChange={e=>setBulkEmail(b=>({...b,toAdvisor:e.target.checked,to:e.target.checked?"":b.to}))} disabled={bulkEmail.sending}/>
+            <span>{getLang()==="de"?"An meinen Steuerberater senden":getLang()==="tr"?"Mali müşavirime gönder":"Send to my tax advisor"}</span>
+          </label>
+          {!bulkEmail.toAdvisor&&<div>
+            <label style={{fontSize:11,fontWeight:600,color:theme.textMuted,marginBottom:4,display:"block"}}>{getLang()==="de"?"Empfänger-Email":getLang()==="tr"?"Alıcı e-posta":"Recipient email"}</label>
+            <input style={css.input} type="email" placeholder="empfaenger@example.com" value={bulkEmail.to} onChange={e=>setBulkEmail(b=>({...b,to:e.target.value}))} disabled={bulkEmail.sending} autoFocus/>
+          </div>}
+          <div>
+            <label style={{fontSize:11,fontWeight:600,color:theme.textMuted,marginBottom:4,display:"block"}}>{getLang()==="de"?"Betreff":getLang()==="tr"?"Konu":"Subject"}</label>
+            <input style={css.input} type="text" value={bulkEmail.subject} onChange={e=>setBulkEmail(b=>({...b,subject:e.target.value}))} disabled={bulkEmail.sending}/>
+          </div>
+          <div>
+            <label style={{fontSize:11,fontWeight:600,color:theme.textMuted,marginBottom:4,display:"block"}}>{getLang()==="de"?"Nachricht (optional)":getLang()==="tr"?"Mesaj (isteğe bağlı)":"Message (optional)"}</label>
+            <textarea style={{...css.input,minHeight:90,resize:"vertical",fontFamily:"inherit"}} placeholder={getLang()==="de"?"z.B. siehe Anhang …":getLang()==="tr"?"örn. ekleri inceleyin …":"e.g. see attachments …"} value={bulkEmail.note} onChange={e=>setBulkEmail(b=>({...b,note:e.target.value}))} disabled={bulkEmail.sending}/>
+          </div>
+          <div style={{fontSize:11,color:theme.textDim,padding:"8px 12px",background:theme.surfaceAlt,borderRadius:8,lineHeight:1.5}}>
+            ℹ️ {getLang()==="de"?`Max ${selected.size>25?selected.size:25} Rechnungen pro Email · Max 25 MB · Original-Dateien wenn vorhanden, sonst generierte PDF`:getLang()==="tr"?`Mail başına max 25 fatura · Max 25 MB · Orijinal dosya yoksa PDF üretilir`:`Max 25 invoices/email · Max 25 MB · Originals when available, else generated PDF`}
+          </div>
+        </div>
+        <div style={{padding:"16px 24px",borderTop:"1px solid "+theme.border,display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <button style={css.btnOutline} onClick={()=>setBulkEmail(b=>({...b,open:false}))} disabled={bulkEmail.sending}>{getLang()==="de"?"Abbrechen":getLang()==="tr"?"İptal":"Cancel"}</button>
+          <button style={{...css.btn(),minWidth:140,opacity:bulkEmail.sending?0.7:1}} onClick={sendBulkEmail} disabled={bulkEmail.sending}>
+            {bulkEmail.sending?<span>⏳ {getLang()==="de"?"Sende…":getLang()==="tr"?"Gönderiliyor…":"Sending…"}</span>:<span>📧 {getLang()==="de"?"Senden":getLang()==="tr"?"Gönder":"Send"}</span>}
+          </button>
         </div>
       </div>
     </div>}
