@@ -510,11 +510,16 @@ async def process_trial_expiry() -> dict:
             try:
                 if not u.trial_ends_at:
                     continue
-                delta = u.trial_ends_at - now_utc
+                # DB'den gelen datetime tz-naive olabilir (eski Postgres satirlari);
+                # tz-aware UTC'ye normalize et — yoksa now_utc ile cikartmada hata.
+                te = u.trial_ends_at
+                if te.tzinfo is None:
+                    te = te.replace(tzinfo=timezone.utc)
+                delta = te - now_utc
                 days_left = delta.days
 
                 # Trial dolmus -> free'ye dusur
-                if u.trial_ends_at <= now_utc:
+                if te <= now_utc:
                     if u.plan == "pro":
                         u.plan = "free"
                         u.trial_ends_at = None  # bir daha dusurmemek icin temizle
