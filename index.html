@@ -2836,25 +2836,40 @@ function AdvisorView({onNav}={}){
       <p style={{color:theme.textMuted,fontSize:12,margin:"0 0 12px"}}>
         {tr("Mandanten, die Ihnen Zugriff gewährt haben. Klicken Sie auf 'Daten ansehen' um in den Lese-Modus zu wechseln.","Clients who granted you access. Click 'View data' to enter read-only mode.")}
       </p>
-      {clients.map(c=>(<div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:"1px solid "+theme.border}}>
+      {clients.map(c=>{
+        // Acting mode'a girip belirli bir sayfaya zipla. Reload sonra App _initialPage okur.
+        const enterAs=(targetPage)=>{
+          localStorage.setItem("atx_acting_client_id",String(c.client_user_id));
+          localStorage.setItem("atx_acting_client_label",c.client_email);
+          localStorage.setItem("atx_acting_scope",c.scope||"read");
+          try{sessionStorage.setItem("atx_acting_target",targetPage);}catch(e){}
+          window.location.reload();
+        };
+        const jumpBtn=(label,target,emoji)=>(
+          <button key={target} title={label} style={{...css.btnOutline,fontSize:11,padding:"6px 10px",whiteSpace:"nowrap"}} onClick={()=>enterAs(target)}>
+            {emoji} {label}
+          </button>
+        );
+        return(<div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 0",borderBottom:"1px solid "+theme.border,flexWrap:"wrap"}}>
         <span style={{fontSize:20}}>🏢</span>
-        <div style={{flex:1,minWidth:0}}>
+        <div style={{flex:"1 1 200px",minWidth:0}}>
           <div style={{color:theme.text,fontWeight:600,fontSize:14}}>{c.client_email}</div>
           <div style={{color:theme.textDim,fontSize:11,fontFamily:mono,marginTop:2}}>
             {c.scope==="read_export"?tr("Lesen + Export","Read + Export"):tr("Nur Lesen","Read only")}
             {c.note?" · "+c.note:""}
           </div>
         </div>
-        <button style={{...css.btn(),fontSize:12,padding:"8px 14px"}} onClick={()=>{
-          localStorage.setItem("atx_acting_client_id",String(c.client_user_id));
-          localStorage.setItem("atx_acting_client_label",c.client_email);
-          localStorage.setItem("atx_acting_scope",c.scope||"read");
-          window.location.reload();
-        }}>👁️ {tr("Daten ansehen","View data")}</button>
-        <button style={{...css.btnOutline,color:theme.danger,borderColor:theme.danger+"55",fontSize:12}} onClick={()=>revoke(c.id,c.client_email)}>
-          {tr("Verbindung beenden","Disconnect")}
-        </button>
-      </div>))}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          <button style={{...css.btn(),fontSize:12,padding:"8px 14px"}} onClick={()=>enterAs("dashboard")}>👁️ {tr("Daten ansehen","View data")}</button>
+          {jumpBtn(tr("Rechnungen","Invoices"),"invoices","📄")}
+          {jumpBtn(tr("Kassenbuch","Cash Book"),"bookkeeping","📒")}
+          {jumpBtn(tr("Belege","Receipts"),"vault","📁")}
+          {jumpBtn(tr("Steuer-Übersicht","Tax Overview"),"steuer_uebersicht","🧾")}
+          <button style={{...css.btnOutline,color:theme.danger,borderColor:theme.danger+"55",fontSize:11,padding:"6px 10px"}} onClick={()=>revoke(c.id,c.client_email)}>
+            {tr("Verbindung beenden","Disconnect")}
+          </button>
+        </div>
+      </div>);})}
     </div>}
   </div>);
 }
@@ -4435,7 +4450,16 @@ function ToastItem({message,type="success",onClose}){
 
 function App(){
   const[authed,setAuthed]=useState(!!localStorage.getItem("atx_token"));
-  const[page,setPage]=useState("dashboard");const[collapsed,setCollapsed]=useState(window.innerWidth<768);
+  // Acting mode'a girince hangi sayfaya gidilecegi sessionStorage'da tutulur
+  // (AdvisorView Mandate row "Rechnungen ansehen" gibi butonlar -> reload -> bu page).
+  const _initialPage=(()=>{
+    try{
+      const tgt=sessionStorage.getItem("atx_acting_target");
+      if(tgt){sessionStorage.removeItem("atx_acting_target");return tgt;}
+    }catch(e){}
+    return "dashboard";
+  })();
+  const[page,setPage]=useState(_initialPage);const[collapsed,setCollapsed]=useState(window.innerWidth<768);
   const[profileOpen,setProfileOpen]=useState(false);
   const[refreshKey,setRefreshKey]=useState(0);
   const[toasts,setToasts]=useState([]);
