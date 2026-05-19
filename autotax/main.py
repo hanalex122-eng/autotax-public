@@ -3981,18 +3981,27 @@ def advisor_invite_lookup(token: str):
         inv = db.query(AdvisorInvite).filter(AdvisorInvite.token == token).first()
         if not inv:
             err(404, "Einladung nicht gefunden")
+        inviter = db.query(User).filter(User.id == inv.inviter_user_id).first()
+        inviter_email = (inviter.email if inviter else "")
+        # NOT: 'accepted' durumunda da inviter bilgisi donelim ki frontend
+        # 'Mandantendaten ansehen' butonunu gosterebilsin (zaten kabul edilmis
+        # invite icin advisor mode'a tek tikla giris).
         if inv.status == "accepted":
-            return {"status": "accepted"}
+            return {
+                "status": "accepted",
+                "inviter_user_id": inv.inviter_user_id,
+                "inviter_email": inviter_email,
+                "scope": inv.scope,
+            }
         if inv.status in ("revoked", "expired"):
             return {"status": inv.status}
         if inv.expires_at and inv.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
             inv.status = "expired"
             db.commit()
             return {"status": "expired"}
-        inviter = db.query(User).filter(User.id == inv.inviter_user_id).first()
         return {
             "status": "pending",
-            "inviter_email": (inviter.email if inviter else ""),
+            "inviter_email": inviter_email,
             "advisor_email": inv.advisor_email,
             "scope": inv.scope,
             "note": inv.note,
@@ -4034,12 +4043,22 @@ def advisor_invite_accept(request: Request, body: dict = Body(...), user: dict =
             AdvisorRelationship.client_user_id == inv.inviter_user_id,
             AdvisorRelationship.advisor_user_id == advisor.id,
         ).first()
+        # Mandant'in email'i (frontend'in auto-acting-mode icin gerekli)
+        inviter = db.query(User).filter(User.id == inv.inviter_user_id).first()
+        inviter_email = (inviter.email if inviter else "") or ""
         if existing and not existing.revoked_at:
             inv.status = "accepted"
             inv.accepted_at = datetime.now(timezone.utc)
             inv.accepted_user_id = advisor.id
             db.commit()
-            return {"success": True, "relationship_id": existing.id, "already_active": True}
+            return {
+                "success": True,
+                "relationship_id": existing.id,
+                "already_active": True,
+                "client_user_id": inv.inviter_user_id,
+                "client_email": inviter_email,
+                "scope": existing.scope or inv.scope,
+            }
         if existing and existing.revoked_at:
             existing.revoked_at = None
             existing.revoked_by = None
@@ -4060,7 +4079,13 @@ def advisor_invite_accept(request: Request, body: dict = Body(...), user: dict =
         audit("advisor.invite_accept", user_id=advisor.id, resource_type="advisor_relationship",
               resource_id=rel.id, payload={"client_user_id": inv.inviter_user_id, "scope": inv.scope},
               request=request)
-        return {"success": True, "relationship_id": rel.id}
+        return {
+            "success": True,
+            "relationship_id": rel.id,
+            "client_user_id": inv.inviter_user_id,
+            "client_email": inviter_email,
+            "scope": rel.scope or inv.scope,
+        }
     finally:
         db.close()
 

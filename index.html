@@ -4575,10 +4575,19 @@ function App(){
                 const r=await _authFetch(API+"/advisor/invite/accept",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:inviteAccept.token})});
                 const d=await r.json();
                 if(r.ok){
-                  if(showToast)showToast(_tr("✓ Einladung angenommen","✓ Invite accepted"),"success");
+                  // Kabul ettikten sonra DOGRUDAN mandant'in acting mode'una gec —
+                  // advisor kendi bos hesabini degil, musterinin verisini gorsun.
+                  if(d.client_user_id){
+                    try{
+                      localStorage.setItem("atx_acting_client_id",String(d.client_user_id));
+                      localStorage.setItem("atx_acting_client_label",d.client_email||"Mandant");
+                      localStorage.setItem("atx_acting_scope",d.scope||"read");
+                      sessionStorage.setItem("atx_acting_target","dashboard");
+                    }catch(e){}
+                  }
                   window.location.hash="";
-                  setInviteAccept(null);
-                  setPage("advisor");
+                  // Reload — acting mode'un tum component'lere yansimasi icin gerekli
+                  window.location.reload();
                 }else{
                   alert(_extractErr(d));
                 }
@@ -4589,6 +4598,16 @@ function App(){
         </Fragment>}
         {inviteAccept.info?.status==="accepted"&&<Fragment>
           <p style={{color:theme.accent,fontSize:13}}>✓ {_tr("Diese Einladung wurde bereits angenommen.","This invite has already been accepted.")}</p>
+          {inviteAccept.info?.inviter_user_id&&<button style={{...css.btn(),marginTop:12,marginRight:8}} onClick={()=>{
+            try{
+              localStorage.setItem("atx_acting_client_id",String(inviteAccept.info.inviter_user_id));
+              localStorage.setItem("atx_acting_client_label",inviteAccept.info.inviter_email||"Mandant");
+              localStorage.setItem("atx_acting_scope",inviteAccept.info.scope||"read");
+              sessionStorage.setItem("atx_acting_target","dashboard");
+            }catch(e){}
+            window.location.hash="";
+            window.location.reload();
+          }}>👁️ {_tr("Mandantendaten ansehen","View client data")}</button>}
           <button style={{...css.btnOutline,marginTop:12}} onClick={()=>{window.location.hash="";setInviteAccept(null);}}>{_t("close")||"Close"}</button>
         </Fragment>}
         {inviteAccept.info?.status==="expired"&&<Fragment>
