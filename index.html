@@ -1033,6 +1033,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
       }
     }
     setBulkEmail(b=>({...b,sending:true}));
+    const _genericFail=errTr("E-Mail-Versand fehlgeschlagen","Email send failed","E-posta gönderimi başarısız");
     try{
       const r=await _authFetch(API+"/invoices/email-bulk",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
         invoice_ids:[...selected],
@@ -1041,8 +1042,11 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
         note:bulkEmail.note.trim(),
         to_advisor:bulkEmail.toAdvisor,
       })});
-      const d=await r.json();
-      if(r.ok&&d.success){
+      // Response'u text olarak oku, JSON parse'i defansif yap (500 HTML/plain text dönerse JSON.parse patlamasin)
+      const rawText=await r.text();
+      let d=null;
+      try{d=rawText?JSON.parse(rawText):null;}catch(_pe){d=null;}
+      if(r.ok&&d&&d.success){
         const sent=d.sent||0,failed=(d.failed||[]).length,skipped=(d.skipped||[]).length;
         let msg=errTr(`✓ ${sent} Belege gesendet an ${d.to}`,`✓ ${sent} receipts sent to ${d.to}`,`✓ ${sent} belge ${d.to} adresine gönderildi`);
         if(failed>0||skipped>0)msg+=errTr(` (${failed} fehlgeschlagen, ${skipped} übersprungen)`,` (${failed} failed, ${skipped} skipped)`,` (${failed} başarısız, ${skipped} atlandı)`);
@@ -1054,11 +1058,21 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
         setBulkEmail({open:false,to:"",subject:"",note:"",toAdvisor:false,sending:false});
         setSelected(new Set());
       }else{
-        alert(_extractErr(d)||"Email failed");
+        // JSON parse edebildiysek backend mesajini kullan, yoksa HTTP status + generic
+        let msg=_genericFail;
+        if(d){
+          const extracted=(typeof _extractErr==="function")?_extractErr(d):null;
+          msg=extracted||d.error||d.message||d.detail||_genericFail;
+        }else if(rawText){
+          // HTML/plain text geldi — kullanicilara teknik mesaj gosterme, status kodu yeterli
+          msg=`${_genericFail} (HTTP ${r.status})`;
+        }
+        if(showToast)showToast(msg,"error");else alert(msg);
         setBulkEmail(b=>({...b,sending:false}));
       }
     }catch(e){
-      alert(e.message);
+      const msg=`${_genericFail}: ${e&&e.message?e.message:e}`;
+      if(showToast)showToast(msg,"error");else alert(msg);
       setBulkEmail(b=>({...b,sending:false}));
     }
   };
@@ -1124,20 +1138,22 @@ function InvoicesView({refreshKey,triggerRefresh,showToast}){
     {sendModeHint&&<div style={{padding:"12px 16px",background:"linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.10))",border:"1px solid rgba(99,102,241,0.4)",borderRadius:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
       <span style={{fontSize:22}}>📧</span>
       <div style={{flex:1,minWidth:200}}>
-        <div style={{fontSize:13,fontWeight:700,color:theme.text}}>{getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"}</div>
-        <div style={{fontSize:12,color:theme.textMuted}}>{getLang()==="de"?"Wählen Sie unten Rechnungen aus (☑) und klicken Sie '📧 per Email' im Aktionsmenü.":getLang()==="tr"?"Aşağıdan faturaları seç (☑), sonra '📧 e-posta' butonuna bas.":"Select invoices below (☑) and click '📧 via email' in the toolbar."}</div>
+        <div style={{fontSize:13,fontWeight:700,color:theme.text}}>{getLang()==="de"?"Versand-Modus":getLang()==="tr"?"Gönderim Modu":"Send Mode"}</div>
+        <div style={{fontSize:12,color:theme.textMuted}}>{getLang()==="de"?"Nur E-Mail-Versand aktiv. Wählen Sie Rechnungen aus (☑) und klicken Sie '📧 per Email'.":getLang()==="tr"?"Sadece e-posta gönderimi aktif. Faturaları seç (☑), sonra '📧 e-posta' butonuna bas.":"Only email send is active. Select invoices (☑) and click '📧 via email'."}</div>
       </div>
-      <button style={{...css.btnOutline,borderColor:theme.border,fontSize:11,padding:"6px 12px"}} onClick={()=>setSendModeHint(false)}>{getLang()==="de"?"Schließen":getLang()==="tr"?"Kapat":"Close"}</button>
+      <button style={{...css.btnOutline,borderColor:theme.border,fontSize:11,padding:"6px 12px"}} onClick={()=>setSendModeHint(false)}>{getLang()==="de"?"Modus beenden":getLang()==="tr"?"Moddan çık":"Exit mode"}</button>
     </div>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
       <div><h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>{_t("invoices")}</h2><p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{filtered.length}/{total} shown</p></div>
       {selected.size>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         <span style={{fontSize:12,fontWeight:700,padding:"6px 12px",borderRadius:8,background:theme.accentSoft,color:theme.accent,whiteSpace:"nowrap"}}>{getLang()==="de"?`${selected.size} Rechnung${selected.size===1?"":"en"} ausgewählt`:getLang()==="tr"?`${selected.size} fatura seçildi`:`${selected.size} invoice${selected.size===1?"":"s"} selected`}</span>
-        <button style={css.btn(theme.danger)} onClick={deleteSelected} disabled={deleting}><Icon d={I.trash} size={16} color="#fff"/>{deleting?"...":selected.size+t("n_delete")}</button>
         <button style={{...css.btnOutline,borderColor:"rgba(99,102,241,0.5)",color:"#6366f1"}} onClick={openBulkEmail}>📧 {selected.size} {getLang()==="de"?"per Email":getLang()==="tr"?"e-posta":"via email"}</button>
-        <button style={{...css.btnOutline,borderColor:"rgba(0,194,255,0.4)",color:"#00c2ff"}} onClick={()=>downloadBulkPDF([...selected],showToast)}>🖨️ {selected.size} PDF</button>
-        <button style={{...css.btnOutline,borderColor:"rgba(16,185,129,0.4)",color:theme.accent}} onClick={()=>downloadBulkOriginal([...selected],invoices,showToast)}>⬇ {selected.size} Originale</button>
-        <button style={{...css.btnOutline,borderColor:"rgba(59,130,246,0.4)",color:theme.blue}} onClick={async()=>{if(!confirm(selected.size+" Copy invoices to Bookkeeping?"))return;let ok=0;for(const id of selected){const inv=invoices.find(i=>i.id===id);if(!inv)continue;try{await api("/bookkeeping",{method:"POST",body:JSON.stringify({description:inv.vendor||"Rechnung",vendor:inv.vendor,gross_amount:inv.total_amount,vat_rate:inv.vat_rate||"19%",entry_type:inv.invoice_type||"expense",category:inv.category||"other",date:inv.date||"",notes:"Aus Rechnungen ID:"+inv.id})});ok++;}catch(ex){}}alert(ok+" → copied to Bookkeeping");setSelected(new Set());doSearch();}}>→ Cash Book ({selected.size})</button>
+        {!sendModeHint&&<>
+          <button style={css.btn(theme.danger)} onClick={deleteSelected} disabled={deleting}><Icon d={I.trash} size={16} color="#fff"/>{deleting?"...":selected.size+t("n_delete")}</button>
+          <button style={{...css.btnOutline,borderColor:"rgba(0,194,255,0.4)",color:"#00c2ff"}} onClick={()=>downloadBulkPDF([...selected],showToast)}>🖨️ {selected.size} PDF</button>
+          <button style={{...css.btnOutline,borderColor:"rgba(16,185,129,0.4)",color:theme.accent}} onClick={()=>downloadBulkOriginal([...selected],invoices,showToast)}>⬇ {selected.size} Originale</button>
+          <button style={{...css.btnOutline,borderColor:"rgba(59,130,246,0.4)",color:theme.blue}} onClick={async()=>{if(!confirm(selected.size+" Copy invoices to Bookkeeping?"))return;let ok=0;for(const id of selected){const inv=invoices.find(i=>i.id===id);if(!inv)continue;try{await api("/bookkeeping",{method:"POST",body:JSON.stringify({description:inv.vendor||"Rechnung",vendor:inv.vendor,gross_amount:inv.total_amount,vat_rate:inv.vat_rate||"19%",entry_type:inv.invoice_type||"expense",category:inv.category||"other",date:inv.date||"",notes:"Aus Rechnungen ID:"+inv.id})});ok++;}catch(ex){}}alert(ok+" → copied to Bookkeeping");setSelected(new Set());doSearch();}}>→ Cash Book ({selected.size})</button>
+        </>}
       </div>}
     </div>
     {showCreateInv&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,overflow:"auto"}} onClick={()=>setShowCreateInv(false)}>

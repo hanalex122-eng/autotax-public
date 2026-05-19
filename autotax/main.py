@@ -2996,26 +2996,33 @@ async def email_invoices_bulk(
     from autotax.reminders import send_email as _send_email
     from autotax.models import AdvisorRelationship as _AdvRel
 
-    invoice_ids = body.get("invoice_ids") or []
-    if not isinstance(invoice_ids, list) or not invoice_ids:
-        err(400, "invoice_ids zorunlu (en az 1 fatura ID)")
-    if len(invoice_ids) > _BULK_EMAIL_MAX_INVOICES:
-        err(400, f"Maximum {_BULK_EMAIL_MAX_INVOICES} fatura tek mail'de gonderilebilir")
     try:
-        invoice_ids = [int(x) for x in invoice_ids]
-    except (TypeError, ValueError):
-        err(400, "invoice_ids list of int olmali")
+        invoice_ids = body.get("invoice_ids") or []
+        if not isinstance(invoice_ids, list) or not invoice_ids:
+            err(400, "invoice_ids zorunlu (en az 1 fatura ID)")
+        if len(invoice_ids) > _BULK_EMAIL_MAX_INVOICES:
+            err(400, f"Maximum {_BULK_EMAIL_MAX_INVOICES} fatura tek mail'de gonderilebilir")
+        try:
+            invoice_ids = [int(x) for x in invoice_ids]
+        except (TypeError, ValueError):
+            err(400, "invoice_ids list of int olmali")
 
-    to_addr = (body.get("to") or "").strip()
-    subject = (body.get("subject") or "").strip()
-    note = (body.get("note") or "").strip()
-    to_advisor = bool(body.get("to_advisor"))
+        to_addr = (body.get("to") or "").strip()
+        subject = (body.get("subject") or "").strip()
+        note = (body.get("note") or "").strip()
+        to_advisor = bool(body.get("to_advisor"))
+    except HTTPException:
+        raise
+    except Exception as _e_parse:
+        logger.exception("email_invoices_bulk: body parse failed")
+        raise HTTPException(status_code=400, detail={"success": False, "error": f"Ungültiger Request: {_e_parse}"})
 
     db = SessionLocal()
     try:
         if to_advisor:
+            # NOT: AdvisorRelationship'in status field'i YOK; soft-delete revoked_at ile (NULL = aktif)
             rel = db.query(_AdvRel).filter(
-                _AdvRel.client_user_id == user["sub"], _AdvRel.status == "active"
+                _AdvRel.client_user_id == user["sub"], _AdvRel.revoked_at.is_(None)
             ).first()
             if not rel:
                 err(400, "Kein aktiver Steuerberater verknüpft — bitte zuerst einladen")
@@ -3035,6 +3042,7 @@ async def email_invoices_bulk(
         missing_ids = [i for i in invoice_ids if i not in found_ids]
 
         attachments: list[tuple] = []
+        attached_invoices: list[Invoice] = []  # email body table'i icin gercek attach edilenler
         failed: list[dict] = []
         skipped: list[dict] = []
         total_size = 0
@@ -3044,7 +3052,12 @@ async def email_invoices_bulk(
             skipped.append({"id": mid, "name": f"#{mid}", "reason": "Rechnung nicht gefunden"})
 
         for inv in invoices:
-            pdf_bytes, fname, mime = _fetch_invoice_pdf_bytes(inv, db, user["sub"])
+            try:
+                pdf_bytes, fname, mime = _fetch_invoice_pdf_bytes(inv, db, user["sub"])
+            except Exception as e:
+                logger.exception("PDF fetch failed for invoice %s", inv.id)
+                failed.append({"id": inv.id, "name": inv.vendor or f"#{inv.id}", "reason": f"PDF-Fehler: {e}"[:120]})
+                continue
             if not pdf_bytes:
                 failed.append({"id": inv.id, "name": inv.vendor or fname, "reason": "PDF konnte nicht erstellt werden"})
                 continue
@@ -3055,6 +3068,7 @@ async def email_invoices_bulk(
                 })
                 continue
             attachments.append((fname, pdf_bytes, mime))
+            attached_invoices.append(inv)
             total_size += len(pdf_bytes)
 
         if not attachments:
@@ -3073,24 +3087,24 @@ async def email_invoices_bulk(
         sender_user = db.query(User).filter(User.id == user["sub"]).first()
         sender_email = sender_user.email if sender_user else ""
 
-        # Liste body'sini hazirla
+        # Liste body'sini hazirla — sadece gercekten attach edilenler
+        def _html_escape(s: str) -> str:
+            return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
         rows_html = ""
-        for inv in invoices:
-            if inv.id not in {inv2.id for inv2 in invoices if any(a[0].endswith(f"-{inv2.id}.pdf") or a[0] == (inv2.filename or "") for a in attachments)}:
-                continue
+        for inv in attached_invoices:
             amt = f"€{inv.total_amount:.2f}" if inv.total_amount else "—"
             rows_html += (
                 f"<tr style='border-bottom:1px solid #e2e8f0;'>"
-                f"<td style='padding:8px 12px;'>{inv.vendor or 'Unbekannt'}</td>"
-                f"<td style='padding:8px 12px;'>{inv.date or '—'}</td>"
+                f"<td style='padding:8px 12px;'>{_html_escape(inv.vendor) or 'Unbekannt'}</td>"
+                f"<td style='padding:8px 12px;'>{_html_escape(inv.date) or '—'}</td>"
                 f"<td style='padding:8px 12px;font-family:monospace;text-align:right;'>{amt}</td>"
                 f"</tr>"
             )
 
         note_html = ""
         if note:
-            safe_note = _re.sub("<", "&lt;", note)
-            safe_note = safe_note.replace("\n", "<br>")
+            safe_note = _html_escape(note).replace("\n", "<br>")
             note_html = f"<p style='background:#f1f5f9;padding:12px;border-left:3px solid #00e5a0;margin:16px 0;'>{safe_note}</p>"
 
         body_html = f"""
@@ -3142,6 +3156,14 @@ async def email_invoices_bulk(
             "to": to_addr,
             "total_size_bytes": total_size,
         }
+    except HTTPException:
+        raise
+    except Exception as _e_top:
+        logger.exception("email_invoices_bulk: unexpected error")
+        raise HTTPException(status_code=500, detail={
+            "success": False,
+            "error": f"Sunucu hatası — E-Mail-Versand fehlgeschlagen: {type(_e_top).__name__}: {str(_e_top)[:200]}",
+        })
     finally:
         db.close()
 

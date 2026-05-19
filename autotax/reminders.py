@@ -274,10 +274,18 @@ def send_email(to_addr: str, subject: str, body_html: str,
                 "html": body_html,
             }
             if attachments:
-                payload["attachments"] = [{
-                    "filename": a[0],
-                    "content": _b64.b64encode(a[1]).decode(),
-                } for a in attachments[:5]]
+                # Resend: filename + content (base64) + content_type. Bulk send icin cap yok;
+                # boyut limiti server tarafinda (BULK_EMAIL_MAX_TOTAL_BYTES) kontrol edilir.
+                payload["attachments"] = []
+                for a in attachments:
+                    fname = a[0]
+                    data = a[1]
+                    mime = a[2] if len(a) >= 3 else "application/pdf"
+                    payload["attachments"].append({
+                        "filename": fname,
+                        "content": _b64.b64encode(data).decode(),
+                        "content_type": mime,
+                    })
             r = _httpx.post(
                 "https://api.resend.com/emails",
                 json=payload,
