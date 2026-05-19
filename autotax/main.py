@@ -6886,8 +6886,15 @@ async def invoice_ai_extract(
     Acting mode advisor'lara izinli DEGIL — write islem (middleware blocklayacak).
     """
     from autotax.ai_ocr import ai_extract_invoice, is_configured, _EMPTY_VALUES
+    # Detayli teshis — kullanici tam olarak hangi env eksik gorsun
+    _has_key = bool((os.getenv("ANTHROPIC_API_KEY") or "").strip())
+    _fallback = (os.getenv("AI_OCR_FALLBACK") or "1").strip()
+    if not _has_key:
+        err(503, "ANTHROPIC_API_KEY env-Variable fehlt im Backend-Prozess. Railway -> Variables -> ANTHROPIC_API_KEY hinzufügen + Service neu starten.")
+    if _fallback == "0":
+        err(503, "AI_OCR_FALLBACK=0 (manuell deaktiviert). Railway -> Variables -> AI_OCR_FALLBACK auf 1 setzen oder loeschen.")
     if not is_configured():
-        err(503, "AI-OCR Fallback nicht konfiguriert (ANTHROPIC_API_KEY fehlt oder AI_OCR_FALLBACK=0)")
+        err(503, f"AI-OCR nicht konfiguriert (has_key={_has_key}, fallback={_fallback})")
 
     db = SessionLocal()
     try:
