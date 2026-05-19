@@ -143,6 +143,7 @@ input::placeholder { color: #475569; }
         <div class="counter dup"><div class="n" id="cDuplicates">0</div><div class="l">Duplikate</div></div>
         <div class="counter err"><div class="n" id="cErrors">0</div><div class="l">Fehler</div></div>
       </div>
+      <div style="font-size:11px;color:#94a3b8;margin:8px 0 4px;text-align:center" id="attLine"></div>
       <div class="current-line" id="currentLine"></div>
       <div class="recent-toggle" id="recentToggle">▸ Details (letzte gescannte Mails)</div>
       <div class="recent-list" id="recentList"></div>
@@ -308,6 +309,23 @@ function renderStatus(s) {
   $("cImported").textContent = s.imported || 0;
   $("cDuplicates").textContent = s.duplicates || 0;
   $("cErrors").textContent = s.errors || 0;
+
+  // Attachment-level diagnostic line (PDF/XML neden gorunmuyorun teshisi)
+  const attTotal = s.att_total || 0;
+  const attPdf = s.att_pdf || 0;
+  const attXml = s.att_xml || 0;
+  const attBig = s.att_too_big || 0;
+  const attUns = s.att_unsupported || 0;
+  if (attTotal > 0) {
+    let parts = [];
+    if (attPdf) parts.push(attPdf + " PDF");
+    if (attXml) parts.push(attXml + " XML");
+    if (attUns) parts.push(attUns + " andere (jpg/docx/…)");
+    if (attBig) parts.push(attBig + " zu groß");
+    $("attLine").textContent = "📎 " + attTotal + " Anhänge gefunden — " + (parts.join(" · ") || "nichts relevantes");
+  } else {
+    $("attLine").textContent = "";
+  }
 
   if (s.running) {
     $("progressTitle").textContent = "🔍 Scan läuft… " + pct + "%";

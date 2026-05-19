@@ -24,7 +24,7 @@ PROVIDERS: dict[str, tuple[str, int]] = {
 SUBJECT_KEYWORDS = ("rechnung", "invoice", "beleg", "faktura", "facture", "quittung")
 
 IMAP_TIMEOUT_SEC = 30
-MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MB per attachment
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25 MB per attachment (PDF rechnungen bazen buyuk)
 
 # --- Auto-sync loop configuration ---
 AUTO_SYNC_INTERVAL_SEC = int(os.getenv("EMAIL_AUTO_SYNC_INTERVAL", "600"))  # every 10 min
@@ -47,7 +47,7 @@ _auto_sync_task: Optional[asyncio.Task] = None
 # Frontend GET /email/status ile 2 sn'de bir poll eder.
 # ---------------------------------------------------------------------------
 _SYNC_STATUS: dict[int, dict] = {}
-_RECENT_CAP = 20  # her kullanici icin son N mail'in detayini sakla
+_RECENT_CAP = 100  # her kullanici icin son N mail'in detayini sakla (164 mail testi icin yeterli)
 
 
 def _status_init(user_id: int, total: int, mode: str) -> None:
@@ -59,6 +59,12 @@ def _status_init(user_id: int, total: int, mode: str) -> None:
         "imported": 0,                     # eklenen yeni Belege
         "duplicates": 0,                   # dup hash atlanan
         "errors": 0,                       # IMAP/parse hatalari
+        # Attachment-level diagnostics (PDF'lerin neden gorunmedigini hizli teshis icin)
+        "att_total": 0,                    # taranan toplam ek sayisi (her tip)
+        "att_pdf": 0,                      # PDF tipi tespit edilen ekler
+        "att_xml": 0,                      # XML tipi tespit edilen ekler
+        "att_too_big": 0,                  # MAX_ATTACHMENT_BYTES asti
+        "att_unsupported": 0,              # PDF/XML disi (image, docx, vs.)
         "current_sender": "",              # surdurulen mail'in sender'i
         "last_error": "",                  # son hata stringi (UI gosterir)
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -391,24 +397,61 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                 _status_finish(user_id, f"IMAP-Verbindung fehlgeschlagen: {_e}")
                 return {"processed": 0, "skipped": 0, "errors": 0, "message": "IMAP-Server nicht erreichbar"}
 
-            typ, _ = M.select("INBOX")
-            if typ != "OK":
-                _status_finish(user_id, "Posteingang nicht verfügbar")
-                return {"processed": 0, "skipped": 0, "errors": 0, "message": "Posteingang nicht verfügbar"}
-
+            # Gmail icin ozel arama: 'All Mail' folder + X-GM-RAW has:attachment
+            # boylece Kaufe/Abos kategorisindeki, arsivlenmis Rechnungen de yakalanir.
+            # Diger provider'lar icin INBOX + UNSEEN/ALL klasik akis.
+            is_gmail = (cfg.provider == "gmail")
+            folder_selected = "INBOX"
             search_query = "ALL" if all_messages else "UNSEEN"
-            typ, data = M.search(None, search_query)
+            ids: list[bytes] = []
+
+            if is_gmail and all_messages:
+                # Tum mailler taranacaksa Gmail'in 'All Mail' folder'ina geç + has:attachment ile filtrele
+                gmail_folders = ['"[Gmail]/All Mail"', '"[Gmail]/Alle Nachrichten"', '"[Google Mail]/All Mail"']
+                selected_ok = False
+                for gf in gmail_folders:
+                    typ, _ = M.select(gf)
+                    if typ == "OK":
+                        folder_selected = gf
+                        selected_ok = True
+                        break
+                if not selected_ok:
+                    # Fallback: INBOX
+                    typ, _ = M.select("INBOX")
+                    if typ != "OK":
+                        _status_finish(user_id, "Posteingang nicht verfügbar")
+                        return {"processed": 0, "skipped": 0, "errors": 0, "message": "Posteingang nicht verfügbar"}
+                    folder_selected = "INBOX"
+
+                # X-GM-RAW: Gmail-spesifik arama. has:attachment cok genis bir filtre — sadece
+                # eki olan mailleri getirir, hem INBOX hem Kaufe/Abos hem archive dahil.
+                try:
+                    typ, data = M.search(None, 'X-GM-RAW', '"has:attachment"')
+                    search_query = "X-GM-RAW has:attachment"
+                except Exception as _xe:
+                    logger.warning("Gmail X-GM-RAW search failed user=%s: %s — fallback to ALL", user_id, _xe)
+                    typ, data = M.search(None, "ALL")
+                    search_query = "ALL (fallback)"
+            else:
+                # Normal akis: INBOX + UNSEEN/ALL
+                typ, _ = M.select("INBOX")
+                if typ != "OK":
+                    _status_finish(user_id, "Posteingang nicht verfügbar")
+                    return {"processed": 0, "skipped": 0, "errors": 0, "message": "Posteingang nicht verfügbar"}
+                typ, data = M.search(None, search_query)
+
             if typ != "OK" or not data or not data[0]:
                 cfg.last_sync = datetime.now(timezone.utc)
                 db.commit()
                 _status_finish(user_id)
-                return {"processed": 0, "skipped": 0, "errors": 0, "mode": search_query}
+                logger.info("sync_user_inbox empty result user=%s folder=%s query=%s", user_id, folder_selected, search_query)
+                return {"processed": 0, "skipped": 0, "errors": 0, "mode": search_query, "folder": folder_selected}
 
             ids = data[0].split()
             cap = 200 if all_messages else max_messages
             ids = ids[-cap:]  # son N mesaj (en yeniler — IMAP UID artarak gider)
             _status_update(user_id, total=len(ids))
-            logger.info("sync_user_inbox user=%s mode=%s -> %d mails to scan", user_id, search_query, len(ids))
+            logger.info("sync_user_inbox user=%s folder=%s query=%s -> %d mails to scan (capped to %d)", user_id, folder_selected, search_query, len(ids), cap)
 
             for msg_id in ids:
                 try:
@@ -424,17 +467,19 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                     logger.info("Email sync user=%s msg=%s subj=%r from=%r", user_id, msg_id.decode() if isinstance(msg_id, bytes) else msg_id, subject[:80], sender[:80])
                     _status_update(user_id, current_sender=sender[:80])
 
-                    # Bu mail icinde isimsiz/uygun ek var mi? — sonunda no_attach kaydetmek icin
+                    # Bu mail icindeki ek istatistikleri (diagnostics icin) + ana sebep
                     mail_imported = 0
                     mail_dup = 0
                     mail_parse_fail = 0
                     mail_has_relevant_attach = False
+                    mail_att_seen = []     # her ek icin (fn, size, ftype, status) — debug satirina yazilir
                     last_reason = ""
 
                     for part in msg.walk():
                         if part.get_content_maintype() == "multipart":
                             continue
                         fn = _decode_header(part.get_filename() or "")
+                        ctype = part.get_content_type() or "?"
                         try:
                             payload = part.get_payload(decode=True)
                         except Exception as _pe:
@@ -443,17 +488,32 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                             logger.warning("Attachment decode failed user=%s msg=%s fn=%r: %s", user_id, msg_id, fn, _pe)
                         if not payload:
                             continue
+                        # Bos body/text/html part'lari da burdan geciyor — sadece ek olanlari say
+                        # (Content-Disposition: attachment veya filename var ise gercek ek kabul et;
+                        # text/html main body'leri filename'siz ve content-type=text/html olur).
+                        has_fn = bool(fn)
+                        is_html_or_text_body = ctype in ("text/plain", "text/html") and not has_fn
+                        if is_html_or_text_body:
+                            continue
+                        _status_update(user_id, inc={"att_total": 1})
+
                         if len(payload) > MAX_ATTACHMENT_BYTES:
-                            last_reason = f"attachment too large ({len(payload)//1024} KB > {MAX_ATTACHMENT_BYTES//1024} KB)"
-                            logger.warning("Attachment too large user=%s fn=%r size=%d", user_id, fn, len(payload))
+                            last_reason = f"attachment too large ({len(payload)//1024} KB > {MAX_ATTACHMENT_BYTES//1024} KB) fn={fn or '(unnamed)'}"
+                            logger.warning("Attachment too large user=%s fn=%r size=%d ctype=%s", user_id, fn, len(payload), ctype)
+                            mail_att_seen.append(f"{fn or '(unnamed)'} [{ctype}, {len(payload)//1024}KB] TOO BIG")
+                            _status_update(user_id, inc={"att_too_big": 1})
                             continue
                         ftype = _file_type(fn, payload)
                         if ftype not in ("xml", "pdf"):
-                            # Non-invoice attachment (image/word/etc.) — atla, sebep yaz
-                            last_reason = f"unsupported type '{ftype}' for fn={fn!r}"
+                            # Non-invoice attachment (image/word/etc.) — atla, debug listesine yaz
+                            last_reason = f"unsupported attach: fn={fn or '(unnamed)'} ctype={ctype} {len(payload)//1024}KB"
+                            mail_att_seen.append(f"{fn or '(unnamed)'} [{ctype}, {len(payload)//1024}KB] SKIP")
+                            _status_update(user_id, inc={"att_unsupported": 1})
                             continue
 
                         mail_has_relevant_attach = True
+                        _status_update(user_id, inc={("att_pdf" if ftype == "pdf" else "att_xml"): 1})
+                        mail_att_seen.append(f"{fn or '(unnamed)'} [{ftype.upper()}, {len(payload)//1024}KB]")
                         fh = generate_file_hash(payload)
                         dup = find_hard_duplicate(db, user_id, fh)
                         if dup:
@@ -537,15 +597,21 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                         logger.info("Email import OK user=%s invoice=%s vendor=%r amount=%s", user_id, inv_id, parsed.get("vendor"), parsed.get("total_amount"))
 
                     # Mail icin tek bir recent-row yaz (en cok bilgi tasiyan durumu sec)
+                    # Ekleri reason'a ekle ki kullanici mail'de NE oldugunu hemen gorsun
+                    att_summary = ("; ".join(mail_att_seen)[:160]) if mail_att_seen else "kein Anhang"
                     if mail_imported > 0:
                         _status_record(user_id, subject, sender, "imported",
-                                       f"{mail_imported} Beleg(e) importiert" + (f", {mail_dup} duplicate" if mail_dup else ""))
+                                       f"{mail_imported} Beleg(e) importiert · Anhange: {att_summary}")
                     elif mail_dup > 0:
-                        _status_record(user_id, subject, sender, "duplicate", f"{mail_dup} Anhang bereits importiert")
+                        _status_record(user_id, subject, sender, "duplicate",
+                                       f"{mail_dup} Anhang bereits importiert · {att_summary}")
                     elif mail_parse_fail > 0:
-                        _status_record(user_id, subject, sender, "parse_fail", last_reason or "Anhang konnte nicht gelesen werden")
+                        _status_record(user_id, subject, sender, "parse_fail",
+                                       f"{last_reason or 'Anhang konnte nicht gelesen werden'} · Anhange: {att_summary}")
                     elif not mail_has_relevant_attach:
-                        _status_record(user_id, subject, sender, "no_attach", last_reason or "Kein PDF/XML im Anhang")
+                        # Bu mail PDF/XML icermeyen ekler tasiyabilir (jpg vs.) — sebep listelenir
+                        _status_record(user_id, subject, sender, "no_attach",
+                                       f"Kein PDF/XML im Anhang · {att_summary}")
 
                     _status_update(user_id, inc={"scanned": 1})
 
