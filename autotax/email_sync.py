@@ -469,6 +469,7 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
 
                     # Bu mail icindeki ek istatistikleri (diagnostics icin) + ana sebep
                     mail_imported = 0
+                    mail_imported_weak = 0  # OCR/parser zayif (amount=0 veya vendor=Unbekannt)
                     mail_dup = 0
                     mail_parse_fail = 0
                     mail_has_relevant_attach = False
@@ -553,6 +554,24 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                             _status_update(user_id, inc={"errors": 0})  # parse fail = soft skip (errors degil)
                             continue
 
+                        # OCR/parser sonucu ZAYIF mi? (vendor='Unbekannt' VEYA amount=0)
+                        # -> Hala import ediyoruz ama recent[]'e flag dusurelim ki kullanici
+                        # 'OCR 0 okudu' durumunu hemen anlasin.
+                        _v = (parsed.get("vendor") or "").strip()
+                        _amt = float(parsed.get("total_amount") or 0) or 0.0
+                        _rt_len = len((parsed.get("raw_text") or ""))
+                        _weak = (_v in ("", "Unbekannt") or _amt <= 0)
+                        if _weak:
+                            # OCR ne kadar text okudu ki? raw_text uzunlugundan anlasilir.
+                            last_reason = (
+                                f"OCR schwach: vendor={_v or 'Unbekannt'} amount={_amt:.2f} "
+                                f"raw_text={_rt_len} chars (PDF gescannt/bildbasiert?)"
+                            )
+                            logger.warning("OCR weak result user=%s fn=%r vendor=%r amount=%s raw_len=%d",
+                                           user_id, fn, _v, _amt, _rt_len)
+                        else:
+                            last_reason = f"OCR ok: vendor={_v} amount={_amt:.2f}€"
+
                         parsed.setdefault("invoice_type", "expense")
                         parsed.setdefault("raw_text", "")
                         parsed.setdefault("category", "other")
@@ -593,15 +612,25 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
 
                         processed += 1
                         mail_imported += 1
+                        if _weak:
+                            mail_imported_weak += 1
                         _status_update(user_id, inc={"imported": 1})
-                        logger.info("Email import OK user=%s invoice=%s vendor=%r amount=%s", user_id, inv_id, parsed.get("vendor"), parsed.get("total_amount"))
+                        logger.info("Email import OK user=%s invoice=%s vendor=%r amount=%s weak=%s", user_id, inv_id, parsed.get("vendor"), parsed.get("total_amount"), _weak)
 
                     # Mail icin tek bir recent-row yaz (en cok bilgi tasiyan durumu sec)
                     # Ekleri reason'a ekle ki kullanici mail'de NE oldugunu hemen gorsun
                     att_summary = ("; ".join(mail_att_seen)[:160]) if mail_att_seen else "kein Anhang"
                     if mail_imported > 0:
-                        _status_record(user_id, subject, sender, "imported",
-                                       f"{mail_imported} Beleg(e) importiert · Anhange: {att_summary}")
+                        if mail_imported_weak >= mail_imported:
+                            # Hepsi zayif OCR — kullanici 'ozellikle bakmali' isareti
+                            _status_record(user_id, subject, sender, "imported_weak",
+                                           f"{mail_imported} Beleg(e) gespeichert ABER OCR schwach · {last_reason}")
+                        elif mail_imported_weak > 0:
+                            _status_record(user_id, subject, sender, "imported",
+                                           f"{mail_imported} Beleg(e) ({mail_imported_weak} schwach) · {last_reason}")
+                        else:
+                            _status_record(user_id, subject, sender, "imported",
+                                           f"{mail_imported} Beleg(e) importiert · {last_reason or att_summary}")
                     elif mail_dup > 0:
                         _status_record(user_id, subject, sender, "duplicate",
                                        f"{mail_dup} Anhang bereits importiert · {att_summary}")
