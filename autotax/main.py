@@ -969,6 +969,15 @@ def health():
             and (os.getenv("AI_OCR_FALLBACK") or "1").strip() != "0"
         ),
         "ai_ocr_model": (os.getenv("AI_OCR_MODEL") or "claude-haiku-4-5-20251001"),
+        # DEBUG (env teshisi icin — sadece adlar, value yok, guvenli):
+        # 'anthropic_configured: false' ama Railway'de ANTHROPIC_API_KEY ekledim
+        # diyorsan -> bu listede 'ANTHROPIC_API_KEY' yazmali. Yoksa env adi yanlis
+        # service'e gitmis veya farkli environment'a (Preview vs Production).
+        "_debug_ai_env_keys_seen_by_backend": sorted([
+            k for k in os.environ.keys()
+            if any(s in k.upper() for s in ("ANTHROPIC", "CLAUDE", "AI_OCR", "AI_REVIEWER"))
+        ]),
+        "_debug_anthropic_key_length": len((os.getenv("ANTHROPIC_API_KEY") or "")),
         "resend_configured": bool(os.getenv("RESEND_API_KEY")),
         "resend_from": (os.getenv("RESEND_FROM") or os.getenv("SMTP_FROM") or "").split("<")[0].strip() or "(default)",
         "smtp_configured": bool(os.getenv("SMTP_HOST") and os.getenv("SMTP_USER") and os.getenv("SMTP_PASS")),
