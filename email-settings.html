@@ -45,7 +45,36 @@ input::placeholder { color: #475569; }
 .meta { font-size: 12px; color: #64748b; margin-top: 8px; }
 .saved-badge { display: inline-block; background: rgba(16,185,129,0.15); color: #10b981; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; margin-left: 8px; vertical-align: middle; }
 .provider-hint { font-size: 11px; color: #64748b; margin-top: 4px; }
-@media (max-width: 640px) { .row.two { grid-template-columns: 1fr; } .actions { flex-direction: column; } .btn { width: 100%; } }
+.progress-card { display: none; margin-top: 14px; padding: 16px; background: #0f1a2e; border: 1px solid #1e3a5f; border-radius: 12px; }
+.progress-card.show { display: block; }
+.progress-card.done { border-color: rgba(16,185,129,0.5); background: rgba(16,185,129,0.05); }
+.progress-card h3 { font-size: 13px; font-weight: 700; color: #60a5fa; margin-bottom: 10px; display:flex; align-items:center; gap: 6px; }
+.progress-card.done h3 { color: #34d399; }
+.progress-bar-wrap { background: #1e293b; border-radius: 999px; height: 8px; overflow: hidden; margin: 8px 0 12px; }
+.progress-bar-fill { background: linear-gradient(90deg,#60a5fa,#34d399); height: 100%; width: 0%; transition: width 0.4s ease; }
+.progress-card.done .progress-bar-fill { background: #34d399; }
+.progress-counters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+.counter { background: #1e293b; padding: 8px 10px; border-radius: 8px; text-align: center; }
+.counter .n { font-size: 18px; font-weight: 700; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+.counter .l { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+.counter.imp .n { color: #34d399; }
+.counter.dup .n { color: #fbbf24; }
+.counter.err .n { color: #f87171; }
+.current-line { font-size: 11px; color: #94a3b8; margin: 6px 0; font-family: 'DM Sans', monospace; }
+.recent-toggle { font-size: 11px; color: #60a5fa; cursor: pointer; user-select: none; margin-top: 8px; }
+.recent-list { margin-top: 8px; max-height: 220px; overflow-y: auto; display: none; }
+.recent-list.show { display: block; }
+.recent-row { padding: 6px 8px; border-bottom: 1px solid #1e293b; font-size: 11px; display: flex; align-items: center; gap: 6px; }
+.recent-row:last-child { border-bottom: none; }
+.recent-status { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700; flex-shrink: 0; }
+.recent-status.imported { background: rgba(52,211,153,0.15); color: #34d399; }
+.recent-status.duplicate { background: rgba(251,191,36,0.15); color: #fbbf24; }
+.recent-status.parse_fail { background: rgba(248,113,113,0.15); color: #f87171; }
+.recent-status.no_attach { background: rgba(100,116,139,0.15); color: #94a3b8; }
+.recent-status.error { background: rgba(248,113,113,0.20); color: #ef4444; }
+.recent-meta { flex: 1; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-reason { font-size: 10px; color: #64748b; margin-top: 2px; }
+@media (max-width: 640px) { .row.two { grid-template-columns: 1fr; } .actions { flex-direction: column; } .btn { width: 100%; } .progress-counters { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
 <body>
@@ -103,6 +132,21 @@ input::placeholder { color: #475569; }
 
     <div class="status" id="status"></div>
     <div class="meta" id="metaLine"></div>
+
+    <!-- Live progress (polled from /email/status) -->
+    <div class="progress-card" id="progressCard">
+      <h3 id="progressTitle">🔍 Scan läuft…</h3>
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progressFill"></div></div>
+      <div class="progress-counters">
+        <div class="counter"><div class="n" id="cScanned">0</div><div class="l">Gescannt</div></div>
+        <div class="counter imp"><div class="n" id="cImported">0</div><div class="l">Importiert</div></div>
+        <div class="counter dup"><div class="n" id="cDuplicates">0</div><div class="l">Duplikate</div></div>
+        <div class="counter err"><div class="n" id="cErrors">0</div><div class="l">Fehler</div></div>
+      </div>
+      <div class="current-line" id="currentLine"></div>
+      <div class="recent-toggle" id="recentToggle">▸ Details (letzte gescannte Mails)</div>
+      <div class="recent-list" id="recentList"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -237,8 +281,128 @@ async function test() {
   }
 }
 
+// ───────────────────────────────────────────────────────────────
+// Live progress polling — /email/status her 2 sn'de bir cekilir
+// ───────────────────────────────────────────────────────────────
+let _pollTimer = null;
+let _pollSyncBtn = null;
+
+function showProgress(running) {
+  const card = $("progressCard");
+  card.classList.add("show");
+  if (!running) card.classList.add("done");
+  else card.classList.remove("done");
+}
+
+function hideProgressCard() {
+  $("progressCard").classList.remove("show", "done");
+}
+
+function renderStatus(s) {
+  if (!s || !s.exists) return;
+  const total = s.total || 0;
+  const scanned = s.scanned || 0;
+  const pct = total > 0 ? Math.round((scanned / total) * 100) : 0;
+  $("progressFill").style.width = pct + "%";
+  $("cScanned").textContent = total > 0 ? (scanned + " / " + total) : scanned;
+  $("cImported").textContent = s.imported || 0;
+  $("cDuplicates").textContent = s.duplicates || 0;
+  $("cErrors").textContent = s.errors || 0;
+
+  if (s.running) {
+    $("progressTitle").textContent = "🔍 Scan läuft… " + pct + "%";
+    if (s.current_sender) {
+      $("currentLine").textContent = "→ " + s.current_sender;
+    } else {
+      $("currentLine").textContent = "Verbinde mit IMAP-Server…";
+    }
+  } else {
+    $("progressTitle").textContent = "✓ Scan abgeschlossen";
+    $("currentLine").textContent = "";
+    if (s.last_error) {
+      $("currentLine").textContent = "⚠️ " + s.last_error;
+    }
+  }
+
+  // Recent list
+  const list = $("recentList");
+  if (s.recent && s.recent.length) {
+    list.innerHTML = s.recent.slice().reverse().map(r => {
+      const status = (r.status || "").replace(/[^a-z_]/g, "");
+      const lbl = ({
+        imported: "✓ Importiert",
+        duplicate: "↺ Duplikat",
+        parse_fail: "✗ Parse-Fehler",
+        no_attach: "— Kein PDF/XML",
+        error: "! Fehler",
+      })[r.status] || r.status;
+      const subj = (r.subject || "(ohne Betreff)").replace(/[<>&]/g, "");
+      const sndr = (r.sender || "").replace(/[<>&]/g, "");
+      const reason = (r.reason || "").replace(/[<>&]/g, "");
+      return `<div class="recent-row">
+        <span class="recent-status ${status}">${lbl}</span>
+        <div class="recent-meta" title="${subj} — ${sndr}\n${reason}">${subj}<br><span style="color:#64748b">${sndr}</span>${reason ? '<div class="recent-reason">' + reason + '</div>' : ''}</div>
+      </div>`;
+    }).join("");
+  } else {
+    list.innerHTML = '<div class="recent-row" style="color:#64748b;font-style:italic">Noch keine Mails verarbeitet.</div>';
+  }
+}
+
+async function pollStatus(onDone) {
+  try {
+    const s = await apiCall("/email/status", { method: "GET" });
+    renderStatus(s);
+    if (s.exists && !s.running) {
+      showProgress(false);
+      // Bittiginde toast/banner
+      const imp = s.imported || 0;
+      const dup = s.duplicates || 0;
+      const err = s.errors || 0;
+      if (imp > 0) {
+        show("✅ " + imp + " neue Rechnung" + (imp === 1 ? "" : "en") + " importiert" + (dup > 0 ? " · " + dup + " Duplikate übersprungen" : ""), "ok");
+      } else if (dup > 0) {
+        show("ℹ️ Keine neuen Rechnungen — alle " + dup + " Anhänge waren Duplikate.", "info");
+      } else if (err > 0) {
+        show("⚠️ Scan fertig mit " + err + " Fehlern. Details unten.", "err");
+      } else {
+        show("ℹ️ Scan fertig — keine Rechnung-Anhänge gefunden (siehe Details unten).", "info");
+      }
+      if (onDone) onDone();
+      return false;  // stop polling
+    }
+    showProgress(true);
+    return true;
+  } catch (e) {
+    console.warn("status poll failed:", e);
+    return true;  // keep trying
+  }
+}
+
+function stopPolling() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  if (_pollSyncBtn) {
+    _pollSyncBtn.btn.disabled = false;
+    _pollSyncBtn.btn.textContent = _pollSyncBtn.orig;
+    _pollSyncBtn = null;
+  }
+}
+
+function startPolling(btn, origText) {
+  stopPolling();
+  _pollSyncBtn = { btn, orig: origText };
+  showProgress(true);
+  // ilk poll hemen, sonra 2 sn'de bir
+  pollStatus(stopPolling);
+  _pollTimer = setInterval(async () => {
+    const cont = await pollStatus(stopPolling);
+    if (!cont) { clearInterval(_pollTimer); _pollTimer = null; }
+  }, 2000);
+}
+
 async function sync(allMode) {
   hide();
+  hideProgressCard();
   const btnId = allMode ? "btnSyncAll" : "btnSync";
   const btn = $(btnId);
   const origText = btn.textContent;
@@ -254,7 +418,10 @@ async function sync(allMode) {
     const url = "/email/sync" + (allMode ? "?all=1" : "");
     const d = await apiCall(url, { method: "POST" });
     if (d.background) {
+      // Background mode: start polling — kullaniciya canli progress goster
       show("🔍 " + d.message, "info");
+      startPolling(btn, origText);
+      return;
     } else if (d.message && (d.processed || 0) === 0) {
       show(d.message, "info");
     } else {
@@ -271,8 +438,10 @@ async function sync(allMode) {
   } catch (e) {
     show("Sync fehlgeschlagen: " + e.message, "err");
   } finally {
-    btn.disabled = false;
-    btn.textContent = origText;
+    if (!_pollTimer) {  // sadece background degilse buton'u burada reset et
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 
@@ -308,8 +477,31 @@ $("btnTest").addEventListener("click", test);
 $("btnSync").addEventListener("click", () => sync(false));
 $("btnSyncAll").addEventListener("click", syncAll);
 $("btnDelete").addEventListener("click", del);
+$("recentToggle").addEventListener("click", () => {
+  const list = $("recentList");
+  list.classList.toggle("show");
+  $("recentToggle").textContent = (list.classList.contains("show") ? "▾" : "▸") + " Details (letzte gescannte Mails)";
+});
+
+// Sayfa acilirken aktif/yarim biten sync varsa progress goster
+async function bootstrapStatus() {
+  try {
+    const s = await apiCall("/email/status", { method: "GET" });
+    if (s && s.exists) {
+      renderStatus(s);
+      showProgress(!!s.running);
+      if (s.running) {
+        // Devam eden bir sync varsa polling'i baslat (buton'a basmadan)
+        const btn = $("btnSyncAll");
+        const origText = btn.textContent;
+        startPolling(btn, origText);
+      }
+    }
+  } catch (e) {}
+}
 
 loadConfig();
+bootstrapStatus();
 </script>
 </body>
 </html>

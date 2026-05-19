@@ -5483,6 +5483,24 @@ async def email_sync(request: Request, user: dict = Depends(get_current_user)):
     return await sync_user_inbox(user["sub"], all_messages=False)
 
 
+@app.get("/email/status")
+async def email_sync_status(user: dict = Depends(get_current_user)):
+    """Live progress of the user's email sync (in-memory).
+
+    Returns:
+      - running (bool)
+      - mode ("all" | "unseen")
+      - total, scanned, imported, duplicates, errors
+      - current_sender (str)
+      - last_error (str)
+      - started_at, finished_at (ISO timestamps)
+      - recent (list of {subject, sender, status, reason, at})
+      - exists (False = hic sync baslamamis)
+    """
+    from autotax.email_sync import get_sync_status
+    return get_sync_status(user["sub"])
+
+
 @app.post("/email/test")
 @limiter.limit("10/hour")
 def email_test(request: Request, user: dict = Depends(get_current_user)):

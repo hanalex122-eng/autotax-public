@@ -40,6 +40,83 @@ _ADVISORY_LOCK_NAMESPACE = 914372000
 _auto_sync_task: Optional[asyncio.Task] = None
 
 
+# ---------------------------------------------------------------------------
+# In-memory per-user sync progress tracking.
+# Single uvicorn worker yeterli — multi-worker'da paylasilmaz, ama bizim
+# kullanim icin (kisisel SaaS, dusuk concurrency) tek worker yeterli.
+# Frontend GET /email/status ile 2 sn'de bir poll eder.
+# ---------------------------------------------------------------------------
+_SYNC_STATUS: dict[int, dict] = {}
+_RECENT_CAP = 20  # her kullanici icin son N mail'in detayini sakla
+
+
+def _status_init(user_id: int, total: int, mode: str) -> None:
+    _SYNC_STATUS[user_id] = {
+        "running": True,
+        "mode": mode,                      # "all" | "unseen"
+        "total": total,                    # taranacak toplam mail sayisi
+        "scanned": 0,                      # simdiye kadar tarananlar
+        "imported": 0,                     # eklenen yeni Belege
+        "duplicates": 0,                   # dup hash atlanan
+        "errors": 0,                       # IMAP/parse hatalari
+        "current_sender": "",              # surdurulen mail'in sender'i
+        "last_error": "",                  # son hata stringi (UI gosterir)
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "recent": [],                      # son N mail'in {subject, sender, status, reason} kaydi
+    }
+
+
+def _status_update(user_id: int, **kwargs) -> None:
+    st = _SYNC_STATUS.get(user_id)
+    if not st:
+        return
+    for k, v in kwargs.items():
+        if k == "inc":  # {"inc": {"scanned": 1, "imported": 1}}
+            for ck, cv in (v or {}).items():
+                st[ck] = (st.get(ck) or 0) + cv
+        else:
+            st[k] = v
+
+
+def _status_record(user_id: int, subject: str, sender: str, status: str, reason: str = "") -> None:
+    st = _SYNC_STATUS.get(user_id)
+    if not st:
+        return
+    entry = {
+        "subject": (subject or "")[:120],
+        "sender": (sender or "")[:120],
+        "status": status,         # "imported" | "duplicate" | "no_attach" | "parse_fail" | "error"
+        "reason": reason[:200] if reason else "",
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    st["recent"].append(entry)
+    # Cap'le: sadece son N'i tut (LIFO icin: append + slice baslangictan)
+    if len(st["recent"]) > _RECENT_CAP:
+        st["recent"] = st["recent"][-_RECENT_CAP:]
+
+
+def _status_finish(user_id: int, message: str = "") -> None:
+    st = _SYNC_STATUS.get(user_id)
+    if not st:
+        return
+    st["running"] = False
+    st["finished_at"] = datetime.now(timezone.utc).isoformat()
+    if message:
+        st["last_error"] = message  # finish'te varsa hata mesaji yansisin
+
+
+def get_sync_status(user_id: int) -> dict:
+    """Kullanicinin son sync durumunu doner (running=False ise tamamlanmis;
+    yoksa hic baslamamis). Frontend polling icin kullanilir."""
+    st = _SYNC_STATUS.get(user_id)
+    if not st:
+        return {"running": False, "exists": False}
+    out = dict(st)
+    out["exists"] = True
+    return out
+
+
 def _try_acquire_user_lock(db_session, user_id: int) -> bool:
     """Try to acquire a Postgres advisory lock for this user. Returns True
     on acquisition, False if another worker/request already holds it.
@@ -253,10 +330,16 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
     all_messages=True: One-off mode triggered by user. Searches ALL messages
     (not just UNSEEN) and does NOT mark them as SEEN — preserves the user's
     read/unread state in their email client. Duplicate protection via file
-    hash prevents reimport. Caps max_messages at 200."""
+    hash prevents reimport. Caps max_messages at 200.
+
+    Progress: _SYNC_STATUS[user_id] dict'i her adimda guncellenir; frontend
+    GET /email/status ile poll eder."""
     from autotax.db import SessionLocal, save_invoice
     from autotax.duplicate_service import generate_file_hash, find_hard_duplicate
     from autotax.models import EmailConfig, Invoice
+
+    mode_label = "all" if all_messages else "unseen"
+    _status_init(user_id, total=0, mode=mode_label)
 
     db = SessionLocal()
     _holds_lock = False
@@ -265,6 +348,7 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
             EmailConfig.user_id == user_id, EmailConfig.enabled == True  # noqa: E712
         ).first()
         if not cfg:
+            _status_finish(user_id, "Keine Email-Konfiguration aktiv")
             return {"processed": 0, "skipped": 0, "errors": 0, "message": "Keine Email-Konfiguration aktiv"}
 
         # Multi-worker / concurrent-request guard: only one sync per user
@@ -272,6 +356,7 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
         _holds_lock = _try_acquire_user_lock(db, user_id)
         if not _holds_lock:
             logger.info("sync_user_inbox: user=%s already in progress; skipping", user_id)
+            _status_finish(user_id, "Sync läuft bereits")
             return {"processed": 0, "skipped": 0, "errors": 0, "message": "Sync läuft bereits"}
 
         if cfg.provider in PROVIDERS:
@@ -279,12 +364,14 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
         else:
             host, port = cfg.host, cfg.port or 993
         if not host:
+            _status_finish(user_id, "Ungültige Provider-Konfiguration")
             return {"processed": 0, "skipped": 0, "errors": 0, "message": "Ungültige Provider-Konfiguration"}
 
         try:
             password = decrypt_password(cfg.encrypted_password)
         except Exception:
             logger.warning("Password decryption failed for user %s", user_id)
+            _status_finish(user_id, "Passwort-Entschlüsselung fehlgeschlagen")
             return {"processed": 0, "skipped": 0, "errors": 0, "message": "Passwort-Entschlüsselung fehlgeschlagen — bitte Konfiguration neu speichern"}
 
         processed = 0
@@ -295,13 +382,18 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
         try:
             try:
                 M = _connect_imap(host, port, cfg.email, password)
-            except imaplib.IMAP4.error:
+            except imaplib.IMAP4.error as _e:
+                logger.warning("IMAP login failed user=%s host=%s: %s", user_id, host, _e)
+                _status_finish(user_id, f"IMAP-Login fehlgeschlagen: {_e}")
                 return {"processed": 0, "skipped": 0, "errors": 0, "message": "IMAP-Login fehlgeschlagen — prüfe Email und App-Passwort"}
-            except (OSError, ssl.SSLError):
+            except (OSError, ssl.SSLError, TimeoutError) as _e:
+                logger.warning("IMAP connection failed user=%s host=%s: %s", user_id, host, _e)
+                _status_finish(user_id, f"IMAP-Verbindung fehlgeschlagen: {_e}")
                 return {"processed": 0, "skipped": 0, "errors": 0, "message": "IMAP-Server nicht erreichbar"}
 
             typ, _ = M.select("INBOX")
             if typ != "OK":
+                _status_finish(user_id, "Posteingang nicht verfügbar")
                 return {"processed": 0, "skipped": 0, "errors": 0, "message": "Posteingang nicht verfügbar"}
 
             search_query = "ALL" if all_messages else "UNSEEN"
@@ -309,22 +401,35 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
             if typ != "OK" or not data or not data[0]:
                 cfg.last_sync = datetime.now(timezone.utc)
                 db.commit()
+                _status_finish(user_id)
                 return {"processed": 0, "skipped": 0, "errors": 0, "mode": search_query}
 
             ids = data[0].split()
             cap = 200 if all_messages else max_messages
             ids = ids[-cap:]  # son N mesaj (en yeniler — IMAP UID artarak gider)
+            _status_update(user_id, total=len(ids))
+            logger.info("sync_user_inbox user=%s mode=%s -> %d mails to scan", user_id, search_query, len(ids))
 
             for msg_id in ids:
                 try:
                     typ, msg_data = M.fetch(msg_id, "(RFC822)")
                     if typ != "OK" or not msg_data or not msg_data[0]:
                         errors += 1
+                        _status_update(user_id, inc={"scanned": 1, "errors": 1}, last_error=f"IMAP fetch fail msg={msg_id}")
+                        _status_record(user_id, "", "", "error", f"IMAP fetch fail msg={msg_id}")
                         continue
                     msg = email.message_from_bytes(msg_data[0][1])
                     subject = _decode_header(msg.get("Subject"))
                     sender = _decode_header(msg.get("From"))
                     logger.info("Email sync user=%s msg=%s subj=%r from=%r", user_id, msg_id.decode() if isinstance(msg_id, bytes) else msg_id, subject[:80], sender[:80])
+                    _status_update(user_id, current_sender=sender[:80])
+
+                    # Bu mail icinde isimsiz/uygun ek var mi? — sonunda no_attach kaydetmek icin
+                    mail_imported = 0
+                    mail_dup = 0
+                    mail_parse_fail = 0
+                    mail_has_relevant_attach = False
+                    last_reason = ""
 
                     for part in msg.walk():
                         if part.get_content_maintype() == "multipart":
@@ -332,34 +437,60 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                         fn = _decode_header(part.get_filename() or "")
                         try:
                             payload = part.get_payload(decode=True)
-                        except Exception:
+                        except Exception as _pe:
                             payload = None
+                            last_reason = f"payload decode error: {_pe}"
+                            logger.warning("Attachment decode failed user=%s msg=%s fn=%r: %s", user_id, msg_id, fn, _pe)
                         if not payload:
                             continue
                         if len(payload) > MAX_ATTACHMENT_BYTES:
+                            last_reason = f"attachment too large ({len(payload)//1024} KB > {MAX_ATTACHMENT_BYTES//1024} KB)"
+                            logger.warning("Attachment too large user=%s fn=%r size=%d", user_id, fn, len(payload))
                             continue
                         ftype = _file_type(fn, payload)
                         if ftype not in ("xml", "pdf"):
+                            # Non-invoice attachment (image/word/etc.) — atla, sebep yaz
+                            last_reason = f"unsupported type '{ftype}' for fn={fn!r}"
                             continue
 
+                        mail_has_relevant_attach = True
                         fh = generate_file_hash(payload)
                         dup = find_hard_duplicate(db, user_id, fh)
                         if dup:
                             skipped += 1
+                            mail_dup += 1
+                            last_reason = f"duplicate hash (already imported as invoice #{dup.id if hasattr(dup,'id') else '?'})"
+                            _status_update(user_id, inc={"duplicates": 1})
                             continue
 
                         parsed: Optional[dict] = None
-                        if ftype == "xml":
-                            parsed = _parse_xml_invoice(payload)
-                        else:
-                            xml_bytes = _extract_zugferd_xml(payload)
-                            if xml_bytes:
-                                parsed = _parse_xml_invoice(xml_bytes)
+                        try:
+                            if ftype == "xml":
+                                parsed = _parse_xml_invoice(payload)
+                                if not parsed:
+                                    last_reason = "XML parse failed (kein erkanntes XRechnung/UBL-Format)"
+                                    logger.warning("XML parse failed user=%s fn=%r", user_id, fn)
                             else:
-                                parsed = await _ocr_parse_pdf(payload, fn)
+                                xml_bytes = _extract_zugferd_xml(payload)
+                                if xml_bytes:
+                                    parsed = _parse_xml_invoice(xml_bytes)
+                                    if not parsed:
+                                        last_reason = "ZUGFeRD XML extracted but parse failed"
+                                        logger.warning("ZUGFeRD XML parse failed user=%s fn=%r", user_id, fn)
+                                else:
+                                    parsed = await _ocr_parse_pdf(payload, fn)
+                                    if not parsed:
+                                        last_reason = "OCR/parse failed for PDF (kein Betrag/Datum erkannt)"
+                                        logger.warning("OCR parse failed user=%s fn=%r", user_id, fn)
+                        except Exception as _pe:
+                            last_reason = f"parse exception: {_pe}"
+                            logger.exception("Parse exception user=%s fn=%r", user_id, fn)
+                            parsed = None
 
                         if not parsed:
                             skipped += 1
+                            mail_parse_fail += 1
+                            _status_update(user_id, inc={"errors": 0})  # parse fail = soft skip (errors degil)
                             continue
 
                         parsed.setdefault("invoice_type", "expense")
@@ -386,6 +517,13 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                                     db.commit()
                             except Exception:
                                 db.rollback()
+                        except Exception as _se:
+                            last_reason = f"save_invoice fail: {_se}"
+                            logger.exception("save_invoice failed user=%s fn=%r", user_id, fn)
+                            errors += 1
+                            mail_parse_fail += 1
+                            _status_update(user_id, inc={"errors": 1}, last_error=last_reason)
+                            continue
 
                         try:
                             from autotax.main import auto_create_cash_entry
@@ -394,6 +532,22 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                             logger.exception("auto_create_cash_entry failed for invoice %s", inv_id)
 
                         processed += 1
+                        mail_imported += 1
+                        _status_update(user_id, inc={"imported": 1})
+                        logger.info("Email import OK user=%s invoice=%s vendor=%r amount=%s", user_id, inv_id, parsed.get("vendor"), parsed.get("total_amount"))
+
+                    # Mail icin tek bir recent-row yaz (en cok bilgi tasiyan durumu sec)
+                    if mail_imported > 0:
+                        _status_record(user_id, subject, sender, "imported",
+                                       f"{mail_imported} Beleg(e) importiert" + (f", {mail_dup} duplicate" if mail_dup else ""))
+                    elif mail_dup > 0:
+                        _status_record(user_id, subject, sender, "duplicate", f"{mail_dup} Anhang bereits importiert")
+                    elif mail_parse_fail > 0:
+                        _status_record(user_id, subject, sender, "parse_fail", last_reason or "Anhang konnte nicht gelesen werden")
+                    elif not mail_has_relevant_attach:
+                        _status_record(user_id, subject, sender, "no_attach", last_reason or "Kein PDF/XML im Anhang")
+
+                    _status_update(user_id, inc={"scanned": 1})
 
                     # Mark seen after handling attachments (even if no attachments matched).
                     # all_messages mode (manuel tum-tarama): okundu/okunmadi durumunu
@@ -403,12 +557,16 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                             M.store(msg_id, "+FLAGS", "\\Seen")
                         except Exception:
                             logger.warning("Failed to mark message %s as seen", msg_id)
-                except Exception:
+                except Exception as _me:
                     errors += 1
+                    _status_update(user_id, inc={"scanned": 1, "errors": 1}, last_error=f"msg processing error: {_me}")
+                    _status_record(user_id, "", "", "error", f"msg processing: {_me}")
                     logger.exception("Email processing failed for msg %s", msg_id)
 
             cfg.last_sync = datetime.now(timezone.utc)
             db.commit()
+            _status_finish(user_id)
+            logger.info("sync_user_inbox done user=%s processed=%d skipped=%d errors=%d scanned=%d", user_id, processed, skipped, errors, len(ids))
             return {"processed": processed, "skipped": skipped, "errors": errors, "mode": search_query, "scanned": len(ids)}
         finally:
             if M is not None:
@@ -424,6 +582,10 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
         if _holds_lock:
             _release_user_lock(db, user_id)
         db.close()
+        # Eger _status_finish henuz cagrilmadiysa (yukaridan exception sizdi) defensive olarak kapat
+        st = _SYNC_STATUS.get(user_id)
+        if st and st.get("running"):
+            _status_finish(user_id, "Sync abgebrochen (interner Fehler)")
 
 
 # ------------------------ automatic sync loop --------------------------
