@@ -2192,9 +2192,10 @@ def _serialize_reminder_invoice(inv: Invoice) -> dict:
 def reminders_upcoming(
     request: Request,
     days: int = Query(7, ge=1, le=90),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_acting_context),
 ):
-    """Onumuzdeki N gun icinde vadesi gelecek odenmemis faturalar."""
+    """Onumuzdeki N gun icinde vadesi gelecek odenmemis faturalar.
+    Advisor acting mode'da Mandant'in faturalarini gosterir."""
     db = SessionLocal()
     try:
         today = datetime.now(timezone.utc).date()
@@ -2221,7 +2222,7 @@ def reminders_upcoming(
 
 @app.get("/reminders/overdue")
 @limiter.limit("30/minute")
-def reminders_overdue(request: Request, user: dict = Depends(get_current_user)):
+def reminders_overdue(request: Request, user: dict = Depends(get_acting_context)):
     """Vadesi gecmis odenmemis faturalar."""
     db = SessionLocal()
     try:
@@ -2244,7 +2245,7 @@ def reminders_overdue(request: Request, user: dict = Depends(get_current_user)):
 
 
 @app.get("/steuer/reminders")
-def steuer_reminders_list(user: dict = Depends(get_current_user), include_done: bool = False, include_snoozed: bool = True):
+def steuer_reminders_list(user: dict = Depends(get_acting_context), include_done: bool = False, include_snoozed: bool = True):
     """Kullanıcının tüm aktif vergi reminder'ları + opsiyonel snoozed/done."""
     from autotax.models import SteuerReminder as _SR
     from autotax.steuer import ensure_reminders_for_user
@@ -2402,7 +2403,7 @@ def steuer_reminders_delete(reminder_id: int, request: Request, user: dict = Dep
 
 @app.get("/steuer/upcoming")
 @limiter.limit("30/minute")
-def steuer_upcoming(request: Request, user: dict = Depends(get_current_user)):
+def steuer_upcoming(request: Request, user: dict = Depends(get_acting_context)):
     """Kullanicinin yaklasan vergi vadeleri (USt/ESt/GewSt/Jahres).
     Kleinunternehmer'a USt yok."""
     from autotax.steuer import upcoming_for_user
@@ -9170,8 +9171,9 @@ def submit_feedback(body: dict = Body(...), user: dict = Depends(get_current_use
 # ============================================================
 
 @app.get("/vault")
-def list_vault(search: Optional[str] = Query(None), user: dict = Depends(get_current_user)):
-    """List all receipts with metadata — checks DB for original file."""
+def list_vault(search: Optional[str] = Query(None), user: dict = Depends(get_acting_context)):
+    """List all receipts with metadata — checks DB for original file.
+    Advisor acting mode'da Mandant'in belgelerini gosterir (X-Acting-Client-Id)."""
     db = SessionLocal()
     try:
         q = db.query(Invoice).filter(Invoice.user_id == user["sub"])
@@ -10817,7 +10819,7 @@ def delete_recurring_expense(rid: int, user: dict = Depends(get_current_user),
 
 
 @app.get("/steuer/summary")
-def steuer_summary(year: int = Query(default=None), user: dict = Depends(get_current_user)):
+def steuer_summary(year: int = Query(default=None), user: dict = Depends(get_acting_context)):
     """Yillik vergi ozeti — Invoice'lardan (AI kategorize etti) + RecurringExpense'lardan.
     Cikti:
       - by_category: {Bewirtung: {gross, absetzbar, count}, ...}
@@ -10928,7 +10930,7 @@ def steuer_summary(year: int = Query(default=None), user: dict = Depends(get_cur
 
 @app.get("/steuer/eur-export")
 async def eur_export(year: int = Query(default=None), format: str = Query("json"),
-                      user: dict = Depends(get_current_user)):
+                      user: dict = Depends(get_acting_context)):
     """Anlage EÜR formatinda yillik export.
 
     EÜR (Einnahmen-Uberschuss-Rechnung) = Kleinunternehmer/Selbstandiger icin
