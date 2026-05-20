@@ -3985,11 +3985,17 @@ def advisor_invite(request: Request, body: AdvisorInviteRequest, user: dict = De
                 f"kein AutoTax-Cloud-Konto haben, können Sie eines mit dieser E-Mail-Adresse "
                 f"anlegen und die Einladung danach annehmen.</p>"
             )
-            send_email(email, subject, body_html,
+            _mail_ok = send_email(email, subject, body_html,
                         user_id=user["sub"], kind="advisor_invite",
                         ref_type="advisor_invite", ref_id=inv.id)
-        except Exception:
-            logger.exception("Advisor invite email send failed")
+            if not _mail_ok:
+                try:
+                    from autotax.reminders import last_send_error as _lse
+                except Exception:
+                    _lse = "(import failed)"
+                logger.warning("Advisor invite email returned False: to=%s err=%s", email, _lse)
+        except Exception as _e:
+            logger.exception("Advisor invite email send failed: to=%s err=%s", email, _e)
         audit("advisor.invite_create", user_id=user["sub"], resource_type="advisor_invite",
               resource_id=None, payload={"advisor_email": email, "scope": scope}, request=request)
         return {"success": True, "token": token, "link": link, "expires_in_days": 14}
