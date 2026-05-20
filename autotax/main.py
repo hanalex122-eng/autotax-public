@@ -1024,7 +1024,7 @@ def service_worker():
 
 
 @app.get("/invoices/{invoice_id}/pdf")
-def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_current_user)):
+def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_context)):
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas as pdf_canvas
@@ -6902,7 +6902,7 @@ def invoice_dashboard(country: str = Query("DE"), user: dict = Depends(get_actin
 # ============================================================
 
 @app.get("/invoices/summary")
-def invoice_summary(user: dict = Depends(get_current_user)):
+def invoice_summary(user: dict = Depends(get_acting_context)):
     db = SessionLocal()
     try:
         all_invoices = db.query(Invoice).filter(Invoice.user_id == user["sub"], (Invoice.is_deleted == False) | (Invoice.is_deleted == None)).all()
@@ -7206,7 +7206,7 @@ def put_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: di
 
 # --- ADDED START: Single invoice detail with full OCR text ---
 @app.get("/invoices/{invoice_id}/detail")
-def get_invoice_detail(invoice_id: int, user: dict = Depends(get_current_user)):
+def get_invoice_detail(invoice_id: int, user: dict = Depends(get_acting_context)):
     """Get full invoice detail including complete raw OCR text."""
     db = SessionLocal()
     try:
@@ -7414,7 +7414,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
 
 
 @app.get("/invoices/{invoice_id}/status")
-def invoice_status(invoice_id: int, user: dict = Depends(get_current_user)):
+def invoice_status(invoice_id: int, user: dict = Depends(get_acting_context)):
     """Check processing status of an invoice (for async upload polling)."""
     db = SessionLocal()
     try:
@@ -8037,7 +8037,7 @@ def reconcile_entry(entry_id: int, user: dict = Depends(get_current_user)):
 # ============================================================
 
 @app.get("/bookkeeping/summary/overview")
-def bookkeeping_summary(year: int = Query(None), user: dict = Depends(get_current_user)):
+def bookkeeping_summary(year: int = Query(None), user: dict = Depends(get_acting_context)):
     db = SessionLocal()
     try:
         q = db.query(CashEntry).filter(CashEntry.user_id == user["sub"], (CashEntry.is_deleted == False) | (CashEntry.is_deleted == None))
@@ -8068,7 +8068,7 @@ def bookkeeping_summary(year: int = Query(None), user: dict = Depends(get_curren
 # ============================================================
 
 @app.get("/bookkeeping/export/csv")
-def export_bookkeeping_csv(year: int = Query(None), user: dict = Depends(get_current_user)):
+def export_bookkeeping_csv(year: int = Query(None), user: dict = Depends(get_acting_context)):
     db = SessionLocal()
     try:
         q = db.query(CashEntry).filter(CashEntry.user_id == user["sub"], (CashEntry.is_deleted == False) | (CashEntry.is_deleted == None))
@@ -9571,7 +9571,7 @@ async def upload_vault_file(invoice_id: int, file: UploadFile = File(...), user:
 
 
 @app.get("/vault/{invoice_id}/download")
-def download_vault_file(invoice_id: int, mode: str = Query("inline"), user: dict = Depends(get_current_user)):
+def download_vault_file(invoice_id: int, mode: str = Query("inline"), user: dict = Depends(get_acting_context)):
     """Download original receipt file from DB. mode=inline (preview) or attachment (download)."""
     db = SessionLocal()
     try:
