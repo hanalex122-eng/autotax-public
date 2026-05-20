@@ -5779,8 +5779,20 @@ def export_all_user_data(request: Request, user: dict = Depends(get_current_user
 
 
 @app.get("/account/me")
-def get_account_me(user: dict = Depends(get_current_user)):
-    """Return current user profile info."""
+def get_account_me(user: dict = Depends(get_acting_context)):
+    """Return current user profile info.
+
+    Acting mode (advisor 'Daten ansehen'): user['sub'] zaten Mandant'in
+    ID'sidir, dolayisiyla profile karti otomatik olarak Mandant'i gosterir.
+    Bu Dashboard'daki 'efe han · videohancer · 6 Eintraege' kartinin
+    advisor mode'da 'Mandant: hanalex122 · 25 Eintraege' olarak yansimasini
+    saglar — banner ile tutarli olur.
+
+    Owner mode'da yine kendi profili doner.
+
+    Response'a 'is_acting' + 'advisor_email' eklenir ki frontend ek bilgi
+    isterse kullanabilir.
+    """
     db = SessionLocal()
     try:
         u = db.query(User).filter(User.id == user["sub"]).first()
