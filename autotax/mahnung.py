@@ -333,6 +333,10 @@ async def process_mahnungen() -> dict:
                         f"{cfg['title']} — Rechnung {inv.invoice_number or ''}",
                         body,
                         attachments=[(fname, pdf_bytes, "application/pdf")],
+                        user_id=inv.user_id,
+                        kind=f"mahnung_l{new_level}",
+                        ref_type="invoice",
+                        ref_id=inv.id,
                     )
 
                 inv.mahnung_level = new_level

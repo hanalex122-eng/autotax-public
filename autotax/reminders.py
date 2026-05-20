@@ -240,13 +240,21 @@ last_send_error: str = ""
 
 
 def send_email(to_addr: str, subject: str, body_html: str,
-               attachments: Optional[list] = None) -> bool:
+               attachments: Optional[list] = None,
+               user_id: Optional[int] = None,
+               kind: str = "generic",
+               ref_type: Optional[str] = None,
+               ref_id: Optional[int] = None) -> bool:
     """Email gonderir. Iki yol:
     1) RESEND_API_KEY env varsa Resend HTTP API (modern, SMTP'siz)
     2) SMTP_HOST + SMTP_USER + SMTP_PASS varsa klasik SMTP
 
     attachments: opsiyonel liste, her oge (filename, bytes, mime_type) tuple.
                  Mahnung PDF'i icin kullanilir.
+
+    user_id/kind/ref_type/ref_id: SentNotificationLog audit kaydi icin.
+    Her gonderim (basarili veya basarisiz) tabloya yazilir, kullanici
+    "Gesendete Mails" sayfasinda gormek icin.
 
     Hata olursa modul-level last_send_error degiskeni doldurulur (caller
     UI'a yansitmak icin okuyabilir).
@@ -257,7 +265,13 @@ def send_email(to_addr: str, subject: str, body_html: str,
     if not to_addr:
         logger.debug("[REMINDER] email skipped — no recipient")
         last_send_error = "no recipient"
+        _log_notification(user_id=user_id, channel="email", kind=kind,
+                          target=None, ref_type=ref_type, ref_id=ref_id,
+                          status="failed", error="no recipient")
         return False
+
+    # Audit subject (truncated) — `kind|subject` formatinda, UI'da gosterim icin
+    audit_kind = f"{kind}|{(subject or '')[:120]}"
 
     # YOL 1: Resend API (oncelikli, kullanici bunu set etmis)
     resend_key = (os.getenv("RESEND_API_KEY") or "").strip()
@@ -295,6 +309,9 @@ def send_email(to_addr: str, subject: str, body_html: str,
             if r.status_code in (200, 201, 202):
                 logger.info("[REMINDER] Resend email sent to %s (subject: %s)",
                             to_addr, subject[:60])
+                _log_notification(user_id=user_id, channel="email", kind=audit_kind,
+                                  target=to_addr, ref_type=ref_type, ref_id=ref_id,
+                                  status="sent")
                 return True
             # Resend non-success — gercek hata mesajini yakala
             try:
@@ -314,6 +331,9 @@ def send_email(to_addr: str, subject: str, body_html: str,
         if not last_send_error:
             last_send_error = "neither Resend nor SMTP configured"
         logger.warning("[REMINDER] email skipped — neither Resend nor SMTP configured")
+        _log_notification(user_id=user_id, channel="email", kind=audit_kind,
+                          target=to_addr, ref_type=ref_type, ref_id=ref_id,
+                          status="failed", error=last_send_error)
         return False
     try:
         # Eklenti varsa mixed multipart, yoksa alternative
@@ -342,10 +362,16 @@ def send_email(to_addr: str, subject: str, body_html: str,
             s.starttls()
             s.login(SMTP_USER, SMTP_PASS)
             s.send_message(msg)
+        _log_notification(user_id=user_id, channel="email", kind=audit_kind,
+                          target=to_addr, ref_type=ref_type, ref_id=ref_id,
+                          status="sent")
         return True
     except Exception as e:
         last_send_error = f"SMTP error: {e}"
         logger.warning("[REMINDER] email error to %s: %s", to_addr, e)
+        _log_notification(user_id=user_id, channel="email", kind=audit_kind,
+                          target=to_addr, ref_type=ref_type, ref_id=ref_id,
+                          status="failed", error=last_send_error)
         return False
 
 
@@ -484,7 +510,8 @@ async def process_monthly_summary(force: bool = False) -> dict:
                     </table>
                     <p style="color:#64748b;font-size:13px;margin-top:24px">AutoTax-HUB · Automatische Monatsübersicht</p>
                     </body></html>"""
-                    if send_email(u.email, f"📊 {label} {py} — Monatsübersicht", body):
+                    if send_email(u.email, f"📊 {label} {py} — Monatsübersicht", body,
+                                   user_id=u.id, kind="monthly_summary"):
                         stats["sent_email"] += 1
             except Exception:
                 logger.exception("[SUMMARY] error for user %s", u.id)
@@ -615,7 +642,9 @@ async def process_reminders() -> dict:
                 if u and u.email:
                     email_subject = f"🧾 Rechnung Reminder: {inv.vendor or 'Rechnung'} — {_CODE_LABEL_DE.get(code, code)}"
                     email_body = _format_email_body(inv, code)
-                    if send_email(u.email, email_subject, email_body):
+                    if send_email(u.email, email_subject, email_body,
+                                   user_id=u.id, kind=f"invoice_reminder:{code}",
+                                   ref_type="invoice", ref_id=inv.id):
                         stats["sent_email"] += 1
 
                 inv.reminder_sent_codes = _serialize_codes(sent_codes)

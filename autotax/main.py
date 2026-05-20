@@ -2861,6 +2861,10 @@ async def mahnung_send_one(
                     f"{cfg['title']} — Rechnung {inv.invoice_number or ''}",
                     html_body,
                     attachments=[(fname2, pdf_bytes, "application/pdf")],
+                    user_id=user["sub"],
+                    kind=f"mahnung_l{level}",
+                    ref_type="invoice",
+                    ref_id=inv.id,
                 )
             except Exception:
                 logger.exception("[MAHNUNG] email failed")
@@ -3144,7 +3148,9 @@ async def email_invoices_bulk(
   </p>
 </div>
 """
-        ok = _send_email(to_addr, subject, body_html, attachments=attachments)
+        ok = _send_email(to_addr, subject, body_html, attachments=attachments,
+                          user_id=user["sub"], kind="bulk_invoices",
+                          ref_type="invoice_ids", ref_id=None)
         if not ok:
             from autotax.reminders import last_send_error as _last_err
             detail = _last_err or "Resend/SMTP error"
@@ -3331,7 +3337,10 @@ async def email_invoice_attachment(
 </div>
 """
         ok = _send_email(to_addr, subject, body_html,
-                         attachments=[(original_name, original_bytes, mime_type)])
+                         attachments=[(original_name, original_bytes, mime_type)],
+                         user_id=user["sub"],
+                         kind=("invoice_to_advisor" if to_advisor else "invoice_email"),
+                         ref_type="invoice", ref_id=inv.id)
         if not ok:
             from autotax.reminders import last_send_error as _last_err
             detail = _last_err or "Resend/SMTP nicht konfiguriert oder Fehler"
@@ -3976,7 +3985,9 @@ def advisor_invite(request: Request, body: AdvisorInviteRequest, user: dict = De
                 f"kein AutoTax-Cloud-Konto haben, können Sie eines mit dieser E-Mail-Adresse "
                 f"anlegen und die Einladung danach annehmen.</p>"
             )
-            send_email(email, subject, body_html)
+            send_email(email, subject, body_html,
+                        user_id=user["sub"], kind="advisor_invite",
+                        ref_type="advisor_invite", ref_id=inv.id)
         except Exception:
             logger.exception("Advisor invite email send failed")
         audit("advisor.invite_create", user_id=user["sub"], resource_type="advisor_invite",
@@ -5800,6 +5811,184 @@ def get_account_me(user: dict = Depends(get_current_user)):
             "invoice_count": inv_count,
             "company_name": companies[0].company_name if companies else "",
         }
+    finally:
+        db.close()
+
+
+@app.get("/mails", response_class=HTMLResponse)
+def mails_page():
+    """Standalone 'Gesendete E-Mails' Seite. JWT auth client-side via fetch
+    (atx_token localStorage). Listet alle vom Backend versendeten Mails
+    (Rechnungs-Versand, Steuerberater-Einladung, Mahnung, Reminder, ...)."""
+    return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head>
+<meta charset="UTF-8"><title>Gesendete E-Mails — AutoTax-Cloud</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,'DM Sans',sans-serif;background:#050a12;color:#e8edf5;margin:0;padding:24px;line-height:1.5}
+  h1{color:#10b981;font-size:24px;margin:0 0 6px}
+  .sub{color:#64748b;font-size:13px;margin:0 0 18px}
+  .topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:18px}
+  .actions{display:flex;gap:8px;flex-wrap:wrap}
+  a.back{color:#94a3b8;text-decoration:none;font-size:13px}
+  a.back:hover{color:#10b981}
+  button{cursor:pointer;font-family:inherit;font-size:13px;padding:8px 14px;border-radius:8px;background:#10b981;border:1px solid #10b981;color:#000;font-weight:600}
+  button:hover{background:#0d9668}
+  button.ghost{background:transparent;color:#94a3b8;border-color:#334155}
+  button.ghost:hover{color:#e8edf5;border-color:#475569}
+  table{width:100%;border-collapse:collapse;background:#0c1420;border-radius:12px;overflow:hidden;border:1px solid #1f2937;font-size:13px}
+  th{text-align:left;padding:12px 14px;background:#111c2c;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+  td{padding:11px 14px;border-top:1px solid #1f2937;vertical-align:top}
+  tr:hover td{background:rgba(255,255,255,0.02)}
+  .status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+  .status.sent{background:#065f46;color:#a7f3d0}
+  .status.failed{background:#7f1d1d;color:#fecaca}
+  .kind{color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .target{font-family:'JetBrains Mono',monospace;font-size:12px;color:#e8edf5}
+  .subject{color:#cbd5e1;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .time{color:#64748b;font-size:11px;white-space:nowrap}
+  .error{color:#f87171;font-size:11px;margin-top:4px;max-width:380px;word-break:break-word}
+  .empty{text-align:center;padding:48px 16px;color:#64748b}
+  .empty h3{color:#94a3b8;font-size:16px;margin:0 0 6px}
+  .err-banner{background:#7f1d1d;color:#fecaca;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px}
+</style></head><body>
+<div class="topbar">
+  <div>
+    <h1>📧 Gesendete E-Mails</h1>
+    <p class="sub">Audit-Liste aller vom Backend versendeten Mails. <a class="back" href="/app">← zurück zur App</a></p>
+  </div>
+  <div class="actions">
+    <button class="ghost" onclick="loadMails()">↻ Aktualisieren</button>
+  </div>
+</div>
+<div id="banner"></div>
+<table id="tbl">
+  <thead><tr>
+    <th>Zeit</th><th>Empfänger</th><th>Betreff / Typ</th>
+    <th>Status</th><th>Bezug</th>
+  </tr></thead>
+  <tbody id="rows"><tr><td colspan="5" class="empty">Lade…</td></tr></tbody>
+</table>
+<script>
+const API = location.origin;
+function getToken(){
+  return localStorage.getItem("atx_token")
+      || localStorage.getItem("token")
+      || localStorage.getItem("access_token")
+      || "";
+}
+function fmtTime(iso){
+  if(!iso) return "—";
+  try{
+    const d = new Date(iso);
+    return d.toLocaleString("de-DE", {day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"});
+  }catch(e){ return iso; }
+}
+function esc(s){ return (s||"").replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+async function loadMails(){
+  const token = getToken();
+  if(!token){
+    document.getElementById("banner").innerHTML =
+      '<div class="err-banner">Nicht eingeloggt. Bitte zuerst in der App anmelden: <a href="/app" style="color:#fff;text-decoration:underline">/app</a></div>';
+    document.getElementById("rows").innerHTML =
+      '<tr><td colspan="5" class="empty"><h3>Keine Session</h3>Bitte zuerst anmelden.</td></tr>';
+    return;
+  }
+  try{
+    const r = await fetch(API + "/account/sent-mails?limit=200", {
+      headers: {"Authorization": "Bearer " + token}
+    });
+    if(r.status === 401){
+      document.getElementById("banner").innerHTML =
+        '<div class="err-banner">Session abgelaufen. <a href="/app" style="color:#fff;text-decoration:underline">Neu anmelden</a></div>';
+      return;
+    }
+    if(!r.ok){
+      document.getElementById("rows").innerHTML =
+        '<tr><td colspan="5" class="empty"><h3>Fehler</h3>HTTP '+r.status+'</td></tr>';
+      return;
+    }
+    const data = await r.json();
+    const items = data.items || [];
+    if(items.length === 0){
+      document.getElementById("rows").innerHTML =
+        '<tr><td colspan="5" class="empty"><h3>Noch keine Mails gesendet</h3>Sobald das System E-Mails verschickt (Rechnungen, Mahnungen, Einladungen), erscheinen sie hier.</td></tr>';
+      return;
+    }
+    const html = items.map(it => {
+      const isSent = it.status === "sent";
+      const statusCls = isSent ? "sent" : "failed";
+      const statusTxt = isSent ? "Gesendet" : "Fehlgeschlagen";
+      const subject = it.subject || it.kind || "—";
+      const errHtml = (!isSent && it.error)
+          ? '<div class="error">⚠ ' + esc(it.error) + '</div>'
+          : "";
+      const ref = it.ref_type
+          ? esc(it.ref_type) + (it.ref_id ? " #" + it.ref_id : "")
+          : "—";
+      return '<tr>' +
+        '<td class="time">' + esc(fmtTime(it.sent_at)) + '</td>' +
+        '<td class="target">' + esc(it.target || "—") + '</td>' +
+        '<td><div class="subject" title="' + esc(subject) + '">' + esc(subject) + '</div>' +
+          '<div class="kind">' + esc(it.kind || "") + '</div>' + errHtml + '</td>' +
+        '<td><span class="status ' + statusCls + '">' + statusTxt + '</span></td>' +
+        '<td style="color:#94a3b8;font-size:12px">' + ref + '</td>' +
+      '</tr>';
+    }).join("");
+    document.getElementById("rows").innerHTML = html;
+  }catch(e){
+    document.getElementById("rows").innerHTML =
+      '<tr><td colspan="5" class="empty"><h3>Netzwerkfehler</h3>' + esc(String(e)) + '</td></tr>';
+  }
+}
+loadMails();
+setInterval(loadMails, 30000);
+</script>
+</body></html>""")
+
+
+@app.get("/account/sent-mails")
+def get_sent_mails(limit: int = 100, user: dict = Depends(get_current_user)):
+    """Kullanicinin son N email gonderimini listele (audit/SentNotificationLog).
+    Telegram/webhook gonderimler dahil degil — sadece channel='email'.
+    Her satir: {id, target (alici), subject, kind (mahnung/invoice/...),
+                ref_type, ref_id, status (sent/failed), error, sent_at}.
+    """
+    from autotax.models import SentNotificationLog
+    try:
+        limit = max(1, min(int(limit), 500))
+    except (TypeError, ValueError):
+        limit = 100
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(SentNotificationLog)
+            .filter(SentNotificationLog.user_id == user["sub"])
+            .filter(SentNotificationLog.channel == "email")
+            .order_by(SentNotificationLog.sent_at.desc())
+            .limit(limit)
+            .all()
+        )
+        items = []
+        for r in rows:
+            # kind formati: "<kind>|<subject>" — subject yoksa sadece kind
+            raw_kind = r.kind or ""
+            if "|" in raw_kind:
+                kind_part, subject_part = raw_kind.split("|", 1)
+            else:
+                kind_part, subject_part = raw_kind, ""
+            items.append({
+                "id": r.id,
+                "target": r.target or "",
+                "subject": subject_part,
+                "kind": kind_part,
+                "ref_type": r.ref_type or "",
+                "ref_id": r.ref_id,
+                "status": r.status,
+                "error": (r.error or "")[:500],
+                "sent_at": r.sent_at.isoformat() if r.sent_at else "",
+            })
+        return {"items": items, "count": len(items)}
     finally:
         db.close()
 
