@@ -6003,6 +6003,29 @@ def get_sent_mails(limit: int = 100, user: dict = Depends(get_current_user)):
         db.close()
 
 
+@app.get("/debug/my-context")
+def debug_my_context(request: Request, ctx: dict = Depends(get_acting_context)):
+    """Diagnostic: kim login + acting context durumu.
+
+    Frontend X-Acting-Client-Id header gonderdi mi? Backend gercekten
+    acting moduna girdi mi? Veriler hangi user_id'den gelecek?
+
+    Auth zorunlu (JWT). Kullanim:
+      curl https://autotax.cloud/debug/my-context -H 'Authorization: Bearer <token>' \\
+           -H 'X-Acting-Client-Id: 42'
+    """
+    return {
+        "logged_in_id": ctx.get("advisor_id") if ctx.get("is_acting") else ctx.get("sub"),
+        "logged_in_email": ctx.get("advisor_email") if ctx.get("is_acting") else ctx.get("email"),
+        "is_acting": bool(ctx.get("is_acting")),
+        "acting_as_id": ctx.get("sub") if ctx.get("is_acting") else None,
+        "acting_as_email": ctx.get("email") if ctx.get("is_acting") else None,
+        "scope": ctx.get("scope"),
+        "header_x_acting_client_id": request.headers.get("X-Acting-Client-Id")
+                                      or request.headers.get("x-acting-client-id"),
+    }
+
+
 @app.post("/import/ai-row")
 async def ai_parse_import_row(body: dict = Body(...), user: dict = Depends(get_current_user)):
     """KI tarafindan tek bir tablo-import satirinin parse edilmesi.
