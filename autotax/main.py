@@ -6009,18 +6009,27 @@ def get_kleinunternehmer(user: dict = Depends(get_current_user)):
 
 @app.post("/invoices/create")
 def create_invoice_manual(body: dict = Body(...), user: dict = Depends(get_current_user)):
-    """Create invoice from JSON (for cross-page transfer). Skips duplicates."""
+    """Create invoice from JSON (manual entry / cross-page transfer).
+
+    Duplicate-Strategie: nur wenn der Nutzer eine *Rechnungsnummer* angibt
+    machen wir einen Dup-Check (vendor+invoice_number+user). Ohne Nummer
+    sind manuelle Eintraege als bewusste Aktion zu behandeln — sonst gehen
+    z.B. wiederkehrende Lidl-Belege fuer 50 EUR ab dem 2. Eintrag stillschweigend
+    verloren (gleicher Vendor + gleicher Betrag = false-positive Duplikat).
+    """
     db = SessionLocal()
     try:
-        # Duplicate check (skip soft-deleted)
-        dup = db.query(Invoice).filter(
-            Invoice.user_id == user["sub"],
-            Invoice.vendor == (body.get("vendor") or "Manual"),
-            Invoice.total_amount == float(body.get("total_amount") or 0),
-            (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
-        ).first()
-        if dup:
-            return {"success": True, "id": dup.id, "message": "already exists"}
+        invoice_no = (body.get("invoice_number") or "").strip()
+        if invoice_no:
+            dup = db.query(Invoice).filter(
+                Invoice.user_id == user["sub"],
+                Invoice.vendor == (body.get("vendor") or "Manual"),
+                Invoice.invoice_number == invoice_no,
+                (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
+            ).first()
+            if dup:
+                return {"success": True, "id": dup.id, "message": "already exists",
+                        "duplicate_of": dup.id}
         inv = Invoice(
             user_id=user["sub"],
             filename=None,
