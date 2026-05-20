@@ -8562,7 +8562,7 @@ async def import_image_table(file: UploadFile = File(...), save: bool = False, u
     Columns: Nr, Datum, Beschreibung, Einnahmen, Ausgaben, Saldo
     Returns JSON rows + CSV string. If save=true, also saves to DB.
     """
-    from autotax.ocr import extract_handwriting_text, extract_image_text, extract_pdf_text, extract_pdf_page_as_image, extract_table_text_autorotate
+    from autotax.ocr import extract_handwriting_text, extract_image_text, extract_pdf_text, extract_pdf_page_as_image, extract_table_text_autorotate, extract_table_text_chunked
     import re as _re
     import gc
 
@@ -8618,16 +8618,18 @@ async def import_image_table(file: UploadFile = File(...), save: bool = False, u
             except Exception as e:
                 logger.debug("Table grid detection failed: %s", e)
 
-            # Strategy 2: OCR.space handwriting — try both orientations
+            # Strategy 2: OCR.space handwriting — try both orientations.
+            # Lange Bilder (uzun fotograf, > ~1500px) chunked OCR ile parcalanir
+            # ki alt yari kaybolmasin. Kisa resimler tek pass'te kalir.
             if not text or len(text.strip()) < 50:
-                # Try original
-                _ocr_text = await extract_table_text_autorotate(content, file.filename or "kassenbuch.jpg")
-                logger.info("Table OCR.space E2 original: %d chars", len(_ocr_text.strip()) if _ocr_text else 0)
+                # Try original (chunked if long)
+                _ocr_text = await extract_table_text_chunked(content, file.filename or "kassenbuch.jpg")
+                logger.info("Table OCR.space E2 original (chunked): %d chars", len(_ocr_text.strip()) if _ocr_text else 0)
                 # Try rotated if available
                 _ocr_rot = ""
                 if _content_rotated:
-                    _ocr_rot = await extract_table_text_autorotate(_content_rotated, file.filename or "kassenbuch_rot.jpg")
-                    logger.info("Table OCR.space E2 rotated: %d chars", len(_ocr_rot.strip()) if _ocr_rot else 0)
+                    _ocr_rot = await extract_table_text_chunked(_content_rotated, file.filename or "kassenbuch_rot.jpg")
+                    logger.info("Table OCR.space E2 rotated (chunked): %d chars", len(_ocr_rot.strip()) if _ocr_rot else 0)
                 # Pick best
                 import re as _re_amt
                 _orig_amts = len(_re_amt.findall(r"\d+[.,]\d{2}", _ocr_text or ""))

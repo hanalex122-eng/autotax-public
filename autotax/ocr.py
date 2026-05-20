@@ -998,3 +998,79 @@ async def batch_ocr_safe(files_with_names: list) -> list:
             logger.info("Batch OCR continuing after error: %s (%s)", filename, result["error"])
     return results
 # --- ADDED END ---
+
+
+# ─── Long-image chunked OCR (Tabellen-Import) ─────────────────────────
+# Kullanici 32 satirli Kassenbuch fotografi yukleyince OCR.space resmin
+# alt yarisini siklikla bos donduruyor (uzun resim downscale ediliyor,
+# kucuk yazi/cizgi kayboluyor). Bu helper uzun resmi N parcaya boler,
+# her parcayi ayri OCR yapar, text'leri birlestirir.
+
+async def extract_table_text_chunked(content: bytes, filename: str = "table.jpg",
+                                      threshold_height: int = 1500,
+                                      max_chunks: int = 4,
+                                      overlap_px: int = 80) -> str:
+    """Uzun bir tablo resmini dik olarak parcalara bolup her birini OCR.
+
+    - Resmin yuksekligi `threshold_height` altinda ise direkt
+      extract_table_text_autorotate kullanir (tek pass).
+    - Daha uzun ise yuksekligi parca basina ~1200px olacak sekilde 2-4
+      parcaya boler (max_chunks ile sinirli). Komsu parcalar arasinda
+      `overlap_px` ust uste binme — bir satirin yarisinin kesilip
+      kaybolmasini onlemek icin.
+    - Her parcanin text'i birlestirilir (\\n ile).
+
+    Output, dogrudan import_image_table'in beklendigi format (raw text).
+    """
+    try:
+        from PIL import Image, ImageOps
+        img = Image.open(io.BytesIO(content))
+        try:
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass
+        w, h = img.size
+    except Exception as e:
+        logger.warning("chunked OCR: PIL open failed (%s) — falling back to single pass", e)
+        return await extract_table_text_autorotate(content, filename)
+
+    if h <= threshold_height or w < 100:
+        # Tek pass yeterli
+        return await extract_table_text_autorotate(content, filename)
+
+    # Hedef parca yuksekligi ~1200px — kabaca 25-30 tablo satiri
+    target_chunk_h = 1200
+    n_chunks = max(2, min(max_chunks, (h + target_chunk_h - 1) // target_chunk_h))
+    chunk_h = h // n_chunks
+
+    logger.info("Chunked OCR: %dx%d → %d chunks of ~%dpx (overlap %dpx)",
+                w, h, n_chunks, chunk_h, overlap_px)
+
+    texts: list[str] = []
+    for i in range(n_chunks):
+        top = max(0, i * chunk_h - (overlap_px if i > 0 else 0))
+        bottom = min(h, (i + 1) * chunk_h + (overlap_px if i < n_chunks - 1 else 0))
+        if bottom - top < 100:
+            continue
+        try:
+            crop = img.crop((0, top, w, bottom))
+            buf = io.BytesIO()
+            crop.save(buf, format="JPEG", quality=90)
+            chunk_bytes = buf.getvalue()
+            chunk_fn = f"chunk{i+1}of{n_chunks}_{filename}"
+            chunk_text = await extract_table_text_autorotate(chunk_bytes, chunk_fn)
+            logger.info("Chunked OCR chunk %d/%d (y=%d-%d): %d chars",
+                        i + 1, n_chunks, top, bottom,
+                        len(chunk_text.strip()) if chunk_text else 0)
+            if chunk_text:
+                texts.append(chunk_text.strip())
+        except Exception as e:
+            logger.warning("Chunked OCR chunk %d/%d failed: %s", i + 1, n_chunks, e)
+            continue
+
+    if not texts:
+        # Tum chunk'lar bos — son care: tek pass
+        logger.warning("Chunked OCR: all chunks empty — falling back to single pass")
+        return await extract_table_text_autorotate(content, filename)
+
+    return "\n".join(texts)
