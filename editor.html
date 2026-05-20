@@ -475,7 +475,13 @@ async function save() {
     if (res.ok) {
       // Update local data
       Object.assign(inv, body);
-      showToast("Gespeichert!");
+      let savedMsg = "✓ Gespeichert";
+      try {
+        const respJson = await res.clone().json();
+        const n = respJson && respJson.learned_rules;
+        if (n && n > 0) savedMsg = "✓ Gespeichert + " + n + " Lernregel(n) gemerkt";
+      } catch(_) {}
+      showToast(savedMsg);
       // Auto-advance to next if available
       if (currentIdx < invoices.length - 1) {
         setTimeout(() => navigate(1), 800);

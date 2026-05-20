@@ -6984,9 +6984,10 @@ def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
         db.refresh(inv)
         # --- Learning: save user corrections as rules for future auto-fill ---
         _edited = {k: v for k, v in (body.model_dump() if hasattr(body, "model_dump") else body.dict()).items() if v is not None}
+        _learned_count = 0
         try:
             from autotax.learning import save_learning_rule
-            save_learning_rule(user["sub"], inv.raw_text or "", _original, _edited)
+            _learned_count = save_learning_rule(user["sub"], inv.raw_text or "", _original, _edited) or 0
         except Exception as e:
             logger.warning("Learning save skipped: %s", e)
         # --- Corrections: ham diff + OCR snapshot (few-shot RAG yakiti) ---
@@ -7052,7 +7053,7 @@ def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
                 "invoice_type": inv.invoice_type, "payment_method": inv.payment_method,
                 "invoice_number": inv.invoice_number,
             })
-        return {"success": True, **invoice_to_dict(inv)}
+        return {"success": True, "learned_rules": int(_learned_count), **invoice_to_dict(inv)}
     except HTTPException:
         raise
     except Exception:

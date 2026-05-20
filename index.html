@@ -1088,14 +1088,21 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
   const saveEdit=async()=>{try{
     // due_date + payment_status + recurring ayri endpoint'lere
     const {due_date:_dd,payment_status:_ps,is_recurring:_ir,recurring_freq:_rf,recurring_next_at:_rn,...editPayload}=editData;
-    await api("/invoices/"+editId,{method:"PUT",body:JSON.stringify(editPayload)});
+    const _resp=await api("/invoices/"+editId,{method:"PUT",body:JSON.stringify(editPayload)});
     if(_dd!==undefined||_ps!==undefined){
       await api("/invoices/"+editId+"/payment",{method:"PATCH",body:JSON.stringify({due_date:_dd||"",payment_status:_ps||"unpaid"})}).catch(()=>{});
     }
     if(_ir!==undefined||_rf!==undefined||_rn!==undefined){
       await api("/invoices/"+editId+"/recurring",{method:"PATCH",body:JSON.stringify({is_recurring:!!_ir,recurring_freq:_rf||"monthly",recurring_next_at:_rn||""})}).catch(()=>{});
     }
-    if(editPreview)URL.revokeObjectURL(editPreview.url);setEditId(null);setEditPreview(null);doSearch();if(triggerRefresh)triggerRefresh();if(showToast)showToast("Invoice + Cash Book updated","success");
+    if(editPreview)URL.revokeObjectURL(editPreview.url);setEditId(null);setEditPreview(null);doSearch();if(triggerRefresh)triggerRefresh();
+    if(showToast){
+      const _n=(_resp&&_resp.learned_rules)||0;
+      const _msg=_n>0
+        ?(getLang()==="de"?"✓ Gespeichert + "+_n+" Lernregel(n) gemerkt":getLang()==="tr"?"✓ Kaydedildi + "+_n+" kural ogrenildi":"✓ Saved + "+_n+" rule(s) learned")
+        :"Invoice + Cash Book updated";
+      showToast(_msg,"success");
+    }
   }catch(e){alert(e.message);}};
   const cats=[...new Set(invoices.map(i=>i.category).filter(Boolean))];
   const _today_iso=new Date().toISOString().slice(0,10);
