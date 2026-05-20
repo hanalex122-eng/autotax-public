@@ -5851,6 +5851,9 @@ def mails_page():
   .empty{text-align:center;padding:48px 16px;color:#64748b}
   .empty h3{color:#94a3b8;font-size:16px;margin:0 0 6px}
   .err-banner{background:#7f1d1d;color:#fecaca;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px}
+  .resend-link{display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;border-radius:8px;background:rgba(168,85,247,0.12);border:1px solid rgba(168,85,247,0.4);color:#c4b5fd;font-size:12px;font-weight:600;font-family:inherit;transition:all .15s}
+  .resend-link:hover{background:rgba(168,85,247,0.22);border-color:#a855f7;color:#e9d5ff}
+  .info-banner{background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);color:#93c5fd;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:12px;line-height:1.5}
 </style></head><body>
 <div class="topbar">
   <div>
@@ -5858,10 +5861,17 @@ def mails_page():
     <p class="sub">Audit-Liste aller vom Backend versendeten Mails. <a class="back" href="/app">← zurück zur App</a></p>
   </div>
   <div class="actions">
+    <a href="https://resend.com/emails" target="_blank" rel="noopener" class="resend-link" title="Resend Dashboard — gerçek delivery durumu (Delivered/Bounced/Complained)">🔗 Resend Logs</a>
     <button class="ghost" onclick="loadMails()">↻ Aktualisieren</button>
   </div>
 </div>
 <div id="banner"></div>
+<div class="info-banner">
+  💡 <strong>"Gesendet"</strong> = Resend API hat die Mail angenommen.
+  Ob sie wirklich beim Empfänger ankam (Delivered) oder als Bounce/Spam abgelehnt wurde,
+  zeigt der <a href="https://resend.com/emails" target="_blank" rel="noopener" style="color:#93c5fd;text-decoration:underline">🔗 Resend-Dashboard</a>.
+  Hotmail/Outlook lehnt manchmal Mails ab (Bounced) — dann landet die Mail nirgends.
+</div>
 <table id="tbl">
   <thead><tr>
     <th>Zeit</th><th>Empfänger</th><th>Betreff / Typ</th>
@@ -5991,6 +6001,37 @@ def get_sent_mails(limit: int = 100, user: dict = Depends(get_current_user)):
         return {"items": items, "count": len(items)}
     finally:
         db.close()
+
+
+@app.post("/import/ai-row")
+async def ai_parse_import_row(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """KI tarafindan tek bir tablo-import satirinin parse edilmesi.
+
+    TableImportView'da kullanici 'uncertain' satira '🤖 KI' butonuna basinca
+    cagrilir. Anthropic Claude Haiku satirin description'undan income/
+    expense/vendor/kategori cikarir.
+
+    body: {description: str, date?: str, hint_amount?: float}
+    returns: {success, suggestion: {description, vendor, income, expense,
+             vat_rate, category, confidence, reason}}
+    """
+    from autotax.ai_ocr import ai_parse_table_row, is_configured
+    description = (body.get("description") or "").strip()
+    if not description:
+        err(400, "description erforderlich")
+    if len(description) > 500:
+        description = description[:500]
+    if not is_configured():
+        err(503, "AI-OCR ist nicht konfiguriert (ANTHROPIC_API_KEY fehlt)")
+    date_hint = (body.get("date") or "").strip()[:10]
+    try:
+        amt_hint = float(body.get("hint_amount") or 0)
+    except (TypeError, ValueError):
+        amt_hint = 0.0
+    result = await ai_parse_table_row(description=description, date=date_hint, hint_amount=amt_hint)
+    if not result:
+        err(502, "AI konnte die Zeile nicht parsen (siehe Server-Logs)")
+    return {"success": True, "suggestion": result}
 
 
 @app.get("/account/kleinunternehmer")

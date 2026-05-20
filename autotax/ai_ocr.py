@@ -226,6 +226,119 @@ async def ai_extract_invoice(
 _EMPTY_VALUES = (None, "", 0, 0.0, "Unbekannt", "unknown", "0%")
 
 
+_ROW_PROMPT = """You are a German Kassenbuch (cash book) row parser.
+
+Given a single row from a user's imported cash-book table (often handwritten OCR or partial spreadsheet text), return a structured JSON object with:
+  - description: cleaned-up text describing the transaction (vendor or item) — short, no junk chars
+  - vendor: best-guess vendor/business name (or null if generic like "Tankstelle")
+  - income: positive number if this row is incoming money for the user, else 0
+  - expense: positive number if this row is outgoing money for the user, else 0
+  - vat_rate: "19%" | "7%" | "0%" | null — German default 19% for most business, 7% for groceries/books, null if unclear
+  - category: one of: food | restaurant | fuel | clothing | electronics | office | telecom | transport | drugstore | service | other
+  - confidence: 0.0–1.0, how confident you are
+  - reason: 1 short sentence in German explaining the choice (e.g. "Aral = Tankstelle, Kraftstoff")
+
+Rules:
+- Exactly ONE of income/expense > 0 (the other is 0). If you can't tell, guess "expense" since most cash-book entries are expenses.
+- Round amounts to 2 decimals.
+- If the row mentions a vendor like Lidl, Rewe, Edeka, Aldi → category=food.
+- Aral, Shell, Total, Esso, Jet → category=fuel.
+- Restaurant/café/Pizzeria/Imbiss → category=restaurant.
+- Telekom, Vodafone, O2 → category=telecom.
+- Privat einzahlung/Geldeingang → income.
+- Return ONLY the JSON object. No fences, no comments.
+
+Input:
+"""
+
+
+async def ai_parse_table_row(description: str, date: str = "", hint_amount: float = 0.0) -> Optional[dict]:
+    """Single table-import row → structured fields via Claude Haiku.
+
+    Use case: user imports a 32-row Excel; parser flags 8 rows as 'uncertain'
+    (no amount detected). User clicks '🤖 KI' on a row → backend calls this
+    function → AI suggests income/expense/category/vendor.
+
+    Returns dict with: description, vendor, income, expense, vat_rate,
+    category, confidence, reason. None on failure (API key, timeout, JSON).
+    """
+    api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        return None
+    if (os.getenv("AI_OCR_FALLBACK") or "1").strip() == "0":
+        return None
+
+    model = (os.getenv("AI_OCR_MODEL") or "claude-haiku-4-5-20251001").strip()
+    raw = (description or "").strip()[:500]
+    if not raw:
+        return None
+
+    hint = ""
+    if date:
+        hint += f"date={date}; "
+    if hint_amount and hint_amount > 0:
+        hint += f"detected_amount={hint_amount:.2f}; "
+    user_text = _ROW_PROMPT + (hint + "row=" + raw if hint else "row=" + raw)
+
+    payload = {
+        "model": model,
+        "max_tokens": 400,
+        "messages": [{"role": "user", "content": user_text}],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                json=payload,
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+            )
+            if r.status_code != 200:
+                logger.warning("ai_parse_table_row Anthropic %d: %s", r.status_code, r.text[:200])
+                return None
+            data = r.json()
+            blocks = data.get("content") or []
+            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+            text = _strip_json_fences(text)
+            try:
+                result = json.loads(text)
+            except json.JSONDecodeError:
+                m = re.search(r"\{[\s\S]*\}", text)
+                if not m:
+                    return None
+                try:
+                    result = json.loads(m.group(0))
+                except Exception:
+                    return None
+            if not isinstance(result, dict):
+                return None
+            # Normalize
+            for k in ("income", "expense"):
+                try:
+                    result[k] = round(float(result.get(k) or 0), 2)
+                except (TypeError, ValueError):
+                    result[k] = 0.0
+            try:
+                result["confidence"] = float(result.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                result["confidence"] = 0.0
+            logger.info(
+                "AI row parse: desc=%r → vendor=%r income=%.2f expense=%.2f cat=%s conf=%.2f",
+                raw[:60], result.get("vendor"), result.get("income", 0),
+                result.get("expense", 0), result.get("category"), result.get("confidence", 0),
+            )
+            return result
+    except httpx.TimeoutException:
+        logger.warning("ai_parse_table_row timeout for %r", raw[:60])
+        return None
+    except Exception:
+        logger.exception("ai_parse_table_row failed for %r", raw[:60])
+        return None
+
+
 def merge_ai_into_parsed(parsed: dict, ai_result: dict) -> dict:
     """parse_invoice'in ciktisina AI sonucunu merge eder.
 

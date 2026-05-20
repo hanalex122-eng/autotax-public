@@ -2559,6 +2559,38 @@ function TableImportView({triggerRefresh,showToast,onNav}){
   };
 
   const editRow=(idx,field,val)=>setRows(prev=>prev.map((r,i)=>i===idx?{...r,[field]:field==="income"||field==="expense"?parseFloat(val)||0:val}:r));
+  // 🤖 KI: bir 'unsicher' satiri Claude'a yollar, gelir/gider+vendor+kategori cikar
+  const[aiRowBusy,setAiRowBusy]=useState({});// {idx:true} -> butonu disable et
+  const aiFixRow=async(idx)=>{
+    const r=rows[idx];if(!r)return;
+    const desc=(r.description||"").trim();
+    if(!desc){if(showToast)showToast("Keine Beschreibung — kann nicht parsen","warn");return;}
+    setAiRowBusy(p=>({...p,[idx]:true}));
+    try{
+      const res=await api("/import/ai-row",{method:"POST",body:JSON.stringify({description:desc,date:r.date||"",hint_amount:(r.income||r.expense||0)})});
+      const s=res&&res.suggestion;
+      if(!s){if(showToast)showToast("AI hat nichts zurueckgegeben","warn");return;}
+      // Sadece bos alanlari doldur — kullanicinin elle yazdiklari korunur
+      setRows(prev=>prev.map((row,i)=>{
+        if(i!==idx)return row;
+        const nx={...row};
+        if((!nx.income||nx.income===0)&&s.income>0)nx.income=s.income;
+        if((!nx.expense||nx.expense===0)&&s.expense>0)nx.expense=s.expense;
+        if((!nx.description||nx.description.length<3)&&s.description)nx.description=s.description;
+        // is_uncertain bayragini kaldir (artik tutar var)
+        if(nx.income>0||nx.expense>0)nx.is_uncertain=false;
+        // AI'in dogru alanlarini metadata olarak sakla (UI hint icin)
+        nx._ai_vendor=s.vendor;nx._ai_category=s.category;nx._ai_vat=s.vat_rate;nx._ai_conf=s.confidence;nx._ai_reason=s.reason;
+        return nx;
+      }));
+      if(showToast){
+        const conf=Math.round((s.confidence||0)*100);
+        const amt=s.income>0?"+"+s.income.toFixed(2)+"€":"-"+s.expense.toFixed(2)+"€";
+        showToast("🤖 "+amt+" · "+(s.category||"?")+" · "+conf+"% — bitte prüfen","success");
+      }
+    }catch(e){alert("AI-Fehler: "+(e.message||e));}
+    finally{setAiRowBusy(p=>{const n={...p};delete n[idx];return n;});}
+  };
   const totalIncome=rows.reduce((s,r)=>s+(r.income||0),0);
   const totalExpense=rows.reduce((s,r)=>s+(r.expense||0),0);
 
@@ -2686,8 +2718,11 @@ function TableImportView({triggerRefresh,showToast,onNav}){
             <td style={{padding:"8px 14px"}}><div style={{display:"flex",alignItems:"center",gap:4}}><input style={{...css.input,flex:1,fontSize:12}} value={r.description} onChange={e=>editRow(i,"description",e.target.value)}/>{r.is_uncertain&&<span title="Amount not detected" style={{color:"#f59e0b",fontSize:14,cursor:"help"}}>⚠</span>}</div></td>
             <td style={{padding:"8px 14px"}}><input style={{...css.input,width:90,fontSize:12,color:theme.accent,borderColor:r.is_uncertain&&r.income===0?"rgba(245,158,11,0.5)":undefined}} type="number" step="0.01" value={r.income} onChange={e=>editRow(i,"income",e.target.value)} placeholder={r.is_uncertain?"prüfen":""}/></td>
             <td style={{padding:"8px 14px"}}><input style={{...css.input,width:90,fontSize:12,color:theme.danger,borderColor:r.is_uncertain&&r.expense===0?"rgba(245,158,11,0.5)":undefined}} type="number" step="0.01" value={r.expense} onChange={e=>editRow(i,"expense",e.target.value)} placeholder={r.is_uncertain?"prüfen":""}/></td>
-            <td style={{padding:"8px 8px"}}>
-              <div style={{cursor:"pointer"}} onClick={()=>setRows(prev=>prev.filter((_,j)=>j!==i))} title="Remove row"><Icon d={I.x} size={14} color={theme.danger}/></div>
+            <td style={{padding:"8px 6px"}}>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                {r.is_uncertain&&<button title="🤖 KI füllt diese Zeile (Claude)" disabled={!!aiRowBusy[i]} onClick={()=>aiFixRow(i)} style={{cursor:aiRowBusy[i]?"wait":"pointer",padding:"4px 8px",borderRadius:6,border:"1px solid rgba(168,85,247,0.5)",background:aiRowBusy[i]?"rgba(168,85,247,0.05)":"rgba(168,85,247,0.12)",color:"#a855f7",fontSize:11,fontWeight:700,fontFamily:"inherit",lineHeight:1,transition:"all 0.15s"}}>{aiRowBusy[i]?"⏳":"🤖"}</button>}
+                <div style={{cursor:"pointer"}} onClick={()=>setRows(prev=>prev.filter((_,j)=>j!==i))} title="Remove row"><Icon d={I.x} size={14} color={theme.danger}/></div>
+              </div>
             </td>
           </tr>)}</tbody>
         </table>
