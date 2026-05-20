@@ -2936,6 +2936,24 @@ function AdvisorView({onNav}={}){
           {jumpBtn(tr("Kassenbuch","Cash Book"),"bookkeeping","📒")}
           {jumpBtn(tr("Belege","Receipts"),"vault","📁")}
           {jumpBtn(tr("Steuer-Übersicht","Tax Overview"),"steuer_uebersicht","🧾")}
+          <button title="Diagnose: hangi user'in datasini cekiyoruz?" style={{...css.btnOutline,fontSize:11,padding:"6px 10px",borderColor:"rgba(168,85,247,0.5)",color:"#a855f7"}} onClick={async()=>{
+            try{
+              const tk=localStorage.getItem("atx_token");
+              const r=await fetch(API+"/debug/my-context",{headers:{"Authorization":"Bearer "+tk,"X-Acting-Client-Id":String(c.client_user_id)}});
+              const d=await r.json();
+              // Ek olarak: bu mandant'in fatura sayisini cek
+              const r2=await fetch(API+"/invoices/summary",{headers:{"Authorization":"Bearer "+tk,"X-Acting-Client-Id":String(c.client_user_id)}});
+              const d2=await r2.json().catch(()=>({}));
+              alert("DIAGNOSE\n\n"+
+                "Login: "+d.logged_in_email+" (#"+d.logged_in_id+")\n"+
+                "is_acting: "+d.is_acting+"\n"+
+                "Acting als: "+d.acting_as_email+" (#"+d.acting_as_id+")\n"+
+                "Scope: "+d.scope+"\n"+
+                "Header sent: "+(d.header_x_acting_client_id||"(yok)")+"\n\n"+
+                "Bu Mandant'in fatura sayisi: "+(d2.total_count!=null?d2.total_count:(d2.total!=null?d2.total:"?"))+"\n"+
+                "Toplam tutar (giderler): "+(d2.expenses_total!=null?d2.expenses_total:"?"));
+            }catch(e){alert("Diagnose-Fehler: "+e.message);}
+          }}>🔍 Diagnose</button>
           <button style={{...css.btnOutline,color:theme.danger,borderColor:theme.danger+"55",fontSize:11,padding:"6px 10px"}} onClick={()=>revoke(c.id,c.client_email)}>
             {tr("Verbindung beenden","Disconnect")}
           </button>
