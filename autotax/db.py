@@ -411,12 +411,36 @@ def _smart_filename(parsed: dict, original: str | None) -> str | None:
     return new_name
 
 
+def _strip_null_bytes(v):
+    """Postgres TEXT/VARCHAR cannot store NUL (0x00) bytes — they raise
+    'A string literal cannot contain NUL (0x00) characters.' on insert.
+    OCR output from PDFs with broken encodings sometimes contains them.
+    Recursively strip from str values; pass through everything else."""
+    if isinstance(v, str):
+        return v.replace("\x00", "") if "\x00" in v else v
+    return v
+
+
+def _sanitize_invoice_data(data: dict) -> dict:
+    """Return a shallow copy of `data` with all string values stripped of
+    NUL bytes. Applied at the DB boundary so the entire upstream pipeline
+    (OCR/parser/email-import) can stay simple."""
+    if not isinstance(data, dict):
+        return data
+    return {k: _strip_null_bytes(v) for k, v in data.items()}
+
+
 def save_invoice(data: dict, user_id: int, filename: str = None, file_data: bytes = None, file_content_type: str = None, file_hash: str = None, possible_duplicate: bool = False) -> int:
     """Persist an invoice. If file_data is provided it is written to disk
     (via autotax.storage) and only the relative path is stored in the DB.
     The file_data column is no longer populated for new rows.
     """
     from autotax import storage
+
+    # Strip Postgres-fatal NUL bytes from all string fields. OCR'd Anthropic
+    # receipts and some scanned PDFs slip 0x00 into the extracted text.
+    data = _sanitize_invoice_data(data)
+    filename = _strip_null_bytes(filename) if filename else filename
 
     # AI Filename: 'IMG_001.pdf' -> '2026-05-17_AUCHAN_3.77EUR.pdf'
     # Sadece generic filename varsa devreye girer, kullanici adlandirmasi korunur.
