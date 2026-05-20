@@ -218,6 +218,7 @@ body{font-family:'DM Sans',sans-serif;background:#050a12;color:#f1f5f9;height:10
 
     <div class="bottom-bar">
       <button class="btn btn-cancel" onclick="window.location.href='/'">Cancel</button>
+      <button class="btn" id="btnAI" onclick="aiExtract()" title="AI liest die PDF und füllt leere Felder (Anthropic Claude)" style="background:rgba(168,85,247,0.1);border:1.5px solid rgba(168,85,247,0.5);color:#a855f7;font-weight:700;transition:all .3s cubic-bezier(0.175,0.885,0.32,1.275)" onmouseenter="this.style.background='rgba(168,85,247,0.2)';this.style.transform='scale(1.04)';this.style.boxShadow='0 4px 16px rgba(168,85,247,0.3)'" onmouseleave="this.style.background='rgba(168,85,247,0.1)';this.style.transform='scale(1)';this.style.boxShadow='none'">&#129302; KI-AI</button>
       <button class="btn btn-save" id="btnSave" onclick="save()">&#10003; Speichern</button>
     </div>
   </div>
@@ -493,6 +494,67 @@ function showToast(msg) {
   t.textContent = msg;
   t.style.display = "block";
   setTimeout(() => t.style.display = "none", 2000);
+}
+
+async function aiExtract() {
+  // KI-AI: Anthropic Claude Haiku PDF'i okur, BOS form alanlarini doldurur.
+  // Kullanicinin manuel girdigi/duzelttigi alanlar EZILMEZ.
+  const inv = invoices[currentIdx];
+  if (!inv) return;
+  if (!confirm("🤖 AI liest die PDF und füllt leere Felder (Vendor, Betrag, Datum, MwSt…). Deine manuellen Eingaben bleiben unverändert. Fortfahren?")) return;
+  const btn = document.getElementById("btnAI");
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = "🤖 Liest…";
+  try {
+    const res = await fetch(API + "/invoices/" + inv.id + "/ai-extract", {
+      method: "POST",
+      headers: {"Authorization": "Bearer " + token},
+    });
+    if (!res.ok) {
+      let detail = "HTTP " + res.status;
+      try { const d = await res.json(); detail = d.detail || detail; } catch(_) {}
+      throw new Error(detail);
+    }
+    const data = await res.json();
+    const ar = data.ai_result || {};
+    let filled = 0;
+    const filledNames = [];
+    const setIfEmpty = (id, val, label) => {
+      if (val == null || val === "") return;
+      const el = document.getElementById(id);
+      if (!el) return;
+      const cur = (el.value || "").trim();
+      // "empty" = leer, 0, 0.00, "0", "0,00"
+      const isEmpty = cur === "" || cur === "0" || cur === "0.00" || cur === "0,00";
+      if (isEmpty) {
+        el.value = val;
+        // Trigger change event for any listeners (e.g. cash-book sync)
+        el.dispatchEvent(new Event("change", {bubbles: true}));
+        filled++;
+        filledNames.push(label || id);
+      }
+    };
+    setIfEmpty("vendor", ar.vendor, "Vendor");
+    setIfEmpty("amount", ar.total_amount, "Betrag");
+    setIfEmpty("vat_rate", ar.vat_rate, "MwSt");
+    setIfEmpty("date", ar.date, "Datum");
+    setIfEmpty("invoice_number", ar.invoice_number, "Rg-Nr");
+    setIfEmpty("category", ar.category, "Kategorie");
+    if (ar.invoice_type === "expense" || ar.invoice_type === "income") {
+      setIfEmpty("invoice_type", ar.invoice_type, "Typ");
+    }
+    setIfEmpty("payment_method", ar.payment_method, "Zahlung");
+    if (filled > 0) {
+      showToast("✓ AI hat " + filled + " Feld(er) ausgefüllt: " + filledNames.join(", ") + " — prüfen + Speichern");
+    } else {
+      showToast("ℹ AI hat keine neuen Daten gefunden — alle Felder schon gefüllt");
+    }
+  } catch (e) {
+    alert("AI-Fehler: " + e.message);
+  }
+  btn.disabled = false;
+  btn.innerHTML = orig;
 }
 
 // Keyboard shortcuts
