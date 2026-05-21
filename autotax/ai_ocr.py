@@ -339,6 +339,175 @@ async def ai_parse_table_row(description: str, date: str = "", hint_amount: floa
         return None
 
 
+_TABLE_VISION_PROMPT = """You are a parser for German handwritten or scanned Kassenbuch (cash book) tables.
+
+The image shows a table with columns like: Nr, Datum, Beschreibung, Einnahmen, Ausgaben, Saldo.
+
+Extract EVERY visible row as JSON. Return ONLY a JSON array (no markdown, no text before/after):
+
+[
+  {
+    "date": "YYYY-MM-DD",
+    "description": "Tragetasche Leukotape",
+    "income": 0,
+    "expense": 26.99,
+    "saldo": -8148.23
+  },
+  ...
+]
+
+Rules:
+- date: convert any format (12.9.21, 9.9.21, 13/09/2021, etc.) to YYYY-MM-DD. Use 20YY for 2-digit years (21→2021).
+- income/expense: exactly ONE of them > 0 per row. The other is 0. Round to 2 decimals.
+- saldo: optional, the running balance (last column). 0 or null if not visible.
+- description: clean the text — fix obvious OCR mistakes if confident (e.g. "Tragetache" → "Tragetasche"). Keep as-is if unsure.
+- Skip header rows (Nr/Datum/Beschreibung etc.) and total/sum rows.
+- If a row's amount column is empty, skip the row (don't invent amounts).
+- Return rows in the order they appear on the image.
+- Output ONLY the JSON array. No commentary. No code fences."""
+
+
+async def ai_parse_table_image(image_bytes: bytes, filename: str = "table.jpg") -> Optional[list]:
+    """Anthropic Claude Vision ile el yazısı/taranmış Kassenbuch tablosunu
+    structured rows olarak parse et.
+
+    OCR.space + parser tek satırlık tablo formatı bekliyor, ama el yazısı
+    OCR'sinde her tablo satırı 2-3 OCR satırına bölünüyor → parser kayıp.
+    Bu fonksiyon resmi DIREKT Claude Vision'a yollar, AI tabloyu görüp
+    structured rows döner.
+
+    Returns: list of dicts (date, description, income, expense, saldo)
+             None on failure.
+
+    Maliyet (Haiku 4.5, Jan 2026): 1 sayfa ~$0.02-0.04.
+    """
+    api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        logger.debug("Vision table parse skip: ANTHROPIC_API_KEY not set")
+        return None
+    if (os.getenv("AI_OCR_FALLBACK") or "1").strip() == "0":
+        return None
+    if not image_bytes:
+        return None
+
+    # 5MB üstünü PIL ile yeniden boyutlandır (Anthropic vision limit)
+    max_size = 5 * 1024 * 1024
+    if len(image_bytes) > max_size:
+        try:
+            from PIL import Image as _Image
+            import io as _io
+            img = _Image.open(_io.BytesIO(image_bytes))
+            # Genişliği 2000px'e indir (kalite koru)
+            w, h = img.size
+            if w > 2000:
+                new_w = 2000
+                new_h = int(h * (new_w / w))
+                img = img.resize((new_w, new_h), _Image.LANCZOS)
+            buf = _io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=85)
+            image_bytes = buf.getvalue()
+            logger.info("Vision table: resized %dx%d → %dx%d (%d KB)",
+                        w, h, img.width, img.height, len(image_bytes) // 1024)
+        except Exception as e:
+            logger.warning("Vision table: resize failed (%s) — sending original", e)
+
+    # Media type detect
+    media_type = "image/jpeg"
+    fn_lower = filename.lower()
+    if fn_lower.endswith(".png"):
+        media_type = "image/png"
+    elif fn_lower.endswith(".webp"):
+        media_type = "image/webp"
+    elif fn_lower.endswith(".gif"):
+        media_type = "image/gif"
+
+    model = (os.getenv("AI_OCR_MODEL") or "claude-haiku-4-5-20251001").strip()
+    content = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": base64.b64encode(image_bytes).decode(),
+            },
+        },
+        {"type": "text", "text": _TABLE_VISION_PROMPT},
+    ]
+
+    payload = {
+        "model": model,
+        "max_tokens": 4096,  # 50 satır için bol miktarda
+        "messages": [{"role": "user", "content": content}],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                json=payload,
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+            )
+            if r.status_code != 200:
+                logger.warning("Vision table parse Anthropic %d: %s", r.status_code, r.text[:300])
+                return None
+            data = r.json()
+            blocks = data.get("content") or []
+            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+            text = _strip_json_fences(text).strip()
+            if not text:
+                return None
+            # Parse JSON array
+            try:
+                rows = json.loads(text)
+            except json.JSONDecodeError:
+                m = re.search(r"\[[\s\S]*\]", text)
+                if not m:
+                    logger.warning("Vision table: no JSON array in response: %s", text[:200])
+                    return None
+                try:
+                    rows = json.loads(m.group(0))
+                except Exception as je:
+                    logger.warning("Vision table: JSON parse failed: %s", je)
+                    return None
+            if not isinstance(rows, list):
+                logger.warning("Vision table: result is not a list (%s)", type(rows))
+                return None
+            # Normalize
+            cleaned = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                try:
+                    income = round(float(r.get("income") or 0), 2)
+                except (TypeError, ValueError):
+                    income = 0.0
+                try:
+                    expense = round(float(r.get("expense") or 0), 2)
+                except (TypeError, ValueError):
+                    expense = 0.0
+                if income == 0 and expense == 0:
+                    continue  # skip rows with no amount
+                cleaned.append({
+                    "date": (r.get("date") or "").strip(),
+                    "description": (r.get("description") or "").strip(),
+                    "income": income,
+                    "expense": expense,
+                    "saldo": r.get("saldo"),
+                    "is_uncertain": False,
+                })
+            logger.info("Vision table parse: %d rows extracted from %s", len(cleaned), filename)
+            return cleaned
+    except httpx.TimeoutException:
+        logger.warning("Vision table parse timeout for %s", filename)
+        return None
+    except Exception:
+        logger.exception("Vision table parse failed for %s", filename)
+        return None
+
+
 def merge_ai_into_parsed(parsed: dict, ai_result: dict) -> dict:
     """parse_invoice'in ciktisina AI sonucunu merge eder.
 

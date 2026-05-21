@@ -9527,6 +9527,80 @@ async def import_image_table(file: UploadFile = File(...), save: bool = False, u
     }
 
 
+# ============================================================
+# TABELLE-IMPORT KI (opt-in, ayri endpoint — mevcut /api/import-image'a
+# dokunmaz). Kullanici "🤖 KI" butonuna basarsa direkt Claude Vision
+# tablo image'ini parse eder. Yerel OCR baris(siz)inde alternatif yol.
+# ============================================================
+
+@app.post("/api/import-image-ki")
+async def import_image_table_ki(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """KI tabanli tablo parse — Anthropic Claude Vision direkt image'i okur.
+
+    Bu endpoint mevcut /api/import-image'a paraleldir; opt-in olarak
+    frontend "🤖 KI" butonundan tetiklenir. Hata durumunda 4xx/5xx doner
+    ve frontend kullaniciyi normal OCR akisina yonlendirir.
+    """
+    from autotax import ai_ocr as _ai
+    if not _ai.is_configured():
+        err(503, "KI nicht verfuegbar — ANTHROPIC_API_KEY fehlt oder deaktiviert")
+
+    content = await file.read()
+    if not content:
+        err(400, "Datei leer")
+
+    # PDF -> ilk sayfayi image'a cevir (Claude Vision PDF direkt de okur,
+    # ama ai_parse_table_image image bytes bekliyor)
+    filename = (file.filename or "table.jpg")
+    fn_lower = filename.lower()
+    content_type = (file.content_type or "").lower()
+    if "pdf" in content_type or fn_lower.endswith(".pdf"):
+        try:
+            from autotax.ocr import extract_pdf_page_as_image
+            img_bytes = extract_pdf_page_as_image(content)
+            if img_bytes:
+                content = img_bytes
+                filename = (filename.rsplit(".", 1)[0] if "." in filename else filename) + ".png"
+            else:
+                err(400, "PDF konnte nicht in Bild umgewandelt werden")
+        except Exception as _e:
+            logger.exception("KI import: PDF->image failed: %s", _e)
+            err(500, "PDF Konvertierung fehlgeschlagen")
+
+    try:
+        rows = await _ai.ai_parse_table_image(content, filename=filename)
+    except Exception as _e:
+        logger.exception("KI table parse failed: %s", _e)
+        err(500, "KI Parse fehlgeschlagen")
+
+    if rows is None:
+        err(502, "KI hat keine Antwort geliefert")
+    if not isinstance(rows, list) or not rows:
+        return {"success": False, "rows": [], "csv": "", "raw_rows": [], "error": "Keine Zeilen erkannt"}
+
+    # CSV string olusturma (mevcut /api/import-image cikti formatina uyum)
+    csv_lines = ["date,description,income,expense,saldo"]
+    for r in rows:
+        d = (r.get("date") or "").replace(",", " ")
+        desc = (r.get("description") or "").replace(",", " ")
+        inc = r.get("income") or 0
+        exp = r.get("expense") or 0
+        sal = r.get("saldo")
+        sal_s = "" if sal is None else str(sal)
+        csv_lines.append(f"{d},{desc},{inc},{exp},{sal_s}")
+
+    audit("import.image_ki", user_id=user["sub"], resource_type="import",
+          resource_id=None, payload={"row_count": len(rows), "filename": filename})
+
+    return {
+        "success": True,
+        "rows": rows,
+        "csv": "\n".join(csv_lines),
+        "raw_rows": [],
+        "ki": True,
+        "row_count": len(rows),
+    }
+
 
 # ============================================================
 # TAX: EÜR
