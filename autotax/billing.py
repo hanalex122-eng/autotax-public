@@ -34,6 +34,7 @@ WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 PRICE_IDS: dict[str, str] = {
     "starter": os.getenv("STRIPE_PRICE_STARTER", "").strip(),
     "pro":     os.getenv("STRIPE_PRICE_PRO", "").strip(),
+    "premium": os.getenv("STRIPE_PRICE_PREMIUM", "").strip(),
     "early":   os.getenv("STRIPE_PRICE_EARLY", "").strip(),
 }
 

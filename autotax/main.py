@@ -9910,7 +9910,7 @@ from autotax import billing as _billing
 def _create_checkout_session_for(plan: str, user: dict) -> dict:
     if not _billing.is_configured():
         err(503, "Bezahlung ist noch nicht eingerichtet. Bitte später erneut versuchen oder Support kontaktieren.")
-    if plan not in {"starter", "pro", "early"}:
+    if plan not in {"starter", "pro", "premium", "early"}:
         err(400, f"Unbekannter Plan: {plan}")
     db = SessionLocal()
     try:
