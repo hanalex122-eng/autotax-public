@@ -42,7 +42,7 @@ Return ONLY a valid JSON object matching this exact schema. Use null for unknown
   "due_date": "YYYY-MM-DD or null",
   "invoice_number": "R9AMD1LM",
   "currency": "EUR",
-  "category": "software|hosting|office|travel|fuel|restaurant|telecom|insurance|advertising|professional|hardware|other",
+  "category": "software|hosting|hardware|office|telecom|advertising|professional|travel|fuel|kfz|transport|bewirtung|restaurant|food|electronics|clothing|health|insurance|bank|fortbildung|miete|other",
   "vendor_email": "support@anthropic.com or null",
   "vendor_domain": "anthropic.com or null",
   "vendor_address": "street + city or null",
