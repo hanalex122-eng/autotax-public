@@ -2442,14 +2442,24 @@ function TableImportView({triggerRefresh,showToast,onNav}){
             const validRows=d.rows.filter(rr=>!rr.is_uncertain&&(rr.income>0||rr.expense>0));
             if(validRows.length>0){
               let autoSaved=0;
+              const autoCreatedInvIds=[];
               for(const rr of validRows){
                 try{
                   const amount=rr.income>0?rr.income:rr.expense;
                   const entryType=rr.income>0?"income":"expense";
                   const body={description:rr.description||"Import",vendor:(rr.description||"Import").substring(0,50),gross_amount:amount,entry_type:entryType,vat_rate:"19%",category:"other",payment_method:"",reference:"",notes:"Tabelle Import",date:rr.date||""};
                   const sr=await fetch(API+"/bookkeeping",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+tk},body:JSON.stringify(body)});
-                  if(sr.ok)autoSaved++;
+                  if(sr.ok){
+                    autoSaved++;
+                    try{const dj=await sr.json();if(dj.invoice_id)autoCreatedInvIds.push(dj.invoice_id);}catch(ex){}
+                  }
                 }catch(ex){}
+              }
+              // Attach original photo to auto-created invoices so "Original" button in Beleg Editor works
+              if(file&&autoCreatedInvIds.length>0){
+                for(const invId of autoCreatedInvIds){
+                  try{const fd2=new FormData();fd2.append("file",file);await fetch(API+"/vault/"+invId+"/upload",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd2});}catch(ex){}
+                }
               }
               if(autoSaved>0){
                 if(triggerRefresh)triggerRefresh();
