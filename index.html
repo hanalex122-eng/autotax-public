@@ -2518,7 +2518,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
     if(!file)return;
     if(mode!=="image"){if(showToast)showToast("KI nur fuer Bilder/PDF","warn");return;}
     setLoading(true);setRows([]);setCsv("");setSaved(0);setErrorMsg("");setShowTable(false);
-    setStep("🤖 KI liest das Bild…");
+    setStep("🪄 Smart-Erkennung liest das Bild…");
     const tk=localStorage.getItem("atx_token");
     const fd=new FormData();fd.append("file",file);
     try{
@@ -2532,7 +2532,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
       const kiRows=d.rows||[];
       if(!kiRows.length){setErrorMsg("KI hat keine Zeilen gefunden");setLoading(false);setStep("");return;}
       setRows(sortRowsByDate(kiRows));setCsv(d.csv||"");setRawRows([]);
-      if(showToast)showToast("🤖 KI: "+kiRows.length+" Zeilen erkannt — pruefen + speichern","success");
+      if(showToast)showToast("🪄 Smart-Erkennung: "+kiRows.length+" Zeilen erkannt — pruefen + speichern","success");
       setTimeout(()=>{setShowTable(true);setTimeout(()=>{tableRef.current?.scrollIntoView({behavior:"smooth",block:"start"});},200);},100);
     }catch(e){setErrorMsg("KI Verbindungsfehler — "+(e.message||e));}
     setLoading(false);setStep("");
@@ -2660,7 +2660,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
 
     {file&&!loading&&!rows.length&&!saved&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
       <button style={{background:"linear-gradient(135deg,#10b981,#3b82f6)",color:"#fff",border:"none",borderRadius:12,padding:"14px 28px",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 20px rgba(16,185,129,0.3)",transition:"all 0.3s",flex:mode==="image"?1:"1 1 100%"}} onClick={analyze} onMouseOver={e=>e.currentTarget.style.transform="scale(1.03)"} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}>{mode==="image"?"🔍 Tabelle erkennen":"📥 Jetzt importieren"}</button>
-      {mode==="image"&&<button title="Anthropic Claude Vision — direkt aus dem Bild (optional, kostet pro Aufruf)" style={{background:"rgba(168,85,247,0.10)",color:"#a855f7",border:"1.5px solid rgba(168,85,247,0.55)",borderRadius:12,padding:"14px 22px",fontSize:15,fontWeight:700,cursor:"pointer",transition:"all 0.3s"}} onClick={analyzeKi} onMouseOver={e=>{e.currentTarget.style.background="rgba(168,85,247,0.20)";e.currentTarget.style.transform="scale(1.03)";}} onMouseOut={e=>{e.currentTarget.style.background="rgba(168,85,247,0.10)";e.currentTarget.style.transform="scale(1)";}}>🤖 KI</button>}
+      {mode==="image"&&<button title="Smart-Erkennung — Tabelle direkt aus dem Bild (Alternative, falls die normale Erkennung schlecht ist)" style={{background:"rgba(168,85,247,0.10)",color:"#a855f7",border:"1.5px solid rgba(168,85,247,0.55)",borderRadius:12,padding:"14px 22px",fontSize:15,fontWeight:700,cursor:"pointer",transition:"all 0.3s"}} onClick={analyzeKi} onMouseOver={e=>{e.currentTarget.style.background="rgba(168,85,247,0.20)";e.currentTarget.style.transform="scale(1.03)";}} onMouseOut={e=>{e.currentTarget.style.background="rgba(168,85,247,0.10)";e.currentTarget.style.transform="scale(1)";}}>🪄 Smart-Erkennung</button>}
     </div>}
 
     {loading&&<div style={{...css.card,textAlign:"center",padding:32,background:"rgba(16,185,129,0.05)",border:"1px solid rgba(16,185,129,0.15)"}}>

@@ -218,7 +218,7 @@ body{font-family:'DM Sans',sans-serif;background:#050a12;color:#f1f5f9;height:10
 
     <div class="bottom-bar">
       <button class="btn btn-cancel" onclick="window.location.href='/'">Cancel</button>
-      <button class="btn" id="btnAI" onclick="aiExtract()" title="AI liest die PDF und füllt leere Felder (Anthropic Claude)" style="background:rgba(168,85,247,0.1);border:1.5px solid rgba(168,85,247,0.5);color:#a855f7;font-weight:700;transition:all .3s cubic-bezier(0.175,0.885,0.32,1.275)" onmouseenter="this.style.background='rgba(168,85,247,0.2)';this.style.transform='scale(1.04)';this.style.boxShadow='0 4px 16px rgba(168,85,247,0.3)'" onmouseleave="this.style.background='rgba(168,85,247,0.1)';this.style.transform='scale(1)';this.style.boxShadow='none'">&#129302; KI-AI</button>
+      <button class="btn" id="btnAI" onclick="aiExtract()" title="Auto-Vorschlag liest den Beleg und schlägt Werte vor" style="background:rgba(168,85,247,0.1);border:1.5px solid rgba(168,85,247,0.5);color:#a855f7;font-weight:700;transition:all .3s cubic-bezier(0.175,0.885,0.32,1.275)" onmouseenter="this.style.background='rgba(168,85,247,0.2)';this.style.transform='scale(1.04)';this.style.boxShadow='0 4px 16px rgba(168,85,247,0.3)'" onmouseleave="this.style.background='rgba(168,85,247,0.1)';this.style.transform='scale(1)';this.style.boxShadow='none'">&#129668; Auto-Vorschlag</button>
       <button class="btn btn-save" id="btnSave" onclick="save()">&#10003; Speichern</button>
     </div>
   </div>
@@ -507,11 +507,11 @@ async function aiExtract() {
   // Kullanicinin manuel girdigi/duzelttigi alanlar EZILMEZ.
   const inv = invoices[currentIdx];
   if (!inv) return;
-  if (!confirm("🤖 AI liest die PDF und füllt leere Felder (Vendor, Betrag, Datum, MwSt…). Deine manuellen Eingaben bleiben unverändert. Fortfahren?")) return;
+  if (!confirm("🪄 Auto-Vorschlag liest den Beleg und schlägt für leere Felder Werte vor (Lieferant, Betrag, Datum, MwSt…). Deine Eingaben bleiben unverändert. Fortfahren?")) return;
   const btn = document.getElementById("btnAI");
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = "🤖 Liest…";
+  btn.innerHTML = "🪄 Liest…";
   try {
     const res = await fetch(API + "/invoices/" + inv.id + "/ai-extract", {
       method: "POST",
@@ -562,12 +562,12 @@ async function aiExtract() {
     setIfEmpty("website", _web, "Webseite");
     // vendor_phone / vendor_fax not in AI schema (yet) — left untouched
     if (filled > 0) {
-      showToast("✓ AI hat " + filled + " Feld(er) ausgefüllt: " + filledNames.join(", ") + " — prüfen + Speichern");
+      showToast("✓ " + filled + " Vorschläge übernommen: " + filledNames.join(", ") + " — prüfen + Speichern");
     } else {
-      showToast("ℹ AI hat keine neuen Daten gefunden — alle Felder schon gefüllt");
+      showToast("ℹ Keine neuen Vorschläge — alle Felder sind schon gefüllt");
     }
   } catch (e) {
-    alert("AI-Fehler: " + e.message);
+    alert("Vorschlag-Fehler: " + e.message);
   }
   btn.disabled = false;
   btn.innerHTML = orig;
