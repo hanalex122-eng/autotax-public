@@ -551,6 +551,16 @@ async function aiExtract() {
       setIfEmpty("invoice_type", ar.invoice_type, "Typ");
     }
     setIfEmpty("payment_method", ar.payment_method, "Zahlung");
+    // Firma/Lieferant block — AI returns vendor_* fields; map them to form inputs
+    setIfEmpty("address", ar.vendor_address, "Adresse");
+    setIfEmpty("iban", ar.vendor_iban, "IBAN");
+    setIfEmpty("tax_id", ar.vendor_ust_id, "USt-ID");
+    setIfEmpty("email", ar.vendor_email, "E-Mail");
+    // vendor_domain often comes as "anthropic.com" — add www. prefix if no scheme
+    var _web = ar.vendor_domain || "";
+    if (_web && !/^https?:\/\//i.test(_web) && !/^www\./i.test(_web)) _web = "www." + _web;
+    setIfEmpty("website", _web, "Webseite");
+    // vendor_phone / vendor_fax not in AI schema (yet) — left untouched
     if (filled > 0) {
       showToast("✓ AI hat " + filled + " Feld(er) ausgefüllt: " + filledNames.join(", ") + " — prüfen + Speichern");
     } else {
