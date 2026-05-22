@@ -107,6 +107,7 @@ def create_checkout_session(*, customer_id: str, plan: str, user_id: int) -> str
         locale="auto",
         billing_address_collection="auto",
         tax_id_collection={"enabled": True},
+        customer_update={"name": "auto", "address": "auto"},
     )
     return session.url
 
