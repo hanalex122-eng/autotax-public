@@ -129,6 +129,25 @@ app.add_middleware(
 )
 
 
+_CSP_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+    "https://cdnjs.cloudflare.com https://js.stripe.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' data: https://fonts.gstatic.com; "
+    "img-src 'self' data: blob: https://*.stripe.com; "
+    "connect-src 'self' https://*.railway.app https://*.up.railway.app "
+    "https://cdnjs.cloudflare.com https://api.stripe.com https://*.stripe.com; "
+    "frame-src 'self' blob: https://js.stripe.com https://hooks.stripe.com "
+    "https://checkout.stripe.com; "
+    "form-action 'self' https://checkout.stripe.com https://billing.stripe.com; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "object-src 'none'; "
+    "upgrade-insecure-requests"
+)
+
+
 @app.middleware("http")
 async def security_headers(request, call_next):
     response = await call_next(request)
@@ -136,10 +155,12 @@ async def security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(self), microphone=()"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
     response.headers["X-Data-Retention"] = "none"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://*.railway.app https://*.up.railway.app https://cdnjs.cloudflare.com; frame-src 'self' blob:; object-src 'self' blob:"
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    response.headers["Content-Security-Policy"] = _CSP_POLICY
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-site"
     return response
 
 
