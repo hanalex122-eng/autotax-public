@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libzbar0 libzbar-dev \
     tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng tesseract-ocr-fra \
     tesseract-ocr-tur tesseract-ocr-spa libglib2.0-0 poppler-utils \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
