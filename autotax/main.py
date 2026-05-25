@@ -883,6 +883,24 @@ async def startup_reminders():
         logger.exception("Failed to start reminder loop")
 
 
+_backup_task = None
+
+
+@app.on_event("startup")
+async def startup_backup():
+    """Weekly PostgreSQL backup -> Cloudflare R2 (if configured)."""
+    global _backup_task
+    try:
+        from autotax.backup import backup_loop, is_configured
+        if is_configured():
+            _backup_task = asyncio.create_task(backup_loop())
+            logger.info("Backup loop scheduled (R2 weekly)")
+        else:
+            logger.info("Backup loop SKIPPED — R2_BACKUP_ENABLED!=1 or env vars eksik")
+    except Exception:
+        logger.exception("Failed to start backup loop")
+
+
 @app.on_event("startup")
 async def setup_telegram_webhook():
     """Sprint 2B: Telegram webhook'u Telegram'a bizim URL'imize işaret etsin
@@ -1004,6 +1022,13 @@ def health():
         "smtp_configured": bool(os.getenv("SMTP_HOST") and os.getenv("SMTP_USER") and os.getenv("SMTP_PASS")),
         "disk_ok": disk_ok,
     }
+
+    # R2 backup status (config-level, actual run history is separate)
+    try:
+        from autotax.backup import config_summary as _backup_summary
+        services["backup_r2"] = _backup_summary()
+    except Exception:
+        services["backup_r2"] = {"enabled": False, "error": "module load failed"}
 
     # Critical = db. Geri kalan opsiyonel.
     status = "ok" if db_ok and disk_ok else ("degraded" if db_ok else "down")
@@ -1910,6 +1935,25 @@ def admin_reset_password(body: dict = Body(...), admin: dict = Depends(get_curre
         return {"success": True, "message": f"Password reset for {email}"}
     finally:
         db.close()
+
+
+@app.post("/admin/backup/run")
+def admin_backup_run(user: dict = Depends(get_current_user)):
+    """Manuel backup tetikleme. /admin/* middleware ADMIN_EMAILS koruyor.
+    Senkron calisir — yanit 1-2 dk surebilir (pg_dump + upload).
+    Loglara da yansir, Telegram'a bildirim gider."""
+    from autotax.backup import run_backup_once, is_configured, config_summary
+    if not is_configured():
+        return {"ok": False, "error": "R2 backup not configured", "config": config_summary()}
+    result = run_backup_once()
+    return result
+
+
+@app.get("/admin/backup/status")
+def admin_backup_status(user: dict = Depends(get_current_user)):
+    """Backup config + son durum (config only, history yok)."""
+    from autotax.backup import config_summary
+    return {"config": config_summary()}
 
 
 @app.post("/admin/reparse")
