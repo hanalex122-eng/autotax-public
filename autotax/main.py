@@ -132,14 +132,16 @@ app.add_middleware(
 _CSP_POLICY = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
-    "https://cdnjs.cloudflare.com https://js.stripe.com; "
+    "https://cdnjs.cloudflare.com https://js.stripe.com "
+    "https://challenges.cloudflare.com; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' data: https://fonts.gstatic.com; "
     "img-src 'self' data: blob: https://*.stripe.com; "
     "connect-src 'self' https://*.railway.app https://*.up.railway.app "
-    "https://cdnjs.cloudflare.com https://api.stripe.com https://*.stripe.com; "
+    "https://cdnjs.cloudflare.com https://api.stripe.com https://*.stripe.com "
+    "https://challenges.cloudflare.com; "
     "frame-src 'self' blob: https://js.stripe.com https://hooks.stripe.com "
-    "https://checkout.stripe.com; "
+    "https://checkout.stripe.com https://challenges.cloudflare.com; "
     "form-action 'self' https://checkout.stripe.com https://billing.stripe.com; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
@@ -1204,7 +1206,11 @@ def api_config():
     """Client-readable feature flag dump (for standalone pages that don't
     go through the index.html inject path)."""
     from autotax.config import FEATURES
-    return FEATURES
+    cfg = dict(FEATURES)
+    # Public-safe Turnstile site key (frontend widget needs this).
+    # Site keys are PUBLIC by design (Cloudflare; not a secret).
+    cfg["turnstile_site_key"] = (os.getenv("TURNSTILE_SITE_KEY") or "").strip()
+    return cfg
 
 
 # --- AutoTax Watcher (desktop agent) update channel ---
@@ -3823,6 +3829,33 @@ class RegisterRequest(BaseModel):
     full_name: Optional[str] = None
     company_name: Optional[str] = None
     gdpr_consent: bool = False
+    turnstile_token: Optional[str] = None  # Cloudflare Turnstile CAPTCHA token (frontend widget)
+
+
+def _verify_turnstile(token: str, remote_ip: str = "") -> bool:
+    """Verify Cloudflare Turnstile token via siteverify API.
+    Returns True if valid OR if Turnstile not configured (graceful fallback).
+    Returns False ONLY when configured + verification fails."""
+    secret = (os.getenv("TURNSTILE_SECRET_KEY") or "").strip()
+    if not secret:
+        # Turnstile not configured — accept all (legacy behavior)
+        return True
+    if not token:
+        return False
+    try:
+        import httpx
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                data={"secret": secret, "response": token, "remoteip": remote_ip},
+            )
+            data = resp.json()
+            return bool(data.get("success"))
+    except Exception:
+        logger.exception("Turnstile verify failed")
+        # Fail-open or fail-closed? For abuse protection, fail CLOSED on network error
+        # when Turnstile IS configured. (If it's not configured we don't reach here.)
+        return False
 
 
 @app.post("/auth/register")
@@ -3830,6 +3863,10 @@ class RegisterRequest(BaseModel):
 def register(request: Request, body: RegisterRequest):
     if not body.gdpr_consent:
         err(400, "Datenschutzerklärung muss akzeptiert werden (DSGVO Art. 6)")
+    # CAPTCHA verification (no-op if TURNSTILE_SECRET_KEY not set)
+    client_ip = _mask_ip(request.client.host) if request.client else ""
+    if not _verify_turnstile(body.turnstile_token or "", client_ip):
+        err(400, "CAPTCHA-Überprüfung fehlgeschlagen. Bitte erneut versuchen.")
     if len(body.password) < 8:
         err(400, "Password must be at least 8 characters")
     if not any(c.isupper() for c in body.password):
