@@ -1,0 +1,67 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly: every Monday 04:00 UTC
+    - cron: '0 4 * * 1'
+
+jobs:
+  pip-audit:
+    name: pip-audit (vulnerable dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit on requirements.txt
+        # Non-blocking: report findings but do not fail the build.
+        # To make it blocking later, remove '|| true'.
+        run: pip-audit --requirement requirements.txt --strict || true
+
+  trufflehog:
+    name: TruffleHog (secret leak scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+        continue-on-error: true
+
+  ruff:
+    name: Ruff (Python lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff (non-blocking)
+        # Style and basic correctness checks. Non-blocking initially —
+        # remove '|| true' when codebase is fully ruff-compliant.
+        run: ruff check autotax/ services/ --output-format=github || true

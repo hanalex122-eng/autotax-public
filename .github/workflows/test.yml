@@ -1,0 +1,51 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax:
+    name: Python syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compile all Python files
+        # Fast catch of accidental syntax errors before Railway deploy.
+        run: python -m compileall autotax/ services/ -q
+
+  import:
+    name: Import check (does main.py load?)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Import autotax.main
+        # Confirms imports work and module loads (catches typos, missing modules).
+        # Uses dummy env so app initialises without real services.
+        env:
+          DATABASE_URL: "sqlite:///./test.db"
+          JWT_SECRET: "ci-only-dummy-secret-do-not-use"
+          STRIPE_SECRET_KEY: ""
+          ANTHROPIC_API_KEY: ""
+          OCR_API_KEY: ""
+        run: |
+          python -c "from autotax import main; print('import OK')"
