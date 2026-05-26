@@ -419,6 +419,21 @@ def safe_str(val, default=""):
     return val if val is not None else default
 
 
+# OWASP CSV Injection / Formula Injection prevention.
+# Excel & LibreOffice treat cells starting with =, +, -, @, \t, \r as formulas
+# -> can execute code or leak data when victim opens the exported file.
+# Prefix with single quote (Excel literal marker) to neutralize.
+_CSV_FORMULA_CHARS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_safe(val):
+    """Sanitize a value before writing into CSV/XLSX cells. Returns str."""
+    s = "" if val is None else str(val)
+    if s and s[0] in _CSV_FORMULA_CHARS:
+        return "'" + s
+    return s
+
+
 def safe_float(val, default=0.0):
     return val if val is not None else default
 
@@ -8274,9 +8289,10 @@ def export_bookkeeping_csv(year: int = Query(None), user: dict = Depends(get_act
         buf.write("Datum,Typ,Beschreibung,Lieferant,Betrag,MwSt,MwSt-Satz,Kategorie,Zahlungsart,Beleg-Nr.\n")
         for e in entries:
             date_str = e.date.strftime("%d.%m.%Y") if e.date else ""
-            desc = (e.description or "").replace('"', '""')
-            vendor = (e.vendor or "").replace('"', '""')
-            buf.write(f'{date_str},{e.entry_type or ""},"{desc}","{vendor}",{safe_float(e.gross_amount):.2f},{safe_float(e.vat_amount):.2f},{safe_vat_rate(e.vat_rate)},{safe_category(e.category)},{safe_str(e.payment_method)},{safe_str(e.reference)}\n')
+            # csv_safe() blocks =CMD()/etc. formula injection in user-controlled fields
+            desc = csv_safe(e.description or "").replace('"', '""')
+            vendor = csv_safe(e.vendor or "").replace('"', '""')
+            buf.write(f'{date_str},{e.entry_type or ""},"{desc}","{vendor}",{safe_float(e.gross_amount):.2f},{safe_float(e.vat_amount):.2f},{safe_vat_rate(e.vat_rate)},{csv_safe(safe_category(e.category))},{csv_safe(safe_str(e.payment_method))},{csv_safe(safe_str(e.reference))}\n')
         buf.seek(0)
         return StreamingResponse(buf, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=kassenbuch_{year or 'all'}.csv"})
     except Exception:
@@ -10806,8 +10822,13 @@ def export_csv(year: int = Query(None), user: dict = Depends(get_acting_context)
     # Transaction header
     buf.write("Datum;Lieferant;Rechnungs-Nr.;Typ;Betrag;MwSt;MwSt-Satz;Kategorie;Zahlungsart;Konto\n")
     for t in txns:
-        vendor = (t["vendor"] or "").replace('"', '""')
-        buf.write(f'{t["date"]};"{vendor}";{t["invoice_number"]};{t["invoice_type"]};{t["total_amount"]:.2f};{t["vat_amount"]:.2f};{t["vat_rate"]};{t["category"]};{t["payment_method"]};{t["konto"]}\n')
+        # Formula injection prevention: csv_safe() prefixes =, +, -, @ with single quote
+        vendor = csv_safe(t["vendor"] or "").replace('"', '""')
+        inv_no = csv_safe(t["invoice_number"])
+        cat = csv_safe(t["category"])
+        pay = csv_safe(t["payment_method"])
+        konto = csv_safe(t["konto"])
+        buf.write(f'{t["date"]};"{vendor}";{inv_no};{t["invoice_type"]};{t["total_amount"]:.2f};{t["vat_amount"]:.2f};{t["vat_rate"]};{cat};{pay};{konto}\n')
     logger.info("CSV export: %d rows, income=%.2f expenses=%.2f", len(txns), m["total_income"], m["total_expenses"])
     buf.seek(0)
     return StreamingResponse(buf, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f"attachment; filename=autotax_export_{year or 'alle'}.csv"})
@@ -10829,9 +10850,10 @@ def export_datev(year: int = Query(None), user: dict = Depends(get_acting_contex
         if len(parts) == 3:
             date_str = f"{parts[2]}{parts[1]}"
         amt = f"{t['total_amount']:.2f}".replace(".", ",")
-        vendor = (t["vendor"] or "").replace(";", " ")
+        vendor = csv_safe((t["vendor"] or "").replace(";", " "))
+        konto = csv_safe(t["konto"])
         vat = (t["vat_rate"] or "0%").replace("%", "")
-        buf.write(f"{amt};{sh};{t['konto']};1200;{vat};{date_str};{vendor};{vat}\n")
+        buf.write(f"{amt};{sh};{konto};1200;{vat};{date_str};{vendor};{vat}\n")
     buf.seek(0)
     return StreamingResponse(buf, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=autotax_datev_{year or 'all'}.csv"})
 
@@ -10868,18 +10890,19 @@ def export_excel(year: int = Query(None), user: dict = Depends(get_acting_contex
 
     row = 3
     for t in txns:
+        # csv_safe() blocks formula injection on user-controlled string cells
         ws.cell(row=row, column=1, value=t["date"])
-        ws.cell(row=row, column=2, value=t["vendor"])
-        ws.cell(row=row, column=3, value=t["invoice_number"])
+        ws.cell(row=row, column=2, value=csv_safe(t["vendor"]))
+        ws.cell(row=row, column=3, value=csv_safe(t["invoice_number"]))
         ws.cell(row=row, column=4, value=t["invoice_type"])
         c5 = ws.cell(row=row, column=5, value=t["total_amount"])
         c5.number_format = '#,##0.00'
         c6 = ws.cell(row=row, column=6, value=t["vat_amount"])
         c6.number_format = '#,##0.00'
         ws.cell(row=row, column=7, value=t["vat_rate"])
-        ws.cell(row=row, column=8, value=t["category"])
-        ws.cell(row=row, column=9, value=t["payment_method"])
-        ws.cell(row=row, column=10, value=t["konto"])
+        ws.cell(row=row, column=8, value=csv_safe(t["category"]))
+        ws.cell(row=row, column=9, value=csv_safe(t["payment_method"]))
+        ws.cell(row=row, column=10, value=csv_safe(t["konto"]))
         for c in range(1, 11):
             ws.cell(row=row, column=c).border = thin_border
         row += 1
