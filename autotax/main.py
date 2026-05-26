@@ -9721,6 +9721,9 @@ def submit_feedback(body: dict = Body(...), user: dict = Depends(get_current_use
     message = body.get("message", "")
     if not message.strip():
         err(400, "Feedback message is empty")
+    # Anti-abuse: cap feedback length (bug reports olabiliyor, biraz daha cömert)
+    if len(message) > 5000:
+        err(400, "Feedback zu lang (max 5000 Zeichen).")
     logger.info("FEEDBACK from user %d: %s", user["sub"], message[:500])
     return {"success": True, "message": "Feedback received"}
 
@@ -10269,6 +10272,9 @@ def set_default_company(company_id: int, user: dict = Depends(get_current_user))
 def chat_endpoint(body: dict = Body(...), user: dict = Depends(get_current_user)):
     _enforce_upload_quota(user["sub"], chat=True)
     message = body.get("message", "")
+    # Anti-abuse: cap chat message length (typical question 50-300 chars; 2000 = generous max)
+    if len(message) > 2000:
+        err(400, "Nachricht zu lang (max 2000 Zeichen). Bitte kuerzer formulieren.")
     db = SessionLocal()
     try:
         all_invoices = db.query(Invoice).filter(Invoice.user_id == user["sub"], (Invoice.is_deleted == False) | (Invoice.is_deleted == None)).all()
