@@ -1342,6 +1342,10 @@ _PRIVACY_THIRD_PARTIES = """<ul>
 <li><strong>Railway Inc.</strong> (USA/EU) — Hosting</li>
 <li><strong>OCR.space / a9t9 Software GmbH</strong> — OCR {ocr_desc}</li>
 <li><strong>Anthropic PBC</strong> (USA) — AI {ai_desc}</li>
+<li><strong>Stripe Payments Europe Ltd.</strong> (Irland/EU) — Zahlungsabwicklung (Kreditkarte, SEPA). Verarbeitet Name, E-Mail, IP, Zahlungsdaten gemäß PCI-DSS.</li>
+<li><strong>Cloudflare, Inc.</strong> (USA/EU-Frankfurt) — Objektspeicher (R2) für verschlüsselte Datenbank-Backups. Kein Zugriff auf personenbezogene Daten im Klartext.</li>
+<li><strong>Resend</strong> (USA) — Transaktionale E-Mails (Rechnungen, Erinnerungen)</li>
+<li><strong>Telegram Messenger Inc.</strong> (UK/UAE) — optionale Benachrichtigungen (nur wenn vom Nutzer aktiviert)</li>
 </ul>"""
 
 def _privacy_page(lang, title, sections):
