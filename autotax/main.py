@@ -3836,17 +3836,22 @@ def register(request: Request, body: RegisterRequest):
     try:
         if db.query(User).filter(User.email == body.email).first():
             err(400, "Email already registered")
-        # Yeni kayit -> 15 gun Pro trial. Cron 15. gunde plan=free yapar
-        # ve Telegram alert atar. Manuel odeme alirsan admin panelden
-        # 'Pro+Cloud' butonuna basarsin -> trial_ends_at NULL olur (kalici).
+        # Anti-abuse: default plan 'free' (30 receipts/ay, 10 chat/gun).
+        # DEFAULT_REGISTRATION_PLAN=pro env ile 15-gun Pro trial geri acilir.
+        # Trial cron 15. gunde plan=free yapar ve Telegram alert atar.
+        # Manuel odeme alirsan admin panelden 'Pro+Cloud' -> trial_ends_at NULL.
+        default_plan = (os.getenv("DEFAULT_REGISTRATION_PLAN") or "free").strip().lower()
+        if default_plan not in {"free", "starter", "pro", "premium", "early"}:
+            default_plan = "free"
         trial_days = int(os.getenv("TRIAL_DAYS", "15"))
-        trial_end = datetime.now(timezone.utc) + timedelta(days=trial_days)
+        trial_end = (datetime.now(timezone.utc) + timedelta(days=trial_days)
+                     if default_plan == "pro" else None)
         try:
             user = User(
                 email=body.email,
                 hashed_password=hash_password(body.password),
                 full_name=body.full_name,
-                plan="pro",  # trial Pro
+                plan=default_plan,
                 trial_ends_at=trial_end,
                 gdpr_consent_at=datetime.now(),
             )
