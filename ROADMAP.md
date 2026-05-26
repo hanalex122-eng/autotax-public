@@ -314,6 +314,190 @@ Yeni feature kabul kriterleri:
 
 ---
 
+# PHASE 11 — ENTERPRISE GROWTH & CERTIFICATION
+
+**Hedef:** Tekil müşteriden enterprise B2B + Steuerberater pazarına çıkış.
+**Süre:** S0-S6 bitince başlar (Ay 4+). Mali yatırım gerekir.
+
+Bu phase, Phase 1-10 (ürün) bittikten sonra **ürün operasyonel olgunluk** + **resmi sertifikasyon** yolu.
+
+---
+
+## 11.1 — İlk 10 gerçek müşteri (Ay 1-6)
+
+**Hedef:** Pilot → para ödeyen müşteri → 10 müşteri.
+
+| Adım | Süre |
+|---|---|
+| Türk akraba berber pilot (DSFinV-K Speedy) | S4 sonu |
+| Network referansı 4-5 berber/esnaf | S5-S6 |
+| Cold outreach (LinkedIn, Steuerberater partnerlik) | S5+ |
+| **10 paying customer milestone** | Ay 4-6 |
+
+Bu süreçte:
+- Customer feedback toplama (Notion / Linear board)
+- Usage analytics (PostHog veya kendi Sentry ile)
+- NPS / CSAT anketleri ay sonu
+- **Churn izle** — eğer ay sonu cancel > %15 ise feature/UX'te sorun var
+
+**Gelir hedefi:** 10 × €89 (AI Steuer) = €890/ay → tüm operasyon maliyetini karşılar + €500/ay kâr.
+
+---
+
+## 11.2 — Sistem stabilite (Ay 3-6)
+
+**Hedef:** %99.5 uptime, sıfır data loss, %1 altı error rate.
+
+| Konu | Hedef |
+|---|---|
+| Uptime | 99.5%+ (1 ay max 3.5 saat down) |
+| P95 response time | < 500ms |
+| Error rate (Sentry) | < 1% |
+| Backup restore drill | 3 ayda 1 manuel test |
+| Customer support response | < 24 saat |
+
+Yapılacaklar:
+- **Sentry + Better Stack / Uptime Robot** (zaten Telegram bot var, formal SLA)
+- **Status page** (status.autotax.cloud — Cloudflare ile bedava)
+- **Runbook** her major incident için (.claude/runbooks/)
+- **Postmortem template** — büyük incident sonrası
+
+---
+
+## 11.3 — Güvenlik dokümantasyonu (Ay 5-7)
+
+**Hedef:** B2B sales için "Security & Compliance" sayfası + resmi belgeler.
+
+Hazırlanacak dokümanlar:
+- ✅ `SECURITY_AUDIT.md` (zaten var, periyodik güncelle)
+- ⚪ **GoBD Verfahrensdokumentation** — BMF zorunlu (5-10 sayfa)
+- ⚪ **Auftragsverarbeitungsvertrag (AVV)** — DSGVO Art. 28, B2B müşteri zorunlu ister
+- ⚪ **TOMs (Technische und Organisatorische Maßnahmen)** — DSGVO ekli, 5-15 sayfa
+- ⚪ **Information Security Policy** (genel politika, 5 sayfa)
+- ⚪ **Data Processing Inventory** — hangi data hangi processor'da
+- ⚪ **Incident Response Plan** — log → triage → notify → fix → postmortem
+- ⚪ **Backup & Disaster Recovery Plan** — RPO/RTO tanımları, R2 restore drill
+- ⚪ **Vendor Risk Assessment** — Stripe, Cloudflare, Anthropic, Resend için
+- ⚪ **Access Control Policy** — ADMIN_EMAILS, JWT lifetime, password policy
+- ⚪ **Security Awareness Training** — bir başka geliştirici eklenirse
+
+**Maliyet:** Solo dev kendisi yazabilir, opsiyonel danışman €1-3k.
+
+---
+
+## 11.4 — Penetration Test (Ay 7-8)
+
+**Hedef:** Bağımsız 3rd party güvenlik testi → bulgular fix → certificate.
+
+| Alanlar | Test edilir |
+|---|---|
+| OWASP Top 10 web app | SQL injection, XSS, CSRF, auth bypass, IDOR |
+| API endpoints | 176 endpoint, rate limit, auth, input validation |
+| Infrastructure | TLS, headers, DNS, hosting config |
+| Social engineering | Email phishing simulation (opsiyonel) |
+| Source code review | Statik analiz (Semgrep, Bandit) |
+
+Önerilen firma (Almanya'da):
+- **SySS GmbH** (Tübingen) — €5-15k, 1-2 hafta
+- **redteam.pl** veya Almanya pentestcİları
+- **HackerOne / Bugcrowd** crowdsourced (alternatif, %0.5-2% bug bounty per critical)
+
+Çıktı: Pentest raporu (CVSS scoring + recommendations) → fix → re-test → certificate of completion.
+
+**Maliyet:** €5-15k tek seferlik + €3-5k yearly re-test.
+
+---
+
+## 11.5 — ISO 27001 light süreç (Ay 9-14)
+
+**Hedef:** Information Security Management System (ISMS) kurulumu.
+
+ISO 27001 "light" = küçük şirketler için TISAX-benzeri uyumluluk, tam sertifikasyon değil.
+
+| Adım | Süre |
+|---|---|
+| Gap analysis (mevcut TOMs vs ISO 27001 Annex A) | 1-2 hafta |
+| ISMS scope tanımı (sadece SaaS prod) | 1 hafta |
+| Risk assessment + treatment plan | 2-3 hafta |
+| Policies + procedures (114 Annex A controls) | 4-6 hafta |
+| Internal audit (kendisi veya danışman) | 1 hafta |
+| Management review + action items | 1 hafta |
+| Sertifikasyon: opsiyonel (sertifika için DEKRA/TÜV harici audit) | 4-8 hafta |
+
+**Light versiyonda** sertifika yerine: "ISO 27001-aligned" claim + dokümantasyon — B2B sales için yeterli.
+
+**Tam sertifika** istersen DEKRA/TÜV Süd vs. ile audit yapılır.
+
+**Maliyet:**
+- Light (claim only): €5-15k danışman + kendi zaman
+- Tam sertifika: +€10-20k audit + €5k/yıl re-audit
+
+---
+
+## 11.6 — BSI Grundschutz / Enterprise tier (Yıl 2+)
+
+**Hedef:** Almanya kamu sektörü ve büyük enterprise müşterilere açılma.
+
+BSI = Bundesamt für Sicherheit in der Informationstechnik (Almanya federal güvenlik kurumu).
+
+| Sertifika | Müşteri profili | Maliyet |
+|---|---|---|
+| **BSI IT-Grundschutz** | Almanya orta-büyük şirketler, kamu | €30-80k |
+| **C5 (Cloud Computing Compliance Criteria Catalogue)** | Cloud provider müşterileri, BSI requested | €20-50k |
+| **Auftragsverarbeitung** | B2B SaaS müşterileri (DSGVO Art. 28 plus) | €5-15k |
+
+**Ön şartlar (ISO 27001 light bittikten sonra):**
+- ISMS olgunluk en az 12 ay
+- Pentest geçmişi (yıllık)
+- Audit log infrastructure (Phase 8'den)
+- Detailed asset inventory
+- Vendor risk management
+- BCMS (Business Continuity Management System)
+- Incident response capability
+
+**Iş etkisi:**
+- Enterprise customer için ZORUNLU
+- 1 enterprise müşteri = 50-200 SMB customer kadar gelir
+- Steuerberater büyük firmalar (HLB, Mazars, RSM Ebner) için referans
+
+**Maliyet vs. Getiri (gerçekçi):**
+- Bir BSI sertifikası 2 yılda alınır, €50-100k yatırım
+- İlk enterprise müşteri 6 ay içinde gelirse yatırımı karşılar
+- Solo dev sınırına ulaşırsan: 2-3 kişilik ekip büyütme + danışmanlık
+
+---
+
+## Phase 11 zaman çizelgesi (özet)
+
+```
+Ay 1-6:    İlk 10 müşteri, ürün stabilite, customer feedback
+Ay 5-7:    Güvenlik dokümantasyonu (paralel, kendi yazar)
+Ay 7-8:    Penetration test (external — SySS veya benzer)
+Ay 9-14:   ISO 27001 light implementation
+Ay 12+:    Enterprise sales konuşmaları (ISMS belgelerle)
+Yıl 2:     BSI / C5 sertifikasyon planlaması
+Yıl 2-3:   BSI sertifika alımı
+Yıl 3+:    Kamu sektörü + büyük enterprise satış
+```
+
+**Hesaplı yol:** Ay 6 sonunda 10 müşteri + €890/ay gelir → Pentest yatırımı için cash flow var → ISO 27001 light + B2B sales açılır → enterprise tier'a köprü.
+
+---
+
+## Phase 11 stratejik notlar
+
+1. **Sertifikasyon → satış değil**, sertifikasyon **satış engellerini kaldırır**. Büyük müşteri "DSGVO + ISO 27001 var mı?" diye sorar, "yok" cevabı satışı öldürür.
+
+2. **Bootstrap'ta sertifikasyon erken yapma** — ürün-pazar uyumu (product-market fit) yokken €30k harcama riski.
+
+3. **B2B-first değil B2C-first kal** — 10 SMB müşteri toplamak 1 enterprise sözleşme açmaktan kolay. Önce SMB'de kazan, sonra enterprise.
+
+4. **Steuerberater partnerlik 1. öncelik** (S5 Berater Portal sonrası) — bir Steuerberater = potansiyel 50-200 mandant. ISO sertifikası gerekmez, sadece DATEV export ve veri güvenliği yeter.
+
+5. **Solo dev sınırı** — Tek başına ISO 27001 + BSI yürütemezsin. 5+ müşteri sonrası yarı zamanlı danışman + Yıl 2'de junior dev/ops kiralama planı.
+
+---
+
 # 📐 Mimari prensipler (tüm sprint'lerde uy)
 
 1. **Backend monolith** (main.py 12k lines) — split etmeyiz, sadece sınırlı şekilde refactor
