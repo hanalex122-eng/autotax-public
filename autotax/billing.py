@@ -48,11 +48,38 @@ def _public_base() -> str:
     return "https://autotax-public-production-3f2a.up.railway.app"
 
 
+# --- TEMPORARY KILL SWITCH (2026-05-26) ---
+# Stripe LIVE devre disi — security audit + CAPTCHA + email verification
+# tamamlanana kadar gercek odeme kabul etmiyoruz.
+#
+# YENIDEN ACMA (sirayla):
+#   A) Kod yoluyla: bu degisken False yap, commit + push (~2 dk)
+#   B) Env yoluyla: Railway env STRIPE_KILL_SWITCH=0 ekle (kod degismez)
+#
+# /health endpoint: stripe_configured=False gosterir kapaliyken.
+# /billing/* endpoints: 503 Service Unavailable doner.
+_STRIPE_KILL_SWITCH_DEFAULT = True  # ← KILL SWITCH ACIK
+
+
+def _kill_switch_active() -> bool:
+    """Env override > code default."""
+    env_val = (os.getenv("STRIPE_KILL_SWITCH") or "").strip()
+    if env_val == "1":
+        return True
+    if env_val == "0":
+        return False
+    return _STRIPE_KILL_SWITCH_DEFAULT
+
+
 def is_configured() -> bool:
+    if _kill_switch_active():
+        return False
     return bool(stripe and SECRET_KEY)
 
 
 def _ensure_configured() -> None:
+    if _kill_switch_active():
+        raise RuntimeError("Stripe billing is temporarily disabled (kill switch active)")
     if not stripe:
         raise RuntimeError("stripe SDK not installed")
     if not SECRET_KEY:
