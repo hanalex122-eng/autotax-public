@@ -78,6 +78,28 @@ input[type="date"].date-force-dark::-webkit-calendar-picker-indicator { filter: 
   table input[type="text"], table input[type="number"] { font-size: 13px !important; min-width: 60px !important; padding: 6px 8px !important; }
   table select { font-size: 12px !important; padding: 6px !important; }
   div[style*="padding:32"] { padding: 12px !important; }
+
+  /* Mobile UX Phase 1 — iOS zoom prevention + touch targets (2026-05-27) */
+  /* iOS Safari zooms on focus if input font-size < 16px. Block that. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  textarea, select {
+    font-size: 16px !important;
+  }
+  /* Touch targets: Apple HIG min 44px, Material 48px. We pick 44px. */
+  button, [role="button"], .btn,
+  a.button, input[type="submit"], input[type="button"] {
+    min-height: 44px;
+  }
+  /* Inputs / textareas also tap targets — keep them comfortable */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  textarea, select {
+    min-height: 44px;
+  }
+  /* Avoid horizontal scrollbars on small phones from oversized inline styles */
+  body { overflow-x: hidden; }
+  /* Generic card padding compression for any large inline padding */
+  div[style*="padding:40"] { padding: 16px !important; }
+  div[style*="padding: 40"] { padding: 16px !important; }
 }
 </style>
 </head>
