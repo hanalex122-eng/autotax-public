@@ -1015,10 +1015,17 @@ def health():
 
     # External service config flags (set/unset — actual reachability test
     # etmiyoruz, cunku /health hizli olmali, network round-trip yok)
+    # Stripe: actual usability (env set AND kill switch off), not just env presence
+    try:
+        from autotax.billing import is_configured as _stripe_is_configured
+        _stripe_active = _stripe_is_configured()
+    except Exception:
+        _stripe_active = bool(os.getenv("STRIPE_SECRET_KEY"))
     services = {
         "db": db_ok,
         "ocr_configured": bool(os.getenv("OCR_API_KEY")),
-        "stripe_configured": bool(os.getenv("STRIPE_SECRET_KEY")),
+        "stripe_configured": _stripe_active,
+        "stripe_kill_switch": (os.getenv("STRIPE_KILL_SWITCH") or "").strip() == "1",
         "stripe_webhook_configured": bool(os.getenv("STRIPE_WEBHOOK_SECRET")),
         "sentry_configured": bool(os.getenv("SENTRY_DSN")),
         "telegram_configured": bool(
