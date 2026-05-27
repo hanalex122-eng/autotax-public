@@ -117,10 +117,13 @@ Expected: `status:"ok"`, `db.connected:true`, `stripe_configured:true`, `backup_
 - `SECURITY_AUDIT.md` — current security state (2026-05-26)
 - `LIVE_CHECKLIST.md` — launch readiness checklist
 - `NEXT_STEPS.md` — prioritised roadmap
+- `ROADMAP.md` — full product roadmap (10 phases)
 - `SECURITY_REPORT.md` — historical audit (2026-04, mostly resolved)
 - `.claude/architecture.md` — deeper system architecture
 - `.claude/auth_flow.md` — auth/JWT details
 - `.claude/deployment.md` — Railway deploy + ops runbook
+- **`.claude/product_principles.md`** — 10 binding working principles (read before every change)
+- **`.claude/ux_voice.md`** — UX language strategy (no "AI" hype; practical/calm tone)
 
 ---
 
