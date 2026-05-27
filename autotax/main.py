@@ -3938,11 +3938,8 @@ class AdvisorInviteRequest(BaseModel):
     note: str | None = None
 
 
-def _advisor_invite_link(token: str) -> str:
-    base = os.getenv("PUBLIC_APP_URL", "").rstrip("/")
-    if not base:
-        base = "https://autotax-public-production-3f2a.up.railway.app"
-    return f"{base}/app#advisor-invite/{token}"
+# --- _advisor_invite_link moved to autotax/crypto_helpers.py (Phase 2.5) ---
+from autotax.crypto_helpers import _advisor_invite_link, _ai_reviewer_sign
 
 
 @app.post("/advisor/invite")
@@ -4708,14 +4705,7 @@ def telegram_status(user: dict = Depends(get_current_user)):
 #   AI_REVIEWER_SECRET        = paylaşılan HMAC anahtarı (32+ byte)
 # ---------------------------------------------------------------------------
 
-def _ai_reviewer_sign(payload_bytes: bytes) -> str:
-    """HMAC-SHA256 imza — webhook spoofing önler."""
-    import hashlib
-    import hmac as _hmac
-    secret = (os.environ.get("AI_REVIEWER_SECRET") or "").strip().encode()
-    if not secret:
-        return ""
-    return _hmac.new(secret, payload_bytes, hashlib.sha256).hexdigest()
+# --- _ai_reviewer_sign moved to autotax/crypto_helpers.py (Phase 2.5) ---
 
 
 async def _auto_vision_reocr(invoice_id: int, user_id: int) -> None:
