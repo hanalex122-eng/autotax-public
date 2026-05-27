@@ -19,6 +19,12 @@ class User(Base):
     gdpr_consent_at = Column(DateTime, nullable=True)  # Art. 7(1) DSGVO — proof of consent
     is_kleinunternehmer = Column(Boolean, default=False, nullable=False)
     has_cloud_addon = Column(Boolean, default=False, nullable=False)  # AutoTax-Cloud upsell unlock
+    # Email verification (anti-abuse + DSGVO opt-in proof).
+    # False = newly registered, hasn't clicked verification link yet.
+    # True  = verified (clicked link OR grandfathered existing user).
+    # Existing users (registered before 2026-05-27) -> backfilled to True via init_db migration.
+    email_verified = Column(Boolean, default=False, nullable=False)
+    email_verified_at = Column(DateTime, nullable=True)
     # Trial sistemi — yeni kayitlar otomatik 15 gun Pro deneme
     # NULL  = trial baslamadi VEYA manuel odeme aldik (kalici Pro)
     # deger = trial bitis tarihi (cron expire eder)

@@ -92,6 +92,16 @@ def init_db():
             if "telegram_notify_pref" not in user_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN telegram_notify_pref TEXT"))
                 logger.info("Added 'telegram_notify_pref' column to users")
+            # Email verification (2026-05-27). Existing users grandfathered to True
+            # so they don't get locked out. Only new registrations start False.
+            if "email_verified" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT TRUE"))
+                logger.info("Added 'email_verified' column to users (existing users grandfathered TRUE)")
+                # New rows default to FALSE will be controlled by model default
+                # (SQLAlchemy default=False overrides DDL default on inserts).
+            if "email_verified_at" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMP"))
+                logger.info("Added 'email_verified_at' column to users")
         # Invoice table — file storage columns
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:

@@ -3863,6 +3863,47 @@ class RegisterRequest(BaseModel):
     turnstile_token: Optional[str] = None  # Cloudflare Turnstile CAPTCHA token (frontend widget)
 
 
+def _send_verification_email(email: str, token: str) -> bool:
+    """Send email-verification link via Resend. Returns True on send, False on error.
+    No-op (returns True) if RESEND_API_KEY not set (graceful degradation)."""
+    resend_key = (os.getenv("RESEND_API_KEY") or "").strip()
+    if not resend_key:
+        logger.warning("Verification email skipped: RESEND_API_KEY not set")
+        return True  # don't block registration just because email isn't configured
+    public_base = (os.getenv("PUBLIC_APP_URL") or "https://autotax.cloud").rstrip("/")
+    verify_url = f"{public_base}/auth/verify-email?token={token}"
+    sender = (os.getenv("RESEND_FROM") or "AutoTax <noreply@autotax.cloud>").strip()
+    subject = "AutoTax — Bitte bestätige deine E-Mail-Adresse"
+    html = f"""<!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111">
+<h2 style="color:#10b981;margin:0 0 16px">Willkommen bei AutoTax!</h2>
+<p>Danke für deine Registrierung. Klicke auf den Button unten, um deine E-Mail-Adresse zu bestätigen.</p>
+<p style="margin:24px 0">
+  <a href="{verify_url}" style="background:#10b981;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600">E-Mail bestätigen</a>
+</p>
+<p style="font-size:13px;color:#555">Falls der Button nicht funktioniert, kopiere diesen Link in deinen Browser:</p>
+<p style="font-size:12px;word-break:break-all;background:#f3f4f6;padding:10px;border-radius:6px;color:#374151">{verify_url}</p>
+<p style="font-size:12px;color:#666;margin-top:24px">Dieser Link ist 24 Stunden gültig. Falls du dich nicht registriert hast, kannst du diese E-Mail einfach ignorieren.</p>
+<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+<p style="font-size:11px;color:#9ca3af">AutoTax-Cloud · Hüseyin Hancer · Saarbrücken</p>
+</body></html>"""
+    try:
+        import httpx as _httpx
+        r = _httpx.post(
+            "https://api.resend.com/emails",
+            json={"from": sender, "to": [email], "subject": subject, "html": html},
+            headers={"Authorization": f"Bearer {resend_key}"},
+            timeout=15,
+        )
+        if r.status_code in (200, 201, 202):
+            logger.info("Verification email sent to %s", _mask_email(email))
+            return True
+        logger.warning("Resend verification email returned %d: %s", r.status_code, r.text[:200])
+        return False
+    except Exception:
+        logger.exception("Verification email send failed")
+        return False
+
+
 def _verify_turnstile(token: str, remote_ip: str = "") -> bool:
     """Verify Cloudflare Turnstile token via siteverify API.
     Returns True if valid OR if Turnstile not configured (graceful fallback).
@@ -3926,6 +3967,7 @@ def register(request: Request, body: RegisterRequest):
                 plan=default_plan,
                 trial_ends_at=trial_end,
                 gdpr_consent_at=datetime.now(),
+                email_verified=False,  # New users must verify via email link
             )
         except Exception:
             user = User(email=body.email, hashed_password=hash_password(body.password), full_name=body.full_name)
@@ -3947,8 +3989,16 @@ def register(request: Request, body: RegisterRequest):
         except Exception:
             logger.warning("Could not create company for user — table may not exist yet")
         logger.info("User registered: %s (company: %s)", _mask_email(body.email), comp_name)
+        # Email verification — send link asynchronously (background safe)
+        try:
+            verify_token = create_access_token(user.id, user.email)
+            _send_verification_email(user.email, verify_token)
+        except Exception:
+            logger.exception("Verification email dispatch failed (registration continues)")
         token = create_token(user.id, user.email)
-        return {"success": True, "token": token, "email": user.email}
+        return {"success": True, "token": token, "email": user.email,
+                "email_verified": False,
+                "verify_message": "Wir haben dir einen Bestätigungslink geschickt. Bitte prüfe dein E-Mail-Postfach."}
     except HTTPException:
         raise
     except Exception:
@@ -3999,7 +4049,8 @@ def login(request: Request, body: AuthRequest, response: Response):
         refresh = create_refresh_token(user.id, user.email)
         audit("auth.login_success", user_id=user.id, request=request)
         _set_auth_cookies(response, token, refresh)
-        return {"success": True, "token": token, "refresh_token": refresh, "email": user.email}
+        return {"success": True, "token": token, "refresh_token": refresh, "email": user.email,
+                "email_verified": bool(getattr(user, "email_verified", True))}
     except HTTPException:
         raise
     except Exception:
@@ -5237,6 +5288,86 @@ def change_password(request: Request, body: ChangePasswordRequest, user: dict = 
         db.close()
 
 
+@app.get("/auth/verify-email", response_class=HTMLResponse)
+def auth_verify_email(token: str = Query(...)):
+    """Email verification landing — token'ı doğrular, email_verified=True yapar,
+    sonra kullanıcıyı /app'a yönlendirir. Standalone HTML, hata da gösterir."""
+    try:
+        from autotax.auth import decode_token as _decode
+        payload = _decode(token)
+        user_id = payload.get("sub")
+    except Exception:
+        return HTMLResponse(content=_verify_result_html(False,
+            "Der Bestätigungslink ist ungültig oder abgelaufen.",
+            "Bitte fordere einen neuen Link an, indem du dich anmeldest."), status_code=400)
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == int(user_id)).first()
+        if not u:
+            return HTMLResponse(content=_verify_result_html(False,
+                "Konto nicht gefunden.", "Bitte registriere dich erneut."), status_code=404)
+        if u.email_verified:
+            return HTMLResponse(content=_verify_result_html(True,
+                "Deine E-Mail wurde bereits bestätigt.",
+                "Du kannst dich jetzt anmelden."))
+        u.email_verified = True
+        u.email_verified_at = datetime.now(timezone.utc)
+        db.commit()
+        logger.info("Email verified: user_id=%s email=%s", user_id, _mask_email(u.email))
+        return HTMLResponse(content=_verify_result_html(True,
+            "E-Mail erfolgreich bestätigt! 🎉",
+            "Du wirst gleich zur Anmeldung weitergeleitet."))
+    except Exception:
+        logger.exception("Email verify failed")
+        return HTMLResponse(content=_verify_result_html(False,
+            "Bestätigung fehlgeschlagen.", "Bitte versuche es später erneut."), status_code=500)
+    finally:
+        db.close()
+
+
+def _verify_result_html(ok: bool, title: str, message: str) -> str:
+    color = "#10b981" if ok else "#ef4444"
+    icon = "✓" if ok else "⚠"
+    redirect = '<script>setTimeout(()=>location.href="/app",2500);</script>' if ok else ""
+    return f"""<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>E-Mail bestätigen</title>
+<style>body{{font-family:'DM Sans',Arial,sans-serif;background:#050a12;color:#e8edf5;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}}
+.card{{background:#0f172a;border:1px solid #2a3548;border-radius:14px;padding:48px 32px;width:100%;max-width:420px;text-align:center}}
+.icon{{font-size:48px;color:{color};margin-bottom:16px;line-height:1}}
+h1{{margin:0 0 12px;color:{color};font-size:22px}}
+p{{color:#94a3b8;font-size:14px;line-height:1.6}}
+a{{color:#10b981;font-weight:600;text-decoration:none;display:inline-block;margin-top:16px}}
+</style></head><body>
+<div class="card">
+<div class="icon">{icon}</div>
+<h1>{title}</h1>
+<p>{message}</p>
+<a href="/app">→ Zur Anmeldung</a>
+</div>{redirect}</body></html>"""
+
+
+@app.post("/auth/resend-verification")
+@limiter.limit("3/minute")
+def resend_verification(request: Request, body: dict = Body(...)):
+    """Resend verification email. Same generic response as reset-password
+    (don't leak whether email exists / is already verified)."""
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        err(400, "E-Mail erforderlich")
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.email == email).first()
+        if u and not u.email_verified:
+            verify_token = create_access_token(u.id, u.email)
+            _send_verification_email(u.email, verify_token)
+            logger.info("Verification email RESEND requested for %s", _mask_email(email))
+        elif u and u.email_verified:
+            logger.info("Verification email RESEND skipped (already verified): %s", _mask_email(email))
+        # Generic response — don't reveal existence/verified state
+        return {"success": True, "message": "Falls dein Konto existiert und unbestätigt ist, wurde ein neuer Link geschickt."}
+    finally:
+        db.close()
+
+
 @app.get("/auth/reset", response_class=HTMLResponse)
 def auth_reset_page(token: str = Query(...)):
     """HTML landing page from password-reset email. Accepts token, lets user
@@ -6118,6 +6249,7 @@ def get_account_me(user: dict = Depends(get_acting_context)):
             "trial_days_left": trial_days_left,
             "invoice_count": inv_count,
             "company_name": companies[0].company_name if companies else "",
+            "email_verified": bool(getattr(u, 'email_verified', True)),
         }
     finally:
         db.close()
