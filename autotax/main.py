@@ -398,98 +398,23 @@ def _check_disk_quota(user_id: int, new_file_size: int) -> tuple[bool, int, int]
 # --- ADDED END ---
 
 
-def _mask_email(email: str) -> str:
-    """DSGVO Art. 25 — mask email in logs."""
-    if not email or "@" not in email:
-        return "***"
-    local, domain = email.split("@", 1)
-    return f"{local[:2]}***@{domain}" if len(local) > 2 else f"***@{domain}"
-
-
-def _mask_ip(ip: str) -> str:
-    """DSGVO Art. 25 — anonymize IP in logs."""
-    if not ip:
-        return "***"
-    parts = ip.split(".")
-    if len(parts) == 4:
-        return f"{parts[0]}.{parts[1]}.{parts[2]}.xxx"
-    return ip[:10] + "***"  # IPv6 fallback
-
-
-def ok_list(items, total):
-    return {"success": True, "items": items, "total": total}
+# --- Pure helpers extracted to autotax/helpers.py (Phase 2, 2026-05-27) ---
+# Bu fonksiyonlar artik autotax.helpers icinde. Re-export buradan yapilir
+# ki mevcut main.py icindeki tum cagrilar degisiklik gerektirmeden calissin.
+from autotax.helpers import (
+    _mask_email, _mask_ip,
+    safe_str, safe_float, safe_vat_rate, safe_category,
+    safe_invoice_type, safe_date_str, safe_vendor,
+    csv_safe, _CSV_FORMULA_CHARS,
+    parse_vat_rate_float, calc_vat,
+    ok_list,
+)
 
 
 def err(status: int, msg: str):
+    """Standard error response (FastAPI HTTPException). Stays in main.py
+    because it depends on FastAPI's HTTPException type."""
     raise HTTPException(status_code=status, detail={"success": False, "error": msg})
-
-
-def safe_str(val, default=""):
-    return val if val is not None else default
-
-
-# OWASP CSV Injection / Formula Injection prevention.
-# Excel & LibreOffice treat cells starting with =, +, -, @, \t, \r as formulas
-# -> can execute code or leak data when victim opens the exported file.
-# Prefix with single quote (Excel literal marker) to neutralize.
-_CSV_FORMULA_CHARS = ("=", "+", "-", "@", "\t", "\r")
-
-
-def csv_safe(val):
-    """Sanitize a value before writing into CSV/XLSX cells. Returns str."""
-    s = "" if val is None else str(val)
-    if s and s[0] in _CSV_FORMULA_CHARS:
-        return "'" + s
-    return s
-
-
-def safe_float(val, default=0.0):
-    return val if val is not None else default
-
-
-def safe_vat_rate(val):
-    return val if val else "0%"
-
-
-def safe_vendor(val):
-    if not val:
-        return "Unbekannt"
-    # Strip everything except ASCII printable + German/European letters
-    import re as _sre
-    cleaned = _sre.sub(r'[^\x20-\x7EäöüÄÖÜßàáâãèéêëìíîïòóôùúûçñÀÁÂÃÈÉÊËÌÍÎÏÒÓÔÙÚÛÇÑ]', '', str(val))
-    # Collapse multiple spaces
-    cleaned = _sre.sub(r'\s{2,}', ' ', cleaned).strip()
-    return cleaned or "Unbekannt"
-
-
-def safe_category(val):
-    return val if val else "other"
-
-
-def safe_invoice_type(val):
-    return val if val in ("income", "expense") else "expense"
-
-
-def safe_date_str(val):
-    if not val:
-        return ""
-    return val
-
-
-def parse_vat_rate_float(vat_rate_str):
-    try:
-        return float((vat_rate_str or "0").replace("%", ""))
-    except (ValueError, TypeError):
-        return 0.0
-
-
-def calc_vat(gross, vat_rate_str):
-    if not gross:
-        return 0.0
-    rate = parse_vat_rate_float(vat_rate_str)
-    if rate <= 0:
-        return 0.0
-    return round(gross * rate / (100 + rate), 2)
 
 
 def _fuzzy_match(a: str, b: str, threshold: float = 0.75) -> bool:
