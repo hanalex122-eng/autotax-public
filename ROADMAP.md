@@ -254,6 +254,33 @@ TOPLAM SİSTEM:                               ██████░░░░  65
 
 ---
 
+# 🧭 Çalışma prensipleri (2026-05-27 user direktifi)
+
+Bu prensipler her sprint'te bağlayıcıdır:
+
+1. **Küçük güvenli commit'ler** — Bir commit = bir değişiklik. Rollback kolay.
+2. **Her değişiklik sonrası test** — Manual veya CI (test workflow var). En azından `/health` doğrula.
+3. **main.py'ı modüllere böl** — ~12k satır, parça parça (file-by-file). Hiçbir commit'te tek seferde 1000+ satır taşıma.
+4. **Mobile UX iyileştir** — Responsive iyileştirmeler, PWA service worker (S6+).
+5. **Berber/dönerci workflow optimize** — DSFinV-K import + industry preset (S4'te).
+6. **AI tax advisor geliştir** — `/steuer/ask` + ai_knowledge cache iyileştirme.
+7. **WISO benzeri tax filing system** — Phase 9 (Steuererklärung) ana hedef.
+8. **Soft launch'a zarar verecek büyük refactor YAPMA** — KIRMIZI çizgi.
+
+### Karar matrisi her değişiklik öncesi
+
+- **GO:** Backward compat + <30 dk + rollback path net + production-safe.
+- **ASK:** >30 dk veya production-breaking riski var.
+- **STOP:** Soft launch'ı geciktirir.
+
+### Berber pilot — şimdilik kapalı
+Berber sadece Kasse ile ilgileniyor, AutoTax Kasse sistemi yok. DSFinV-K
+parser (Phase 1 / S4) bitince yeniden konuşulacak. Şimdilik **Phase 9
+Steuererklärung modülü** öncelikli — AI Steuer €89/ay planının gerçek
+satış argümanı.
+
+---
+
 # 🎯 Sprint S0 — LIVE (BUGÜN/YARIN, 4-6 saat kalan)
 
 Bu sprint **soft launch** için gerekli minimum. Şu an %85 bitik.
