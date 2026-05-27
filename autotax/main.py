@@ -417,14 +417,13 @@ def err(status: int, msg: str):
     raise HTTPException(status_code=status, detail={"success": False, "error": msg})
 
 
-def _fuzzy_match(a: str, b: str, threshold: float = 0.75) -> bool:
-    if not a or not b:
-        return False
-    a, b = a.lower().replace(" ", ""), b.lower().replace(" ", "")
-    if a == b or a in b or b in a:
-        return True
-    common = sum(1 for c in a if c in b)
-    return common / max(len(a), len(b)) >= threshold
+# --- Validators / extractors moved to autotax/validators.py (Phase 2.3, 2026-05-27) ---
+from autotax.validators import (
+    _fuzzy_match,
+    _extract_first_iban, _extract_first_phone, _extract_first_address,
+    _safe_json_list,
+    _MAGIC_BYTES, _validate_file_magic,
+)
 
 
 def parse_date_str_to_datetime(date_str):
@@ -688,21 +687,7 @@ def auto_create_cash_entry(invoice_id: int, user_id: int, data: dict):
         db.close()
 
 
-# --- ADDED START: quick entity extractors for invoice_to_dict ---
-import re as _re_global
-
-def _extract_first_iban(text):
-    m = _re_global.search(r"\b([A-Z]{2}\s?\d{2}\s?(?:\d{4}\s?){2,7}\d{1,4})\b", text.upper())
-    return m.group(1).replace(" ", "") if m else ""
-
-def _extract_first_phone(text):
-    m = _re_global.search(r"(?:tel\.?|fon|phone|fax)\s*:?\s*([\d\s/\-+]{6,20})", text, _re_global.IGNORECASE)
-    return m.group(1).strip() if m else ""
-
-def _extract_first_address(text):
-    m = _re_global.search(r"(\d{4,5}\s+[A-ZÄÖÜ][a-zäöüß]{2,}(?:\s+[A-ZÄÖÜ][a-zäöüß]{2,})?)", text)
-    return m.group(1).strip() if m else ""
-# --- ADDED END ---
+# --- _extract_first_* / _re_global moved to autotax.validators (Phase 2.3) ---
 
 def invoice_to_dict(i):
     return {
@@ -759,18 +744,7 @@ def invoice_to_dict(i):
     }
 
 
-def _safe_json_list(raw):
-    """JSON string'den liste cikar, hata varsa []."""
-    if not raw:
-        return []
-    if isinstance(raw, list):
-        return raw
-    try:
-        import json as _j
-        v = _j.loads(raw)
-        return v if isinstance(v, list) else []
-    except Exception:
-        return []
+# --- _safe_json_list moved to autotax.validators (Phase 2.3) ---
 
 
 def cash_entry_to_dict(e):
@@ -3715,28 +3689,7 @@ ALLOWED_TYPES = {"application/pdf", "image/jpeg", "image/jpg", "image/png", "ima
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 # Magic bytes for file type validation (prevents fake content_type)
-_MAGIC_BYTES = {
-    b"\xff\xd8\xff": "image/jpeg",
-    b"\x89PNG": "image/png",
-    b"%PDF": "application/pdf",
-    b"II\x2a\x00": "image/tiff",  # little-endian TIFF
-    b"MM\x00\x2a": "image/tiff",  # big-endian TIFF
-    b"RIFF": "image/webp",        # WebP starts with RIFF
-    b"PK\x03\x04": "application/zip",  # ZIP archive
-}
-
-
-def _validate_file_magic(content: bytes, claimed_type: str) -> bool:
-    """Check if file content matches claimed MIME type via magic bytes."""
-    if not content or len(content) < 4:
-        return False
-    # HEIC/HEIF have complex headers — trust content_type for those
-    if "heic" in claimed_type or "heif" in claimed_type:
-        return True
-    for magic, mime in _MAGIC_BYTES.items():
-        if content[:len(magic)] == magic:
-            return True
-    return False
+# --- _MAGIC_BYTES + _validate_file_magic moved to autotax.validators (Phase 2.3) ---
 
 
 # ============================================================
