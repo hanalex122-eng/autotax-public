@@ -83,23 +83,32 @@ try:
         return event
 
     _sentry_dsn = os.environ.get("SENTRY_DSN", "").strip()
-    if _sentry_dsn:
-        sentry_sdk.init(
-            dsn=_sentry_dsn,
-            environment=os.environ.get("RAILWAY_ENVIRONMENT", "production"),
-            integrations=[
-                FastApiIntegration(),
-                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
-            ],
-            traces_sample_rate=0.1,
-            profiles_sample_rate=0.0,  # CPU profili Railway free'de gereksiz
-            send_default_pii=False,
-            before_send=_scrub_event,
-            release=(os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:7] or "dev",
-        )
-        logger.info("Sentry initialized: env=%s release=%s",
-                    os.environ.get("RAILWAY_ENVIRONMENT", "production"),
-                    (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:7])
+    # Defensive: only init if DSN is a valid-looking https/http URL.
+    # Boş string veya kotu format -> Sentry SDK BadDsn atip butun app'i cokmesini
+    # engelle (2026-05-27 incident: bos DSN ile container crash loop'a girdi).
+    if _sentry_dsn and (_sentry_dsn.startswith("https://") or _sentry_dsn.startswith("http://")):
+        try:
+            sentry_sdk.init(
+                dsn=_sentry_dsn,
+                environment=os.environ.get("RAILWAY_ENVIRONMENT", "production"),
+                integrations=[
+                    FastApiIntegration(),
+                    LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+                ],
+                traces_sample_rate=0.1,
+                profiles_sample_rate=0.0,  # CPU profili Railway free'de gereksiz
+                send_default_pii=False,
+                before_send=_scrub_event,
+                release=(os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:7] or "dev",
+            )
+            logger.info("Sentry initialized: env=%s release=%s",
+                        os.environ.get("RAILWAY_ENVIRONMENT", "production"),
+                        (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:7])
+        except Exception:
+            # Sentry DSN yanlis bile olsa app boot etmeli — never crash boot for telemetry.
+            logger.exception("Sentry init failed — app will continue without error tracking")
+    elif _sentry_dsn:
+        logger.warning("SENTRY_DSN set but invalid (must start with https://) — Sentry disabled")
 except ImportError:
     pass  # sentry-sdk yüklü değil — sessizce atla
 
