@@ -3558,22 +3558,8 @@ def admin_user_details(user_id: int, user: dict = Depends(get_current_user)):
         db.close()
 
 
-# DATEV Konto mapping (Ausgaben)
-_DATEV_KONTO_MAP = {
-    "food": "6800", "groceries": "6800", "restaurant": "6640",
-    "fuel": "6670", "transport": "6673",
-    "office": "6815", "software": "6815", "subscription": "6815",
-    "telecom": "6805", "shipping": "6810",
-    "electronics": "6800", "shopping": "6800",
-    "insurance": "6400", "health": "6800", "medical": "6800",
-    "home": "6800", "clothing": "6800",
-    "other": "6800",
-}
-# DATEV Konto mapping (Einnahmen)
-_DATEV_KONTO_MAP_INCOME = {
-    "other": "8400", "food": "8400", "electronics": "8400",
-    "software": "8400", "shopping": "8400",
-}
+# --- DATEV Konto mappings moved to autotax/datev.py (Phase 2.4, 2026-05-27) ---
+from autotax.datev import _DATEV_KONTO_MAP, _DATEV_KONTO_MAP_INCOME
 
 def calculate_dashboard_metrics(user_id: int, year: int = None):
     """Shared function: compute dashboard metrics from invoices table.
