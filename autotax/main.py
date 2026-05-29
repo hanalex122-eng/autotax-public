@@ -3841,29 +3841,8 @@ def register(request: Request, body: RegisterRequest):
         db.close()
 
 
-def _set_auth_cookies(response: Response, access_token: str, refresh_token: str):
-    """Sprint 1: HttpOnly cookie dual mode (Aşama A).
-    Response body'de hala token döner — frontend backward compat.
-    Aşama B'de frontend cookie'ye geçer, body'den token kaldırılır."""
-    is_https = (os.environ.get("PUBLIC_APP_URL", "").startswith("https://")
-                or os.environ.get("RAILWAY_ENVIRONMENT") == "production")
-    response.set_cookie(
-        key="atx_token", value=access_token,
-        httponly=True, secure=is_https, samesite="strict",
-        max_age=3600,  # 1 saat (access token süresi)
-        path="/",
-    )
-    response.set_cookie(
-        key="atx_refresh", value=refresh_token,
-        httponly=True, secure=is_https, samesite="strict",
-        max_age=7 * 24 * 3600,  # 7 gün
-        path="/",
-    )
-
-
-def _clear_auth_cookies(response: Response):
-    response.delete_cookie("atx_token", path="/")
-    response.delete_cookie("atx_refresh", path="/")
+# --- Auth cookie helpers moved to autotax/cookies.py (Phase 2.7, 2026-05-29) ---
+from autotax.cookies import _set_auth_cookies, _clear_auth_cookies
 
 
 @app.post("/auth/login")
