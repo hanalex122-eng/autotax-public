@@ -873,6 +873,61 @@ async def shutdown_reminders():
         _reminder_task.cancel()
 
 
+@app.get("/health/turnstile")
+def health_turnstile():
+    """Diagnostic: shows whether Turnstile env is configured and live-tests
+    the secret key against Cloudflare. NOT FOR PRODUCTION USE — safe to
+    leave in: no secrets are exposed (only lengths + prefixes + error codes
+    that Cloudflare itself returns publicly)."""
+    site_key = (
+        os.getenv("TURNSTILE_SITE_KEY")
+        or os.getenv("CLOUDFLARE_TURNSTILE_SITE_KEY")
+        or ""
+    ).strip()
+    secret_key = (
+        os.getenv("TURNSTILE_SECRET_KEY")
+        or os.getenv("CLOUDFLARE_TURNSTILE_SECRET_KEY")
+        or ""
+    ).strip()
+    site_source = "TURNSTILE_SITE_KEY" if os.getenv("TURNSTILE_SITE_KEY") else (
+        "CLOUDFLARE_TURNSTILE_SITE_KEY" if os.getenv("CLOUDFLARE_TURNSTILE_SITE_KEY") else "none"
+    )
+    secret_source = "TURNSTILE_SECRET_KEY" if os.getenv("TURNSTILE_SECRET_KEY") else (
+        "CLOUDFLARE_TURNSTILE_SECRET_KEY" if os.getenv("CLOUDFLARE_TURNSTILE_SECRET_KEY") else "none"
+    )
+    result = {
+        "site_key_set": bool(site_key),
+        "site_key_length": len(site_key),
+        "site_key_prefix": site_key[:15] if site_key else "",
+        "site_key_source_env": site_source,
+        "secret_key_set": bool(secret_key),
+        "secret_key_length": len(secret_key),
+        "secret_key_prefix": secret_key[:15] if secret_key else "",
+        "secret_key_source_env": secret_source,
+    }
+    # Live-test: ask Cloudflare to verify an empty token. We expect a
+    # `missing-input-response` error code if our secret key is RECOGNIZED,
+    # but `invalid-input-secret` if the secret key itself is bad. This way
+    # we can distinguish "wrong secret" from "wrong token".
+    if secret_key:
+        try:
+            import httpx
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.post(
+                    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                    data={"secret": secret_key, "response": "test-empty"},
+                )
+                data = resp.json()
+                result["cloudflare_test_response"] = {
+                    "http_status": resp.status_code,
+                    "success": data.get("success"),
+                    "error_codes": data.get("error-codes"),
+                }
+        except Exception as e:
+            result["cloudflare_test_response"] = {"exception": str(e)[:200]}
+    return result
+
+
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     """Health check — UptimeRobot ve benzeri monitor'lar HEAD kullaniyor.
