@@ -1139,7 +1139,11 @@ def api_config():
     cfg = dict(FEATURES)
     # Public-safe Turnstile site key (frontend widget needs this).
     # Site keys are PUBLIC by design (Cloudflare; not a secret).
-    cfg["turnstile_site_key"] = (os.getenv("TURNSTILE_SITE_KEY") or "").strip()
+    cfg["turnstile_site_key"] = (
+        os.getenv("TURNSTILE_SITE_KEY")
+        or os.getenv("CLOUDFLARE_TURNSTILE_SITE_KEY")
+        or ""
+    ).strip()
     return cfg
 
 
@@ -3709,7 +3713,11 @@ def _verify_turnstile(token: str, remote_ip: str = "") -> bool:
     """Verify Cloudflare Turnstile token via siteverify API.
     Returns True if valid OR if Turnstile not configured (graceful fallback).
     Returns False ONLY when configured + verification fails."""
-    secret = (os.getenv("TURNSTILE_SECRET_KEY") or "").strip()
+    secret = (
+        os.getenv("TURNSTILE_SECRET_KEY")
+        or os.getenv("CLOUDFLARE_TURNSTILE_SECRET_KEY")
+        or ""
+    ).strip()
     if not secret:
         # Turnstile not configured — accept all (legacy behavior)
         return True
