@@ -42,8 +42,17 @@ FEATURES: dict[str, bool | str] = {
 
 def features_js_literal() -> str:
     """JSON-serialise the FEATURES dict so it can be embedded into the
-    served HTML as `window.FEATURES = {...};`."""
-    return json.dumps(FEATURES, ensure_ascii=False)
+    served HTML as `window.FEATURES = {...};`. Adds runtime-resolved
+    public values (Turnstile site key) that aren't in the static dict."""
+    payload = dict(FEATURES)
+    # Public-safe Cloudflare Turnstile site key — needed by the SPA to
+    # render the CAPTCHA widget. Site keys are public by design (Cloudflare).
+    payload["turnstile_site_key"] = (
+        os.getenv("TURNSTILE_SITE_KEY")
+        or os.getenv("CLOUDFLARE_TURNSTILE_SITE_KEY")
+        or ""
+    ).strip()
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # --------------------------- landing copy ------------------------------
