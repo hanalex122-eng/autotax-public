@@ -3696,45 +3696,13 @@ class RegisterRequest(BaseModel):
     turnstile_token: Optional[str] = None  # Cloudflare Turnstile CAPTCHA token (frontend widget)
 
 
-def _send_verification_email(email: str, token: str) -> bool:
-    """Send email-verification link via Resend. Returns True on send, False on error.
-    No-op (returns True) if RESEND_API_KEY not set (graceful degradation)."""
-    resend_key = (os.getenv("RESEND_API_KEY") or "").strip()
-    if not resend_key:
-        logger.warning("Verification email skipped: RESEND_API_KEY not set")
-        return True  # don't block registration just because email isn't configured
-    public_base = (os.getenv("PUBLIC_APP_URL") or "https://autotax.cloud").rstrip("/")
-    verify_url = f"{public_base}/auth/verify-email?token={token}"
-    sender = (os.getenv("RESEND_FROM") or "AutoTax <noreply@autotax.cloud>").strip()
-    subject = "AutoTax — Bitte bestätige deine E-Mail-Adresse"
-    html = f"""<!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111">
-<h2 style="color:#10b981;margin:0 0 16px">Willkommen bei AutoTax!</h2>
-<p>Danke für deine Registrierung. Klicke auf den Button unten, um deine E-Mail-Adresse zu bestätigen.</p>
-<p style="margin:24px 0">
-  <a href="{verify_url}" style="background:#10b981;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:600">E-Mail bestätigen</a>
-</p>
-<p style="font-size:13px;color:#555">Falls der Button nicht funktioniert, kopiere diesen Link in deinen Browser:</p>
-<p style="font-size:12px;word-break:break-all;background:#f3f4f6;padding:10px;border-radius:6px;color:#374151">{verify_url}</p>
-<p style="font-size:12px;color:#666;margin-top:24px">Dieser Link ist 24 Stunden gültig. Falls du dich nicht registriert hast, kannst du diese E-Mail einfach ignorieren.</p>
-<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
-<p style="font-size:11px;color:#9ca3af">AutoTax-Cloud · Hüseyin Hancer · Saarbrücken</p>
-</body></html>"""
-    try:
-        import httpx as _httpx
-        r = _httpx.post(
-            "https://api.resend.com/emails",
-            json={"from": sender, "to": [email], "subject": subject, "html": html},
-            headers={"Authorization": f"Bearer {resend_key}"},
-            timeout=15,
-        )
-        if r.status_code in (200, 201, 202):
-            logger.info("Verification email sent to %s", _mask_email(email))
-            return True
-        logger.warning("Resend verification email returned %d: %s", r.status_code, r.text[:200])
-        return False
-    except Exception:
-        logger.exception("Verification email send failed")
-        return False
+# --- Notification helpers moved to autotax/notifications.py (Phase 2.6, 2026-05-29) ---
+from autotax.notifications import (
+    _send_resend_email,
+    _send_verification_email,
+    _send_password_reset_email,
+    _send_telegram_message,
+)
 
 
 def _verify_turnstile(token: str, remote_ip: str = "") -> bool:
