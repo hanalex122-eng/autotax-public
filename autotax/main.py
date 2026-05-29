@@ -3717,12 +3717,20 @@ def _verify_turnstile(token: str, remote_ip: str = "") -> bool:
         return False
     try:
         import httpx
+        payload = {"secret": secret, "response": token}
+        # Only send remoteip if it looks like a real IP — masked/empty values
+        # cause Cloudflare to return invalid-input errors.
+        if remote_ip and remote_ip.replace(".", "").replace(":", "").isalnum() and "xxx" not in remote_ip:
+            payload["remoteip"] = remote_ip
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(
                 "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                data={"secret": secret, "response": token, "remoteip": remote_ip},
+                data=payload,
             )
             data = resp.json()
+            if not data.get("success"):
+                # Log the rejection reason so future failures surface immediately.
+                logger.warning("Turnstile verify rejected: %s", data.get("error-codes"))
             return bool(data.get("success"))
     except Exception:
         logger.exception("Turnstile verify failed")
@@ -3737,8 +3745,10 @@ def register(request: Request, body: RegisterRequest):
     if not body.gdpr_consent:
         err(400, "Datenschutzerklärung muss akzeptiert werden (DSGVO Art. 6)")
     # CAPTCHA verification (no-op if TURNSTILE_SECRET_KEY not set)
-    client_ip = _mask_ip(request.client.host) if request.client else ""
-    if not _verify_turnstile(body.turnstile_token or "", client_ip):
+    # NOTE: Cloudflare siteverify needs the REAL client IP (not masked) — masked
+    # IPs are rejected as invalid-input. Logging still uses masked IP.
+    real_ip = request.client.host if request.client else ""
+    if not _verify_turnstile(body.turnstile_token or "", real_ip):
         err(400, "CAPTCHA-Überprüfung fehlgeschlagen. Bitte erneut versuchen.")
     if len(body.password) < 8:
         err(400, "Password must be at least 8 characters")
