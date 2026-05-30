@@ -620,3 +620,36 @@ class TaxDeclaration(Base):
         UniqueConstraint("user_id", "year", name="uq_tax_decl_user_year"),
         Index("ix_tax_decl_user_year", "user_id", "year"),
     )
+
+
+class CashRegisterImport(Base):
+    """One DSFinV-K / Speedy Kasse / generic CSV upload from a customer's
+    cash register. Each upload spawns N CashEntry rows.
+
+    Idempotency via sha256 of the raw file: re-uploading same file is a no-op.
+    Source field flags parser used (generic | speedy | dsfinvk). See
+    autotax/kasse.py for parsing logic + .claude/kasse_plan.md for scope.
+    """
+    __tablename__ = "cash_register_imports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    source = Column(String(20), default="generic", nullable=False)
+    file_name = Column(String, nullable=True)
+    file_sha256 = Column(String(64), nullable=True, index=True)
+    period_start = Column(Date, nullable=True)
+    period_end = Column(Date, nullable=True)
+    total_rows = Column(Integer, default=0)
+    total_amount = Column(Float, default=0.0)
+    total_vat = Column(Float, default=0.0)
+    rows_imported = Column(Integer, default=0)
+    rows_skipped = Column(Integer, default=0)
+    status = Column(String(20), default="pending", nullable=False)
+    error_message = Column(Text, nullable=True)
+    raw_csv_excerpt = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_cri_user_created", "user_id", "created_at"),
+        UniqueConstraint("user_id", "file_sha256", name="uq_cri_user_sha"),
+    )
