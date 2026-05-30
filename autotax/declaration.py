@@ -142,6 +142,23 @@ FORM_SECTIONS = [
         ],
     },
     {
+        "key": "anlage_kind",
+        "title_de": "Anlage Kind (optional)",
+        "title_tr": "Anlage Kind — Çocuklar (varsa, opsiyonel)",
+        "is_repeated_array": True,  # frontend renders dynamic list
+        "array_key": "kinder",      # field name in data dict
+        "fields": [
+            # Per-child schema — used by frontend to render row inputs
+            {"key": "vorname",         "label_de": "Vorname",            "label_tr": "Ad",                  "type": "text", "required": True},
+            {"key": "geburtsdatum",    "label_de": "Geburtsdatum",       "label_tr": "Doğum tarihi",        "type": "date", "required": True},
+            {"key": "steuer_id",       "label_de": "Steuer-ID (optional)", "label_tr": "Vergi kimlik (ops.)", "type": "text", "required": False, "pattern": r"^\d{11}$"},
+            {"key": "kindergeld",      "label_de": "Kindergeld bezogen",  "label_tr": "Kindergeld alındı mı", "type": "select", "required": True,
+             "options": [{"v":"ja","de":"Ja","tr":"Evet"},{"v":"nein","de":"Nein","tr":"Hayır"}]},
+            {"key": "shared_custody",  "label_de": "Geteiltes Sorgerecht (50/50)", "label_tr": "Ortak velayet (50/50)", "type": "select", "required": False,
+             "options": [{"v":"nein","de":"Nein","tr":"Hayır"},{"v":"ja","de":"Ja","tr":"Evet"}]},
+        ],
+    },
+    {
         "key": "anlage_sonderausgaben",
         "title_de": "Sonderausgaben & §35a (haushaltsnahe)",
         "title_tr": "Özel giderler + §35a (ev hizmetleri)",
@@ -198,8 +215,12 @@ FORM_SECTIONS = [
 
 
 def _flat_fields() -> list[dict]:
+    """Flat list of fields for validation — SKIPS repeated-array sections
+    (those are validated per-row by the frontend)."""
     out: list[dict] = []
     for section in FORM_SECTIONS:
+        if section.get("is_repeated_array"):
+            continue
         for f in section["fields"]:
             out.append({**f, "section": section["key"]})
     return out
@@ -775,6 +796,32 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
         c.drawString(margin_l + 0.3 * cm, y,
                      f"Überschuss Vermietung: {v_net:.2f} €")
         y -= 0.8 * cm
+
+    # ─── Section: ANLAGE KIND (children) ───
+    kinder = data.get("kinder") or []
+    if isinstance(kinder, list) and kinder:
+        y = ensure_space(y, 4 + 1.5 * len(kinder))
+        y = section_band("Anlage Kind — Kinder", y)
+        c.setFillColor(MUTED)
+        c.setFont("Helvetica", 8)
+        c.drawString(margin_l + 0.3 * cm, y,
+                     f"{len(kinder)} Kind(er) — Kindergeld/Kinderfreibetrag")
+        y -= 0.7 * cm
+        for i, k in enumerate(kinder, 1):
+            if not isinstance(k, dict):
+                continue
+            y = ensure_space(y, 1.5 * cm)
+            name = f"{k.get('vorname','')} ({k.get('geburtsdatum','—')})"
+            kg = "✓" if (k.get("kindergeld") == "ja") else "—"
+            sc = "✓" if (k.get("shared_custody") == "ja") else "—"
+            c.setFillColor(INK)
+            c.setFont("Helvetica-Bold", 9)
+            c.drawString(margin_l + 0.3 * cm, y, f"{i}. {name}")
+            c.setFont("Helvetica", 9)
+            c.drawString(margin_l + 9 * cm, y, f"Kindergeld: {kg}")
+            c.drawString(margin_l + 13 * cm, y, f"Geteilt: {sc}")
+            y -= 0.55 * cm
+        y -= 0.3 * cm
 
     # ─── Section: ANLAGE SONDERAUSGABEN (only if any field filled) ───
     so_keys = ("spenden_geld", "spenden_partei", "steuerberater",

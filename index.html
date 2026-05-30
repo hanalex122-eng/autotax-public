@@ -5078,6 +5078,67 @@ function DeclarationView(){
     </div>}
 
     {decl && schema && schema.map(section=>(
+      section.is_repeated_array ? (
+        // Dynamic children-array section
+        <div key={section.key} style={{marginBottom:isMobile?14:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:isMobile?14:20}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+            <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"var(--accent)"}}>
+              {_l==="tr"?section.title_tr:section.title_de}
+            </h3>
+            <button onClick={()=>{
+              const list=(decl.data||{})[section.array_key]||[];
+              const newList=[...list,{vorname:"",geburtsdatum:"",kindergeld:"ja",shared_custody:"nein"}];
+              updateField(section.array_key,newList);
+            }} style={{padding:"6px 12px",background:"linear-gradient(135deg,#10b981,#059669)",border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              + {tr("Kind hinzufügen","Add child","Çocuk ekle")}
+            </button>
+          </div>
+          {((decl.data||{})[section.array_key]||[]).length===0 ? (
+            <div style={{padding:20,color:"var(--text-muted)",textAlign:"center",fontSize:13,fontStyle:"italic"}}>
+              {tr("Noch keine Kinder hinzugefügt. Falls du Kinder hast, klick oben + hinzufügen.",
+                  "No children added. If you have children, click + above.",
+                  "Henüz çocuk eklenmedi. Çocuğunuz varsa yukarıdan + ekleyin.")}
+            </div>
+          ) : (
+            ((decl.data||{})[section.array_key]||[]).map((row,idx)=>(
+              <div key={idx} style={{padding:14,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <strong style={{fontSize:13,color:"var(--text-muted)"}}>👶 {tr("Kind","Child","Çocuk")} #{idx+1}</strong>
+                  <button onClick={()=>{
+                    const list=[...((decl.data||{})[section.array_key]||[])];
+                    list.splice(idx,1);
+                    updateField(section.array_key,list);
+                  }} style={{background:"transparent",border:"1px solid #ef4444",color:"#ef4444",padding:"4px 10px",borderRadius:6,fontSize:11,cursor:"pointer"}}>
+                    {tr("Entfernen","Remove","Sil")}
+                  </button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:10}}>
+                  {section.fields.map(f=>(
+                    <div key={f.key} style={{display:"flex",flexDirection:"column",gap:4}}>
+                      <label style={{fontSize:11,color:"var(--text-muted)",fontWeight:500}}>{_l==="tr"?f.label_tr:f.label_de}</label>
+                      {f.type==="select" ? (
+                        <select value={row[f.key]||""} onChange={e=>{
+                          const list=[...((decl.data||{})[section.array_key]||[])];
+                          list[idx]={...list[idx],[f.key]:e.target.value};
+                          updateField(section.array_key,list);
+                        }} style={{padding:M.inputPad,background:"var(--card)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontSize:M.inputSize,minHeight:isMobile?44:"auto"}}>
+                          {(f.options||[]).map(o=><option key={o.v} value={o.v}>{_l==="tr"?o.tr:o.de}</option>)}
+                        </select>
+                      ) : (
+                        <input type={f.type==="date"?"date":"text"} value={row[f.key]||""} onChange={e=>{
+                          const list=[...((decl.data||{})[section.array_key]||[])];
+                          list[idx]={...list[idx],[f.key]:e.target.value};
+                          updateField(section.array_key,list);
+                        }} style={{padding:M.inputPad,background:"var(--card)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontSize:M.inputSize,fontFamily:"inherit",minHeight:isMobile?44:"auto"}}/>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
       <div key={section.key} style={{marginBottom:isMobile?14:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:isMobile?14:20}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
           <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"var(--accent)"}}>
@@ -5124,6 +5185,7 @@ function DeclarationView(){
           })}
         </div>
       </div>
+      )
     ))}
 
     {showEur && <EurDetailModal year={year} onClose={()=>setShowEur(false)} tr={tr}/>}
