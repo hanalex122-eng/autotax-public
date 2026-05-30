@@ -2718,6 +2718,56 @@ def declaration_pdf(request: Request, year: int, user: dict = Depends(get_acting
     )
 
 
+@app.post("/steuer/document/extract")
+@limiter.limit("10/minute")
+async def steuer_document_extract(
+    request: Request,
+    file: UploadFile = File(...),
+    doc_type: Optional[str] = Query(None, description="hint: lohnsteuerbescheinigung|rentenbescheid|versicherungsnachweis|spendenbescheinigung|generic"),
+    user: dict = Depends(get_acting_context),
+):
+    """Phase 3 — AI extraction of a tax document (LSB, Rentenbescheid, etc.).
+
+    Body: multipart upload (PDF or image, <=8MB).
+    Query: ?doc_type=lohnsteuerbescheinigung (or other supported key).
+    Returns: {extraction: {...}, suggested_fields: {...}, confidence: 0.0..1.0}
+
+    Frontend uses suggested_fields to pre-fill the declaration form. Apply
+    is done via the existing PATCH /steuer/declaration/{year}.
+    """
+    from autotax.tax_doc_ocr import (
+        extract_tax_document, declaration_fields_from_extraction, is_configured,
+    )
+    _require_steuer_declaration_access(user)
+    if not is_configured():
+        raise HTTPException(status_code=503, detail="AI OCR nicht konfiguriert")
+    raw = await file.read()
+    if not raw or len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Datei fehlt oder >8MB")
+    media_type = (file.content_type or "application/octet-stream").lower()
+    if media_type == "application/octet-stream":
+        # Guess from filename
+        name = (file.filename or "").lower()
+        if name.endswith(".pdf"):
+            media_type = "application/pdf"
+        elif name.endswith(".png"):
+            media_type = "image/png"
+        elif name.endswith((".jpg", ".jpeg")):
+            media_type = "image/jpeg"
+    extraction = await extract_tax_document(raw, media_type, doc_type_hint=doc_type)
+    if not extraction:
+        raise HTTPException(status_code=502, detail="Extraktion fehlgeschlagen")
+    suggested = declaration_fields_from_extraction(extraction)
+    confidence = float(extraction.get("confidence") or 0.0)
+    return {
+        "extraction": extraction,
+        "suggested_fields": suggested,
+        "confidence": confidence,
+        "auto_apply_threshold": 0.85,
+        "confirm_threshold": 0.7,
+    }
+
+
 @app.post("/admin/steuer/run-now")
 async def admin_run_steuer_now(user: dict = Depends(get_current_user)):
     """Manuel steuer reminder cycle (test icin)."""
