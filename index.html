@@ -5289,7 +5289,12 @@ function DeclarationView(){
       </div>);
     })()}
 
-    {decl && schema && schema.map(section=>(
+    {decl && schema && schema.filter(section=>{
+      // Conditional rendering: hide section if its trigger field doesn't match
+      if(!section.conditional_on)return true;
+      const cur=(decl.data||{})[section.conditional_on.field];
+      return cur===section.conditional_on.value;
+    }).map(section=>(
       section.is_repeated_array ? (
         // Dynamic children-array section
         <div key={section.key} style={{marginBottom:isMobile?14:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:isMobile?14:20}}>

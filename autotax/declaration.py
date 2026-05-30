@@ -66,12 +66,49 @@ FORM_SECTIONS = [
              "options": [{"v": "ledig", "de": "Ledig", "tr": "Bekar"}, {"v": "verheiratet", "de": "Verheiratet", "tr": "Evli"}, {"v": "geschieden", "de": "Geschieden", "tr": "Boşanmış"}, {"v": "verwitwet", "de": "Verwitwet", "tr": "Dul"}],
              "hint_de": "Status zum 31.12. des Steuerjahres. Verheiratet → Splittingtarif möglich.",
              "hint_tr": "Vergi yılı 31.12 itibarıyla durum. Evli → Splittingtarif olası."},
+            {"key": "steuerklasse",   "label_de": "Steuerklasse (1-6)",            "label_tr": "Vergi sınıfı (1-6)",                  "type": "select", "required": False, "zeile_de": "LSB Zeile 7",
+             "options": [{"v":"","de":"—","tr":"—"},{"v":"1","de":"I (ledig)","tr":"I (bekar)"},{"v":"2","de":"II (alleinerziehend)","tr":"II (yalnız ebeveyn)"},{"v":"3","de":"III (verh. höherer Verdiener)","tr":"III (evli üst gelir)"},{"v":"4","de":"IV (verh. gleich)","tr":"IV (evli eşit)"},{"v":"5","de":"V (verh. niedrigerer)","tr":"V (evli alt gelir)"},{"v":"6","de":"VI (Zweitjob)","tr":"VI (ikinci iş)"}],
+             "hint_de": "Aus deiner Lohnsteuerbescheinigung (Zeile 7). III/V = klassische Ehe-Kombi, IV/IV ähnliche Verdienste.",
+             "hint_tr": "Lohnsteuerbescheinigung'dan (Zeile 7). III/V evli klasik kombo, IV/IV eşit gelirlerde."},
             {"key": "iban",           "label_de": "IBAN (Erstattung)",             "label_tr": "IBAN (iade için)",                    "type": "text",   "required": True,  "pattern": r"^DE\d{20}$", "zeile_de": "Zeile 23",
              "hint_de": "Wohin soll das Finanzamt eine Erstattung überweisen? Nur deutsche IBAN.",
              "hint_tr": "Finanzamt iade tutarı nereye gönderecek? Sadece Alman IBAN."},
             {"key": "kontoinhaber",   "label_de": "Kontoinhaber",                  "label_tr": "Hesap sahibi",                        "type": "text",   "required": True, "zeile_de": "Zeile 24",
              "hint_de": "Name auf dem Konto — bei eigenem Konto: dein Name",
              "hint_tr": "Hesap üstündeki isim — kendi hesabınsa: kendi adın"},
+        ],
+    },
+    {
+        "key": "anlage_ehepartner",
+        "title_de": "Ehepartner (nur bei Zusammenveranlagung)",
+        "title_tr": "Eş bilgileri (sadece birlikte beyan için)",
+        "conditional_on": {"field": "familienstand", "value": "verheiratet"},
+        "fields": [
+            {"key": "spouse_vorname",      "label_de": "Vorname Ehepartner",        "label_tr": "Eş adı",                 "type": "text",   "required": False, "zeile_de": "Zeile 18",
+             "hint_de": "Wie im Personalausweis des Ehepartners.",
+             "hint_tr": "Eşin kimlik kartındaki adı."},
+            {"key": "spouse_nachname",     "label_de": "Nachname Ehepartner",       "label_tr": "Eş soyadı",              "type": "text",   "required": False, "zeile_de": "Zeile 18",
+             "hint_de": "Wie im Personalausweis.",
+             "hint_tr": "Kimlikteki gibi."},
+            {"key": "spouse_geburtsdatum", "label_de": "Geburtsdatum Ehepartner",   "label_tr": "Eş doğum tarihi",        "type": "date",   "required": False, "zeile_de": "Zeile 19",
+             "hint_de": "TT.MM.JJJJ", "hint_tr": "GG.AA.YYYY"},
+            {"key": "spouse_steuer_id",    "label_de": "Steuer-ID Ehepartner (11-stellig)", "label_tr": "Eş vergi kimlik (11 hane)", "type": "text", "required": False, "pattern": r"^\d{11}$", "zeile_de": "Zeile 20",
+             "hint_de": "Vom Bundeszentralamt für Steuern erteilt. Aus dem Schreiben oder Lohnsteuerbescheinigung des Partners.",
+             "hint_tr": "Bundeszentralamt'tan verilir. Eşin LSB veya Schreiben'inden."},
+            {"key": "spouse_religion",     "label_de": "Religion Ehepartner",       "label_tr": "Eş dini",                "type": "select", "required": False, "zeile_de": "Zeile 21",
+             "options": [{"v":"none","de":"Keine","tr":"Yok"},{"v":"ev","de":"Evangelisch","tr":"Evanjelik"},{"v":"rk","de":"Römisch-katholisch","tr":"Katolik"},{"v":"other","de":"Andere","tr":"Diğer"}],
+             "hint_de": "Für Kirchensteuer-Berechnung.",
+             "hint_tr": "Kilise vergisi için."},
+            {"key": "spouse_lohn_brutto",  "label_de": "Bruttoarbeitslohn Ehepartner (€)", "label_tr": "Eş brüt maaş (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 27",
+             "hint_de": "Falls Ehepartner angestellt. Aus seiner/ihrer Lohnsteuerbescheinigung Zeile 3.",
+             "hint_tr": "Eş bordrolu çalışıyorsa LSB Zeile 3."},
+            {"key": "spouse_lohnsteuer",   "label_de": "Lohnsteuer Ehepartner (€)", "label_tr": "Eş Lohnsteuer (€)",     "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 28",
+             "hint_de": "Lohnsteuerbescheinigung Zeile 4.",
+             "hint_tr": "LSB Zeile 4."},
+            {"key": "veranlagungsart",     "label_de": "Veranlagungsart",           "label_tr": "Beyan türü",             "type": "select", "required": False, "zeile_de": "Zeile 24",
+             "options": [{"v":"zusammen","de":"Zusammenveranlagung (Splittingtarif)","tr":"Birlikte beyan (Splitting)"},{"v":"einzeln","de":"Einzelveranlagung","tr":"Ayrı beyan"}],
+             "hint_de": "Zusammenveranlagung: Splittingtarif → meist günstiger. Einzeln nur in Ausnahmefällen.",
+             "hint_tr": "Birlikte beyan: Splitting tarifesi → genelde avantajlı. Ayrı çok ender."},
         ],
     },
     {
@@ -165,7 +202,9 @@ FORM_SECTIONS = [
             # Per-child schema — used by frontend to render row inputs
             {"key": "vorname",         "label_de": "Vorname",            "label_tr": "Ad",                  "type": "text", "required": True, "zeile_de": "Zeile 4"},
             {"key": "geburtsdatum",    "label_de": "Geburtsdatum",       "label_tr": "Doğum tarihi",        "type": "date", "required": True, "zeile_de": "Zeile 4"},
-            {"key": "steuer_id",       "label_de": "Steuer-ID (optional)", "label_tr": "Vergi kimlik (ops.)", "type": "text", "required": False, "pattern": r"^\d{11}$", "zeile_de": "Zeile 7"},
+            {"key": "steuer_id",       "label_de": "Steuer-ID Kind (11-stellig, wichtig für Kinderfreibetrag)", "label_tr": "Çocuk vergi kimlik (11 hane, Kinderfreibetrag için önemli)", "type": "text", "required": False, "pattern": r"^\d{11}$", "zeile_de": "Zeile 7",
+             "hint_de": "Aus dem Schreiben des Bundeszentralamts für Steuern oder Geburtsurkunde. Ohne Steuer-ID kein Kinderfreibetrag.",
+             "hint_tr": "Bundeszentralamt'tan veya doğum belgesinden. Steuer-ID olmadan Kinderfreibetrag yok."},
             {"key": "kindergeld",      "label_de": "Kindergeld bezogen",  "label_tr": "Kindergeld alındı mı", "type": "select", "required": True, "zeile_de": "Zeile 13",
              "options": [{"v":"ja","de":"Ja","tr":"Evet"},{"v":"nein","de":"Nein","tr":"Hayır"}]},
             {"key": "shared_custody",  "label_de": "Geteiltes Sorgerecht (50/50)", "label_tr": "Ortak velayet (50/50)", "type": "select", "required": False, "zeile_de": "Zeile 17",
@@ -977,9 +1016,46 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
                    _human_value(data.get("kontoinhaber"), None, "de"), show_line_num=True)
     y -= 1.6 * cm
 
+    # ─── Section: EHEPARTNER (only if verheiratet) ───
+    if data.get("familienstand") == "verheiratet" and (
+        data.get("spouse_vorname") or data.get("spouse_steuer_id")
+    ):
+        y = ensure_space(y, 6 * cm)
+        y = section_band("D — Ehepartner (Zusammenveranlagung)", y)
+        # Row 1: Vorname / Nachname
+        draw_field_box(margin_l, y, col_w, "Vorname Ehepartner",
+                       _human_value(data.get("spouse_vorname"), None, "de"),
+                       show_line_num=True)
+        draw_field_box(margin_l + col_w + col_gap, y, col_w, "Nachname Ehepartner",
+                       _human_value(data.get("spouse_nachname"), None, "de"))
+        y -= 1.25 * cm
+        # Row 2: Geburtsdatum / Steuer-ID
+        draw_field_box(margin_l, y, col_w, "Geburtsdatum",
+                       _human_value(data.get("spouse_geburtsdatum"), None, "de"),
+                       show_line_num=True)
+        draw_field_box(margin_l + col_w + col_gap, y, col_w, "Steuer-ID Ehepartner",
+                       _human_value(data.get("spouse_steuer_id"), None, "de"))
+        y -= 1.25 * cm
+        # Row 3: Brutto / Lohnsteuer
+        sb = data.get("spouse_lohn_brutto")
+        sl = data.get("spouse_lohnsteuer")
+        sb_str = f"{float(sb):.2f} €" if sb else "—"
+        sl_str = f"{float(sl):.2f} €" if sl else "—"
+        draw_field_box(margin_l, y, col_w, "Bruttoarbeitslohn EP", sb_str,
+                       show_line_num=True)
+        draw_field_box(margin_l + col_w + col_gap, y, col_w, "Lohnsteuer EP", sl_str)
+        y -= 1.25 * cm
+        # Veranlagungsart bold
+        va = data.get("veranlagungsart") or "zusammen"
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 10)
+        va_lbl = "Zusammenveranlagung (Splittingtarif)" if va == "zusammen" else "Einzelveranlagung"
+        c.drawString(margin_l + 0.3 * cm, y, f"Veranlagungsart: {va_lbl}")
+        y -= 0.8 * cm
+
     # ─── Section: ANLAGE S ───
     y = ensure_space(y, 5 * cm)
-    y = section_band("D — Anlage S (Selbständige Tätigkeit)", y)
+    y = section_band("E — Anlage S (Selbständige Tätigkeit)", y)
 
     # Tätigkeit full width
     draw_field_box(margin_l, y, content_w, "Tätigkeit",
@@ -1347,16 +1423,23 @@ _PERMANENT_FIELDS = {
     "geburtsdatum", "religion",
     # Behinderung: once recognized rarely changes
     "eigene_gdb", "eigene_merkmal",
+    # Spouse identity
+    "spouse_vorname", "spouse_nachname", "spouse_geburtsdatum",
+    "spouse_steuer_id", "spouse_religion",
 }
 
 # Semi-permanent: yearly confirmation prompted in UI
 _SEMI_PERMANENT_FIELDS = {
-    "strasse", "plz", "ort", "familienstand",
+    "strasse", "plz", "ort", "familienstand", "steuerklasse",
     "iban", "kontoinhaber", "taetigkeit",
     # Rental property identity (per-property)
     "v_adresse",
     # Pflegegrad may be reassessed yearly
     "pflege_grad",
+    # Spouse veranlagungsart usually stable
+    "veranlagungsart",
+    # Commute distance — usually stable unless job change
+    "pendler_km", "pendler_mittel",
 }
 
 # Everything else is Annual — reset to default each year.
@@ -1453,6 +1536,7 @@ def generate_elster_xml(declaration, user) -> str:
     parts.append(field("Geburtsdatum", data.get("geburtsdatum")))
     parts.append(field("Religion", data.get("religion")))
     parts.append(field("Familienstand", data.get("familienstand")))
+    parts.append(field("Steuerklasse", data.get("steuerklasse")))
     parts.append('    <Wohnanschrift>')
     parts.append(field("Strasse", data.get("strasse"), 6))
     parts.append(field("PLZ", data.get("plz"), 6))
@@ -1463,6 +1547,22 @@ def generate_elster_xml(declaration, user) -> str:
     parts.append(field("Kontoinhaber", data.get("kontoinhaber"), 6))
     parts.append('    </Bankverbindung>')
     parts.append('  </Mantelbogen>')
+
+    # Ehepartner XML — only when verheiratet + data exists
+    if data.get("familienstand") == "verheiratet" and (
+        data.get("spouse_vorname") or data.get("spouse_steuer_id")
+    ):
+        parts.append('')
+        parts.append('  <Ehepartner>')
+        parts.append(field("Vorname", data.get("spouse_vorname")))
+        parts.append(field("Nachname", data.get("spouse_nachname")))
+        parts.append(field("Geburtsdatum", data.get("spouse_geburtsdatum")))
+        parts.append(field("SteuerID", data.get("spouse_steuer_id")))
+        parts.append(field("Religion", data.get("spouse_religion")))
+        parts.append(amount("Bruttoarbeitslohn", data.get("spouse_lohn_brutto")))
+        parts.append(amount("Lohnsteuer", data.get("spouse_lohnsteuer")))
+        parts.append(field("Veranlagungsart", data.get("veranlagungsart") or "zusammen"))
+        parts.append('  </Ehepartner>')
     parts.append('')
 
     if kinder_xml:
