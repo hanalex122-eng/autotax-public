@@ -4682,6 +4682,75 @@ function ToastItem({message,type="success",onClose}){
   </div>);
 }
 
+// EÜR detay modalı — seçilen yılın income/expense breakdown'unu gösterir.
+function EurDetailModal({year,onClose,tr}){
+  const[data,setData]=useState(null);
+  const[loading,setLoading]=useState(true);
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const r=await _authFetch(API+"/invoices?date_from="+year+"-01-01&date_to="+year+"-12-31&limit=500");
+        if(r.ok){
+          const j=await r.json();
+          const items=j.items||j||[];
+          let income=0,expense=0;
+          const byCat={income:{},expense:{}};
+          items.forEach(it=>{
+            const amt=parseFloat(it.total_amount||0)||0;
+            const cat=it.category||"other";
+            if(it.invoice_type==="income"){income+=amt;byCat.income[cat]=(byCat.income[cat]||0)+amt;}
+            else if(it.invoice_type==="expense"){expense+=amt;byCat.expense[cat]=(byCat.expense[cat]||0)+amt;}
+          });
+          setData({income,expense,profit:income-expense,count:items.length,byCat});
+        }
+      }catch(e){}
+      setLoading(false);
+    })();
+  },[year]);
+  return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:"var(--card)",borderRadius:14,padding:24,maxWidth:600,width:"100%",maxHeight:"85vh",overflow:"auto",border:"1px solid var(--border)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <h2 style={{margin:0,fontSize:20,fontWeight:700}}>📊 EÜR {year}</h2>
+        <button onClick={onClose} style={{background:"transparent",border:"none",color:"var(--text-muted)",fontSize:24,cursor:"pointer",padding:4}}>×</button>
+      </div>
+      {loading && <div style={{color:"var(--text-muted)"}}>{tr("Lädt…","Loading…","Yükleniyor…")}</div>}
+      {!loading && data && <div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
+          <div style={{padding:14,background:"rgba(16,185,129,0.10)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:10}}>
+            <div style={{fontSize:11,color:"#10b981",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>{tr("Einnahmen","Income","Gelir")}</div>
+            <div style={{fontSize:22,fontWeight:700,color:"#10b981"}}>{data.income.toFixed(2)} €</div>
+          </div>
+          <div style={{padding:14,background:"rgba(239,68,68,0.10)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:10}}>
+            <div style={{fontSize:11,color:"#ef4444",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>{tr("Ausgaben","Expenses","Gider")}</div>
+            <div style={{fontSize:22,fontWeight:700,color:"#ef4444"}}>{data.expense.toFixed(2)} €</div>
+          </div>
+          <div style={{padding:14,background:"rgba(139,92,246,0.10)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:10}}>
+            <div style={{fontSize:11,color:"#8b5cf6",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>{tr("Gewinn","Profit","Kar")}</div>
+            <div style={{fontSize:22,fontWeight:700,color:"#8b5cf6"}}>{data.profit.toFixed(2)} €</div>
+          </div>
+        </div>
+        <div style={{fontSize:12,color:"var(--text-muted)",marginBottom:12}}>{data.count} {tr("Belege","receipts","belge")}</div>
+        {Object.keys(data.byCat.income).length>0 && <div style={{marginBottom:16}}>
+          <h4 style={{margin:"0 0 8px",fontSize:13,color:"#10b981"}}>{tr("Einnahmen-Kategorien","Income categories","Gelir kategorileri")}</h4>
+          {Object.entries(data.byCat.income).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>(
+            <div key={cat} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:13}}>
+              <span>{cat}</span><span style={{fontWeight:600}}>{amt.toFixed(2)} €</span>
+            </div>
+          ))}
+        </div>}
+        {Object.keys(data.byCat.expense).length>0 && <div>
+          <h4 style={{margin:"0 0 8px",fontSize:13,color:"#ef4444"}}>{tr("Ausgaben-Kategorien","Expense categories","Gider kategorileri")}</h4>
+          {Object.entries(data.byCat.expense).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>(
+            <div key={cat} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:13}}>
+              <span>{cat}</span><span style={{fontWeight:600}}>{amt.toFixed(2)} €</span>
+            </div>
+          ))}
+        </div>}
+      </div>}
+    </div>
+  </div>);
+}
+
 // Steuererklärung — MVP (2026-05-30 v2 — validation + save indicator + year selector).
 function DeclarationView(){
   const _l=getLang();
@@ -4695,6 +4764,7 @@ function DeclarationView(){
   const[err,setErr]=useState("");
   const[saveState,setSaveState]=useState("idle"); // idle | saving | saved | error
   const[errors,setErrors]=useState({}); // field key -> error msg
+  const[showEur,setShowEur]=useState(false);
   const saveTimerRef=useRef(null);
 
   const load=async(yr=year)=>{
@@ -4818,13 +4888,19 @@ function DeclarationView(){
 
     {decl && schema && schema.map(section=>(
       <div key={section.key} style={{marginBottom:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:20}}>
-        <h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:700,color:"var(--accent)"}}>
-          {_l==="tr"?section.title_tr:section.title_de}
-        </h3>
-        <div style={{display:"grid",gap:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+          <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"var(--accent)"}}>
+            {_l==="tr"?section.title_tr:section.title_de}
+          </h3>
+          {section.key==="anlage_s" && <button onClick={()=>setShowEur(true)} style={{padding:"6px 12px",background:"transparent",border:"1px solid var(--border)",borderRadius:6,color:"var(--accent)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+            📊 {tr("EÜR-Details anzeigen","Show EÜR details","EÜR detayını gör")}
+          </button>}
+        </div>
+        <div style={{display:"grid",gap:14}}>
           {section.fields.map(f=>{
             const fieldErr=errors[f.key];
             const hasError=!!fieldErr;
+            const hint=_l==="tr"?f.hint_tr:f.hint_de;
             return(<div key={f.key} style={{display:"flex",flexDirection:"column",gap:4}}>
               <label style={{fontSize:12,color:hasError?"#ef4444":"var(--text-muted)",fontWeight:500}}>
                 {_l==="tr"?f.label_tr:f.label_de}
@@ -4842,12 +4918,15 @@ function DeclarationView(){
                        disabled={decl.status==="finalized"}
                        style={{padding:"10px 12px",background:"var(--surface)",border:`1px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:8,color:"var(--text)",fontSize:14,fontFamily:"inherit"}}/>
               )}
+              {hint && !hasError && <div style={{fontSize:11,color:"var(--text-dim)",marginTop:2,fontStyle:"italic"}}>💡 {hint}</div>}
               {hasError && <div style={{fontSize:11,color:"#ef4444",marginTop:2}}>{fieldErr}</div>}
             </div>);
           })}
         </div>
       </div>
     ))}
+
+    {showEur && <EurDetailModal year={year} onClose={()=>setShowEur(false)} tr={tr}/>}
 
     {decl && <div style={{display:"flex",gap:12,marginTop:24,flexWrap:"wrap",alignItems:"center"}}>
       <button onClick={downloadPDF} style={{padding:"12px 24px",background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,cursor:"pointer"}}>
