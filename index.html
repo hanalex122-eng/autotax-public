@@ -5248,6 +5248,43 @@ function DeclarationView(){
       ⚠ {errorCount} {tr("Felder benötigen Aufmerksamkeit","fields need attention","alan dikkat gerektiriyor")}
     </div>}
 
+    {decl && (()=>{
+      const eigGdb=parseInt((decl.data||{}).eigene_gdb||0,10);
+      const eigMerk=((decl.data||{}).eigene_merkmal||"").toUpperCase();
+      const pbTable={20:384,30:620,40:860,50:1140,60:1440,70:1780,80:2120,90:2460,100:2840};
+      const erhoeht=["H","BL","TBL"].includes(eigMerk);
+      const pb=erhoeht?7400:(eigGdb?pbTable[Math.floor(eigGdb/10)*10]||0:0);
+      if(pb===0)return null;
+      return(<div style={{padding:"12px 16px",background:"rgba(16,185,129,0.10)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:8,marginBottom:16,fontSize:13,color:"#10b981",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+        <div>
+          ♿ <strong>{tr("Behindertenpauschbetrag (§ 33b EStG)","Disability flat tax allowance","Engellilik sabit tazminat")}:</strong>
+          {" "}
+          {erhoeht?tr("Merkzeichen ","Marker ","İşaret ")+eigMerk:`GdB ${eigGdb}%`}
+        </div>
+        <strong style={{fontSize:18}}>{pb.toLocaleString("de-DE")} €</strong>
+      </div>);
+    })()}
+
+    {decl && (()=>{
+      const kinder=(decl.data||{}).kinder||[];
+      const pbTable={20:384,30:620,40:860,50:1140,60:1440,70:1780,80:2120,90:2460,100:2840};
+      const totalKindPb=kinder.reduce((sum,k)=>{
+        const gdb=parseInt(k.behinderung_gdb||0,10);
+        const merk=(k.behinderung_merkmal||"").toUpperCase();
+        const ueb=k.behindert_uebertrag==="ja";
+        if(!ueb)return sum;
+        const pb=["H","BL","TBL"].includes(merk)?7400:(gdb?pbTable[Math.floor(gdb/10)*10]||0:0);
+        return sum+pb;
+      },0);
+      if(totalKindPb===0)return null;
+      return(<div style={{padding:"12px 16px",background:"rgba(139,92,246,0.10)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:8,marginBottom:16,fontSize:13,color:"#8b5cf6",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+        <div>
+          👨‍👦 <strong>{tr("Übertragener Behindertenpauschbetrag (Kinder)","Carried-over disability allowance (children)","Aktarılan engellilik tazminatı (çocuklar)")}</strong>
+        </div>
+        <strong style={{fontSize:18}}>{totalKindPb.toLocaleString("de-DE")} €</strong>
+      </div>);
+    })()}
+
     {decl && schema && schema.map(section=>(
       section.is_repeated_array ? (
         // Dynamic children-array section

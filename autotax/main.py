@@ -2525,10 +2525,18 @@ def _declaration_to_dict(decl, include_data: bool = True) -> dict:
 
 @app.get("/steuer/declaration/schema")
 def declaration_schema():
-    """Form schema (sections + fields) + expense category guide.
-    Static config, no auth needed."""
-    from autotax.declaration import FORM_SECTIONS, EXPENSE_GUIDE
-    return {"sections": FORM_SECTIONS, "expense_guide": EXPENSE_GUIDE}
+    """Form schema (sections + fields) + expense category guide +
+    Behindertenpauschbetrag table. Static config, no auth needed."""
+    from autotax.declaration import (
+        FORM_SECTIONS, EXPENSE_GUIDE,
+        BEHINDERTEN_PAUSCHBETRAG, BEHINDERTEN_PAUSCHBETRAG_ERHOEHT,
+    )
+    return {
+        "sections": FORM_SECTIONS,
+        "expense_guide": EXPENSE_GUIDE,
+        "pauschbetrag_table": BEHINDERTEN_PAUSCHBETRAG,
+        "pauschbetrag_erhoeht": BEHINDERTEN_PAUSCHBETRAG_ERHOEHT,
+    }
 
 
 @app.post("/steuer/declaration/ask")

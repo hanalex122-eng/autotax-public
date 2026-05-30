@@ -207,6 +207,28 @@ FORM_SECTIONS = [
         ],
     },
     {
+        "key": "anlage_kap",
+        "title_de": "Anlage KAP — Kapitalerträge (optional)",
+        "title_tr": "Anlage KAP — Sermaye gelirleri (varsa, opsiyonel)",
+        "fields": [
+            {"key": "kap_zinsen",     "label_de": "Zinsen + Dividenden (€)", "label_tr": "Faiz + temettü (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 7",
+             "hint_de": "Aus Steuerbescheinigung der Bank. Über Freistellungsauftrag €1.000 (Single) / €2.000 (verheiratet) hinaus.",
+             "hint_tr": "Banka vergi belgesinden. Freistellungsauftrag €1.000 (bekar) / €2.000 (evli) üstü."},
+            {"key": "kap_kursgewinn", "label_de": "Kursgewinne / Aktien-Verkauf (€)", "label_tr": "Hisse satış kazancı (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 8",
+             "hint_de": "Realisierte Gewinne aus Aktien / ETF Verkauf.",
+             "hint_tr": "Gerçekleşen hisse/ETF satış kazancı."},
+            {"key": "kap_quellensteuer", "label_de": "Einbehaltene Kapitalertragsteuer (€)", "label_tr": "Kesilen sermaye vergisi (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 37",
+             "hint_de": "25% Kapitalertragsteuer + Soli + ggf. Kirchensteuer aus Steuerbescheinigung.",
+             "hint_tr": "%25 sermaye vergisi + Soli + (varsa) kilise vergisi."},
+            {"key": "kap_quellensteuer_ausland", "label_de": "Anrechenbare ausländische Quellensteuer (€)", "label_tr": "Mahsup edilebilir yabancı vergi (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 41",
+             "hint_de": "Z.B. US-Withholding-Tax auf US-Aktien-Dividenden.",
+             "hint_tr": "Örn. ABD hisselerinde alınan vergi."},
+            {"key": "freistellungsauftrag", "label_de": "Freistellungsauftrag genutzt (€)", "label_tr": "Freistellungsauftrag (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 12",
+             "hint_de": "Sparer-Pauschbetrag 2025: €1.000 Single, €2.000 verheiratet.",
+             "hint_tr": "Sparer-Pauschbetrag 2025: bekar €1.000, evli €2.000."},
+        ],
+    },
+    {
         "key": "anlage_sonderausgaben",
         "title_de": "Sonderausgaben & §35a (haushaltsnahe)",
         "title_tr": "Özel giderler + §35a (ev hizmetleri)",
@@ -1000,7 +1022,7 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
         for i, k in enumerate(kinder, 1):
             if not isinstance(k, dict):
                 continue
-            y = ensure_space(y, 1.5 * cm)
+            y = ensure_space(y, 1.8 * cm)
             name = f"{k.get('vorname','')} ({k.get('geburtsdatum','—')})"
             kg = "✓" if (k.get("kindergeld") == "ja") else "—"
             sc = "✓" if (k.get("shared_custody") == "ja") else "—"
@@ -1010,7 +1032,96 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
             c.setFont("Helvetica", 9)
             c.drawString(margin_l + 9 * cm, y, f"Kindergeld: {kg}")
             c.drawString(margin_l + 13 * cm, y, f"Geteilt: {sc}")
+            # Behinderung des Kindes
+            k_gdb = k.get("behinderung_gdb")
+            k_merk = k.get("behinderung_merkmal")
+            k_ueb = k.get("behindert_uebertrag")
+            if k_gdb or k_merk:
+                k_pb = pauschbetrag_for_gdb(int(k_gdb) if k_gdb else 0, k_merk)
+                y -= 0.45 * cm
+                c.setFillColor(MUTED)
+                c.setFont("Helvetica-Oblique", 8)
+                ueb_txt = "✓ auf Eltern übertragen" if k_ueb == "ja" else ""
+                c.drawString(margin_l + 0.5 * cm, y,
+                             f"   Behinderung: GdB {k_gdb}% "
+                             f"{('Merkmal '+k_merk) if k_merk else ''} "
+                             f"→ Pauschbetrag {k_pb} € {ueb_txt}")
             y -= 0.55 * cm
+        y -= 0.3 * cm
+
+    # ─── Section: ANLAGE KAP (Kapitalerträge, only if filled) ───
+    kap_keys = ("kap_zinsen", "kap_kursgewinn", "kap_quellensteuer",
+                "kap_quellensteuer_ausland", "freistellungsauftrag")
+    has_kap = any(data.get(k) for k in kap_keys)
+    if has_kap:
+        y = ensure_space(y, 6 * cm)
+        y = section_band("Anlage KAP — Kapitalerträge", y)
+        kap_rows = [
+            ("kap_zinsen", "Zinsen + Dividenden"),
+            ("kap_kursgewinn", "Kursgewinne / Aktien"),
+            ("kap_quellensteuer", "Kapitalertragsteuer einbehalten"),
+            ("kap_quellensteuer_ausland", "Ausländische Quellensteuer"),
+            ("freistellungsauftrag", "Freistellungsauftrag genutzt"),
+        ]
+        for i in range(0, len(kap_rows), 2):
+            y = ensure_space(y, 2.5 * cm)
+            for j, (key, label) in enumerate(kap_rows[i:i + 2]):
+                x = margin_l + j * (eur_w + col_gap)
+                val = data.get(key)
+                val_str = f"{float(val or 0):.2f} €"
+                draw_field_box(x, y, eur_w, label, val_str,
+                               show_line_num=(j == 0))
+            y -= 1.25 * cm
+        y -= 0.3 * cm
+
+    # ─── Section: ANLAGE BEHINDERUNG (eigene, only if GdB set) ───
+    eigene_gdb = data.get("eigene_gdb")
+    eigene_merkmal = data.get("eigene_merkmal")
+    pflege_grad = data.get("pflege_grad")
+    has_beh = bool(eigene_gdb or eigene_merkmal or pflege_grad)
+    if has_beh:
+        y = ensure_space(y, 4 * cm)
+        y = section_band("Anlage Außergewöhnl. Belastungen — Behinderung (eigene)", y)
+        pb = pauschbetrag_for_gdb(int(eigene_gdb) if eigene_gdb else 0, eigene_merkmal)
+        beh_rows = [
+            ("eigene_gdb", "GdB (%)", f"{eigene_gdb or '—'} %" if eigene_gdb else "—"),
+            ("eigene_merkmal", "Merkzeichen", eigene_merkmal or "—"),
+            ("pflege_grad", "Pflegegrad", pflege_grad or "—"),
+        ]
+        for key, label, val in beh_rows:
+            y = ensure_space(y, 1.3 * cm)
+            draw_field_box(margin_l, y, content_w, label, val, show_line_num=True)
+            y -= 1.25 * cm
+        if pb > 0:
+            c.setFillColor(INK)
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(margin_l + 0.3 * cm, y,
+                         f"Behindertenpauschbetrag (§ 33b EStG): {pb:.2f} €")
+            y -= 0.7 * cm
+
+    # ─── Section: ANLAGE AUSSERGEWÖHNLICHE BELASTUNGEN ───
+    ab_keys = ("krankheitskosten", "pflegekosten", "bestattungskosten",
+               "scheidungskosten", "kurkosten")
+    has_ab = any(data.get(k) for k in ab_keys)
+    if has_ab:
+        y = ensure_space(y, 5 * cm)
+        y = section_band("Außergewöhnliche Belastungen", y)
+        ab_rows = [
+            ("krankheitskosten", "Krankheitskosten"),
+            ("pflegekosten", "Pflegekosten"),
+            ("bestattungskosten", "Bestattungskosten"),
+            ("scheidungskosten", "Scheidungskosten"),
+            ("kurkosten", "Kur / Sanatorium"),
+        ]
+        for i in range(0, len(ab_rows), 2):
+            y = ensure_space(y, 2.5 * cm)
+            for j, (key, label) in enumerate(ab_rows[i:i + 2]):
+                x = margin_l + j * (eur_w + col_gap)
+                val = data.get(key)
+                val_str = f"{float(val or 0):.2f} €"
+                draw_field_box(x, y, eur_w, label, val_str,
+                               show_line_num=(j == 0))
+            y -= 1.25 * cm
         y -= 0.3 * cm
 
     # ─── Section: ANLAGE SONDERAUSGABEN (only if any field filled) ───
@@ -1311,6 +1422,41 @@ def generate_elster_xml(declaration, user) -> str:
         parts.append(amount("Grundsteuer", data.get("v_grundsteuer")))
         parts.append(amount("SonstigeWerbungskosten", data.get("v_sonst")))
         parts.append('  </AnlageV>')
+
+    kap_keys = ("kap_zinsen", "kap_kursgewinn", "kap_quellensteuer",
+                "kap_quellensteuer_ausland", "freistellungsauftrag")
+    if any(data.get(k) for k in kap_keys):
+        parts.append('')
+        parts.append('  <AnlageKAP>')
+        parts.append(amount("ZinsenDividenden", data.get("kap_zinsen")))
+        parts.append(amount("Kursgewinne", data.get("kap_kursgewinn")))
+        parts.append(amount("KESt", data.get("kap_quellensteuer")))
+        parts.append(amount("AuslQuellensteuer", data.get("kap_quellensteuer_ausland")))
+        parts.append(amount("Freistellungsauftrag", data.get("freistellungsauftrag")))
+        parts.append('  </AnlageKAP>')
+
+    if data.get("eigene_gdb") or data.get("eigene_merkmal"):
+        parts.append('')
+        parts.append('  <AnlageBehinderung>')
+        parts.append(field("GdB", data.get("eigene_gdb")))
+        parts.append(field("Merkzeichen", data.get("eigene_merkmal")))
+        parts.append(field("Pflegegrad", data.get("pflege_grad")))
+        pb = pauschbetrag_for_gdb(int(data.get("eigene_gdb") or 0),
+                                   data.get("eigene_merkmal"))
+        parts.append(amount("Pauschbetrag", pb))
+        parts.append('  </AnlageBehinderung>')
+
+    ab_keys = ("krankheitskosten", "pflegekosten", "bestattungskosten",
+               "scheidungskosten", "kurkosten")
+    if any(data.get(k) for k in ab_keys):
+        parts.append('')
+        parts.append('  <AussergewoehnlicheBelastungen>')
+        parts.append(amount("Krankheitskosten", data.get("krankheitskosten")))
+        parts.append(amount("Pflegekosten", data.get("pflegekosten")))
+        parts.append(amount("Bestattungskosten", data.get("bestattungskosten")))
+        parts.append(amount("Scheidungskosten", data.get("scheidungskosten")))
+        parts.append(amount("Kurkosten", data.get("kurkosten")))
+        parts.append('  </AussergewoehnlicheBelastungen>')
 
     so_keys = ("spenden_geld", "spenden_partei", "steuerberater",
                "kirchensteuer_so", "handwerker_lohn", "haushaltsdienst",
