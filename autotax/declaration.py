@@ -80,9 +80,8 @@ FORM_SECTIONS = [
     },
     {
         "key": "anlage_ehepartner",
-        "title_de": "Ehepartner (nur bei Zusammenveranlagung)",
-        "title_tr": "Eş bilgileri (sadece birlikte beyan için)",
-        "conditional_on": {"field": "familienstand", "value": "verheiratet"},
+        "title_de": "Ehepartner / Eş — nur ausfüllen wenn verheiratet (Zusammenveranlagung)",
+        "title_tr": "Eş bilgileri — sadece evliyseniz doldurun (Zusammenveranlagung)",
         "fields": [
             {"key": "spouse_vorname",      "label_de": "Vorname Ehepartner",        "label_tr": "Eş adı",                 "type": "text",   "required": False, "zeile_de": "Zeile 18",
              "hint_de": "Wie im Personalausweis des Ehepartners.",
@@ -202,9 +201,9 @@ FORM_SECTIONS = [
             # Per-child schema — used by frontend to render row inputs
             {"key": "vorname",         "label_de": "Vorname",            "label_tr": "Ad",                  "type": "text", "required": True, "zeile_de": "Zeile 4"},
             {"key": "geburtsdatum",    "label_de": "Geburtsdatum",       "label_tr": "Doğum tarihi",        "type": "date", "required": True, "zeile_de": "Zeile 4"},
-            {"key": "steuer_id",       "label_de": "Steuer-ID Kind (11-stellig, wichtig für Kinderfreibetrag)", "label_tr": "Çocuk vergi kimlik (11 hane, Kinderfreibetrag için önemli)", "type": "text", "required": False, "pattern": r"^\d{11}$", "zeile_de": "Zeile 7",
-             "hint_de": "Aus dem Schreiben des Bundeszentralamts für Steuern oder Geburtsurkunde. Ohne Steuer-ID kein Kinderfreibetrag.",
-             "hint_tr": "Bundeszentralamt'tan veya doğum belgesinden. Steuer-ID olmadan Kinderfreibetrag yok."},
+            {"key": "steuer_id",       "label_de": "★ Steuer-ID Kind (11-stellig) — PFLICHT für Kinderfreibetrag", "label_tr": "★ Çocuk vergi kimlik (11 hane) — Kinderfreibetrag için ZORUNLU", "type": "text", "required": False, "pattern": r"^\d{11}$", "zeile_de": "Zeile 7",
+             "hint_de": "Aus dem Schreiben des Bundeszentralamts für Steuern oder Geburtsurkunde. OHNE Steuer-ID kein Kinderfreibetrag (€6.612/Jahr Verlust)!",
+             "hint_tr": "Bundeszentralamt'tan veya doğum belgesinden. Steuer-ID OLMADAN Kinderfreibetrag yok (yıllık €6.612 kayıp)!"},
             {"key": "kindergeld",      "label_de": "Kindergeld bezogen",  "label_tr": "Kindergeld alındı mı", "type": "select", "required": True, "zeile_de": "Zeile 13",
              "options": [{"v":"ja","de":"Ja","tr":"Evet"},{"v":"nein","de":"Nein","tr":"Hayır"}]},
             {"key": "shared_custody",  "label_de": "Geteiltes Sorgerecht (50/50)", "label_tr": "Ortak velayet (50/50)", "type": "select", "required": False, "zeile_de": "Zeile 17",
