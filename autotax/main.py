@@ -2546,8 +2546,11 @@ async def declaration_ask(
     payload: dict = Body(...),
     user: dict = Depends(get_acting_context),
 ):
-    """Ask AI a question about a tax field. Provides context (which field,
-    user's question). Returns a German-tax-aware answer.
+    """Ask AI a question about a tax field. With Q&A cache layer:
+    1. Normalize question → check ai_knowledge cache (pg_trgm similarity)
+    2. Cache hit (≥0.55 similarity) → return cached answer ($0)
+    3. Cache miss → Claude Haiku ($0.001) + save to cache
+    Next identical/similar question = cached, no AI cost.
 
     Body: {"field_key": str, "field_label": str, "question": str}
     """
@@ -2559,9 +2562,34 @@ async def declaration_ask(
     field_key = (payload.get("field_key") or "").strip()[:64]
     field_label = (payload.get("field_label") or "").strip()[:128]
     question = (payload.get("question") or "").strip()[:1000]
-    if not question:
-        raise HTTPException(status_code=400, detail="question erforderlich")
+    if not question or len(question) < 3:
+        raise HTTPException(status_code=400, detail="Frage zu kurz")
+    no_cache = bool(payload.get("no_cache"))
 
+    # Cache lookup — context-aware: field_label included in normalize for
+    # field-specific Q&A (Krankenkasse Brutto vs IBAN Brutto are different).
+    cache_key = f"[{field_key}] {question}" if field_key else question
+    if not no_cache:
+        try:
+            from autotax import ai_knowledge as _aik
+            db = SessionLocal()
+            try:
+                cached = _aik.find_cached_answer(db, cache_key, language="de")
+            finally:
+                db.close()
+            if cached:
+                return {
+                    "answer": cached["answer"],
+                    "field_key": field_key,
+                    "cache_hit": True,
+                    "score": cached.get("score"),
+                    "model": "cache",
+                    "disclaimer": "Keine rechtsverbindliche Steuerberatung.",
+                }
+        except Exception:
+            logger.exception("declaration_ask cache lookup failed")
+
+    # Cache miss → Claude Haiku
     system = (
         "Du bist ein freundlicher deutscher Steuer-Assistent für Selbständige "
         "und Arbeitnehmer in der Einkommensteuererklärung. Antworten kurz, "
@@ -2595,9 +2623,27 @@ async def declaration_ask(
             data = r.json()
             blocks = data.get("content") or []
             text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+            answer = text.strip()
+
+            # Save to cache for future identical/similar questions
+            try:
+                from autotax import ai_knowledge as _aik
+                db = SessionLocal()
+                try:
+                    _aik.save_to_cache(db, cache_key, answer,
+                                       user_id=user["sub"],
+                                       source_model=model,
+                                       confidence=0.85)
+                finally:
+                    db.close()
+            except Exception:
+                logger.exception("declaration_ask cache save failed")
+
             return {
-                "answer": text.strip(),
+                "answer": answer,
                 "field_key": field_key,
+                "cache_hit": False,
+                "model": model,
                 "disclaimer": "Keine rechtsverbindliche Steuerberatung — nur Orientierung.",
             }
     except HTTPException:
