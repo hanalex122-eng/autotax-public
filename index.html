@@ -699,6 +699,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     {id:"vault",icon:I.invoice,label:_t("vault")},
     {id:"steuer_uebersicht",icon:I.tax,label:getLang()==="de"?"Steuer-Übersicht":"Tax Overview"},
     {id:"declaration",icon:I.invoice,label:getLang()==="de"?"Steuererklärung 2025":getLang()==="tr"?"Vergi Beyannamesi 2025":"Tax Return 2025",badge:"BETA"},
+    {id:"kasse",icon:I.upload,label:getLang()==="de"?"Kassensystem":getLang()==="tr"?"Kasiyer Sistemi":"Cash Register",badge:"NEU"},
     ...(F.editor!==false?[{id:"editor",icon:I.check,label:_t("editor")}]:[]),
     {id:"export",icon:I.export,label:_t("export")},
     {id:"companies",icon:I.invoice,label:_t("companies")},
@@ -4682,6 +4683,143 @@ function ToastItem({message,type="success",onClose}){
   </div>);
 }
 
+// Kassensystem (DSFinV-K + Speedy + generic CSV) upload + history
+function KasseView(){
+  const _l=getLang();
+  const tr=(de,en,t)=>_l==="de"?de:_l==="tr"?(t||en):en;
+  const[imports,setImports]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[uploading,setUploading]=useState(false);
+  const[locked,setLocked]=useState(null);
+  const[lastResult,setLastResult]=useState(null);
+  const fileInputRef=useRef(null);
+
+  const load=async()=>{
+    setLoading(true);
+    try{
+      const r=await _authFetch(API+"/kasse/imports");
+      if(r.status===402){const j=await r.json();setLocked(j.detail||{});}
+      else if(r.ok){const j=await r.json();setImports(j.items||[]);}
+    }catch(e){}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+
+  const upload=async(file)=>{
+    if(!file)return;
+    setUploading(true);setLastResult(null);
+    try{
+      const fd=new FormData();fd.append("file",file);
+      const r=await _authFetch(API+"/kasse/import",{method:"POST",body:fd});
+      const j=await r.json();
+      if(r.status===402){setLocked(j.detail||{});}
+      else if(!r.ok){alert("Upload failed: "+(j.detail||"unknown"));}
+      else{setLastResult(j);load();}
+    }catch(e){alert(e.message);}
+    setUploading(false);
+  };
+
+  const remove=async(id)=>{
+    if(!confirm(tr("Import-Eintrag löschen? CashEntry-Buchungen bleiben.",
+                   "Delete import record? CashEntry rows remain.",
+                   "Import kaydını sil? CashEntry kayıtları kalır.")))return;
+    try{
+      const r=await _authFetch(API+"/kasse/imports/"+id,{method:"DELETE"});
+      if(r.ok)load();
+    }catch(e){}
+  };
+
+  if(locked){
+    const planNames={free:"Free",early:"Early",starter:"Starter",pro:"Pro",ai_steuer:"AI Steuer",premium:"Premium"};
+    return(<div style={{padding:"40px 20px",maxWidth:720,margin:"0 auto"}}>
+      <div style={{background:"linear-gradient(135deg,rgba(139,92,246,0.10),rgba(99,102,241,0.05))",border:"1px solid rgba(139,92,246,0.3)",borderRadius:16,padding:"36px 28px",textAlign:"center"}}>
+        <div style={{fontSize:56,marginBottom:16}}>🔒</div>
+        <h1 style={{margin:"0 0 12px",fontSize:24,fontWeight:800}}>
+          {tr("Kassensystem — Pro-Funktion","Kassensystem — Pro Feature","Kasiyer Sistemi — Pro")}
+        </h1>
+        <p style={{margin:"0 0 24px",color:"var(--text-muted)",fontSize:15,lineHeight:1.6}}>
+          {tr("DSFinV-K + Speedy Kasse + generischer CSV-Import. Im Pro-Plan und höher.",
+              "DSFinV-K + Speedy Kasse + generic CSV import. Pro and above.",
+              "DSFinV-K + Speedy + jenel CSV import. Pro ve üstü.")}
+          {" "}
+          {tr("Dein Plan","Your plan","Mevcut plan")}: <strong>{planNames[locked.current_plan]||locked.current_plan}</strong>
+        </p>
+        <a href="#pricing" style={{padding:"14px 28px",background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:700,textDecoration:"none",display:"inline-block"}}>
+          🚀 {tr("Upgraden zu Pro","Upgrade to Pro","Pro'ya yükselt")}
+        </a>
+      </div>
+    </div>);
+  }
+
+  return(<div style={{padding:"20px",maxWidth:1000,margin:"0 auto"}}>
+    <div style={{marginBottom:24}}>
+      <h1 style={{margin:"0 0 8px",fontSize:26,fontWeight:800}}>🧾 {tr("Kassensystem","Cash Register","Kasiyer Sistemi")}</h1>
+      <p style={{margin:0,color:"var(--text-muted)",fontSize:14,lineHeight:1.5}}>
+        {tr("DSFinV-K + Speedy Kasse + generische CSV. ZIP oder CSV hochladen. CashEntry-Buchungen werden automatisch erstellt.",
+            "DSFinV-K + Speedy + generic CSV. ZIP or CSV. CashEntry rows auto-created.",
+            "DSFinV-K + Speedy + jenel CSV. ZIP veya CSV. CashEntry kayıtları otomatik oluşur.")}
+      </p>
+    </div>
+
+    <div style={{padding:24,background:"var(--card)",border:"2px dashed var(--border)",borderRadius:12,textAlign:"center",marginBottom:24}}>
+      <div style={{fontSize:48,marginBottom:12}}>📦</div>
+      <h3 style={{margin:"0 0 8px",fontSize:16}}>{tr("CSV / ZIP hochladen","Upload CSV / ZIP","CSV / ZIP yükle")}</h3>
+      <p style={{margin:"0 0 16px",color:"var(--text-muted)",fontSize:13}}>
+        {tr("DSFinV-K, Speedy Kasse, oder generisches CSV. Max 10MB.",
+            "DSFinV-K, Speedy, or generic CSV. Max 10MB.",
+            "DSFinV-K, Speedy veya jenel CSV. Maks 10MB.")}
+      </p>
+      <input ref={fileInputRef} type="file" accept=".csv,.zip,application/zip,text/csv" onChange={e=>{
+        const f=e.target.files&&e.target.files[0];if(f)upload(f);
+        if(fileInputRef.current)fileInputRef.current.value="";
+      }} style={{display:"none"}}/>
+      <button onClick={()=>fileInputRef.current&&fileInputRef.current.click()} disabled={uploading} style={{padding:"12px 24px",background:uploading?"#444":"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,fontSize:15,cursor:uploading?"wait":"pointer"}}>
+        {uploading?tr("Wird verarbeitet…","Processing…","İşleniyor…"):"📤 "+tr("Datei wählen","Choose file","Dosya seç")}
+      </button>
+    </div>
+
+    {lastResult && <div style={{padding:16,background:lastResult.status==="imported"?"rgba(16,185,129,0.10)":lastResult.status==="failed"?"rgba(239,68,68,0.10)":"rgba(245,158,11,0.10)",border:"1px solid "+(lastResult.status==="imported"?"rgba(16,185,129,0.3)":lastResult.status==="failed"?"rgba(239,68,68,0.3)":"rgba(245,158,11,0.3)"),borderRadius:8,marginBottom:24}}>
+      {lastResult.duplicate ? (
+        <div style={{color:"#f59e0b"}}>⚠ {tr("Datei bereits importiert","File already imported","Dosya zaten içe aktarılmış")} — #{lastResult.import_id}</div>
+      ) : lastResult.status==="failed" ? (
+        <div style={{color:"#ef4444"}}>❌ {tr("Import fehlgeschlagen","Import failed","Aktarım başarısız")}: {(lastResult.errors||[]).join(", ")}</div>
+      ) : (
+        <div>
+          <div style={{color:"#10b981",fontWeight:600,marginBottom:8}}>✓ {tr("Erfolgreich importiert","Successfully imported","Başarıyla aktarıldı")}</div>
+          <div style={{fontSize:13,color:"var(--text-muted)"}}>
+            {lastResult.rows_imported} {tr("Buchungen","entries","kayıt")} ·
+            €{(lastResult.total_amount||0).toLocaleString("de-DE")} ·
+            {tr("Quelle","Source","Kaynak")}: {lastResult.source}
+          </div>
+        </div>
+      )}
+    </div>}
+
+    <h3 style={{margin:"0 0 12px",fontSize:16,fontWeight:700}}>{tr("Vergangene Imports","Past imports","Geçmiş içe aktarmalar")}</h3>
+    {loading ? <div style={{color:"var(--text-muted)"}}>{tr("Lädt…","Loading…","Yükleniyor…")}</div> :
+     imports.length===0 ? <div style={{padding:24,background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text-muted)",textAlign:"center",fontSize:13}}>{tr("Noch keine Imports.","No imports yet.","Henüz içe aktarma yok.")}</div> :
+     <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"}}>
+       {imports.map(im=>(
+         <div key={im.id} style={{padding:14,borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+           <div style={{flex:"1 1 250px"}}>
+             <div style={{fontSize:14,fontWeight:600}}>{im.file_name||"(unnamed)"}</div>
+             <div style={{fontSize:11,color:"var(--text-muted)",marginTop:4}}>
+               {im.source} · {im.created_at?.slice(0,10)} ·
+               {im.status==="imported"?<span style={{color:"#10b981"}}> ✓ {im.rows_imported} {tr("Zeilen","rows","satır")}</span>:
+                im.status==="failed"?<span style={{color:"#ef4444"}}> ✗ {im.error_message?.slice(0,80)}</span>:
+                " "+im.status}
+             </div>
+             {im.period_start && <div style={{fontSize:11,color:"var(--text-dim)"}}>{im.period_start} → {im.period_end} · €{(im.total_amount||0).toLocaleString("de-DE")}</div>}
+           </div>
+           <button onClick={()=>remove(im.id)} style={{background:"transparent",border:"1px solid #ef4444",color:"#ef4444",padding:"4px 10px",borderRadius:6,fontSize:11,cursor:"pointer"}}>
+             {tr("Eintrag löschen","Delete record","Kaydı sil")}
+           </button>
+         </div>
+       ))}
+     </div>}
+  </div>);
+}
+
 // EÜR detay modalı — seçilen yılın income/expense breakdown'unu gösterir.
 function EurDetailModal({year,onClose,tr}){
   const[data,setData]=useState(null);
@@ -5307,7 +5445,7 @@ function App(){
   if(!authed)return<Fragment><AuthScreen onLogin={()=>setAuthed(true)}/><CookieConsent/></Fragment>;
   // SendInvoicesView: InvoicesView'in sendOnly=true ile kopyasi — sadece email gonder buton'u
   const SendInvoicesView=(props)=><InvoicesView {...props} sendOnly={true}/>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView};
+  const views={dashboard:DashboardView,invoices:InvoicesView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView};
   const _t=typeof t==="function"?t:k=>k;
   const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),send_invoices:(getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.

@@ -2871,6 +2871,194 @@ async def steuer_document_extract(
     }
 
 
+# ────────────────────────────────────────────────────────────────────
+# Kassensystem (DSFinV-K + Speedy + generic CSV) — PATH B (2026-05-30).
+# See autotax/kasse.py + .claude/kasse_plan.md.
+# ────────────────────────────────────────────────────────────────────
+
+# Plans that include Kassensystem access. Admin override.
+_KASSE_PLANS = {"pro", "ai_steuer", "premium"}
+
+
+def _require_kasse_access(user: dict) -> None:
+    """Kasse = Pro+ feature. Admin bypass."""
+    email = (user.get("email") or "").strip().lower()
+    if _ADMIN_EMAILS and email in _ADMIN_EMAILS:
+        return
+    plan = _user_plan(user["sub"])
+    if plan in _KASSE_PLANS:
+        return
+    raise HTTPException(
+        status_code=402,
+        detail={
+            "error": "premium_feature",
+            "feature": "kassensystem",
+            "current_plan": plan,
+            "required_plans": sorted(_KASSE_PLANS),
+            "message": "Kassensystem-Import ist im Pro-Plan und höher enthalten.",
+            "upgrade_url": "/app#pricing",
+        },
+    )
+
+
+@app.post("/kasse/import")
+@limiter.limit("10/minute")
+async def kasse_import(request: Request,
+                       file: UploadFile = File(...),
+                       user: dict = Depends(get_acting_context)):
+    """Upload DSFinV-K / Speedy / generic CSV (or ZIP). Parses → creates
+    CashEntry rows + CashRegisterImport record. Idempotent on file sha256."""
+    from autotax.models import CashRegisterImport
+    from autotax.kasse import file_sha256, parse_kasse_file
+    _require_kasse_access(user)
+    raw = await file.read()
+    if not raw or len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Datei fehlt oder >10MB")
+    sha = file_sha256(raw)
+
+    db = SessionLocal()
+    try:
+        # Idempotency check
+        existing = db.query(CashRegisterImport).filter(
+            CashRegisterImport.user_id == user["sub"],
+            CashRegisterImport.file_sha256 == sha,
+        ).first()
+        if existing:
+            return {
+                "duplicate": True,
+                "import_id": existing.id,
+                "message": "Datei bereits importiert",
+                "status": existing.status,
+                "rows_imported": existing.rows_imported,
+            }
+
+        # Parse
+        parsed = parse_kasse_file(raw, file.filename or "")
+        if parsed.get("errors"):
+            cri = CashRegisterImport(
+                user_id=user["sub"],
+                source=parsed["source"],
+                file_name=file.filename or "",
+                file_sha256=sha,
+                status="failed",
+                error_message=" / ".join(parsed["errors"])[:500],
+                raw_csv_excerpt=parsed.get("raw_excerpt", "")[:500],
+            )
+            db.add(cri)
+            db.commit()
+            db.refresh(cri)
+            return {"import_id": cri.id, "status": "failed",
+                    "errors": parsed["errors"], "rows": 0}
+
+        # Save parse result + create CashEntry rows
+        cri = CashRegisterImport(
+            user_id=user["sub"],
+            source=parsed["source"],
+            file_name=file.filename or "",
+            file_sha256=sha,
+            period_start=parsed["period_start"] or None,
+            period_end=parsed["period_end"] or None,
+            total_rows=parsed["total_rows"],
+            total_amount=parsed["total_amount"],
+            rows_skipped=parsed["skipped_rows"],
+            status="parsed",
+            raw_csv_excerpt=parsed.get("raw_excerpt", "")[:500],
+        )
+        db.add(cri)
+        db.flush()  # get cri.id
+
+        imported = 0
+        for r in parsed["rows"]:
+            try:
+                # Use existing CashEntry model (already in models.py)
+                entry = CashEntry(
+                    user_id=user["sub"],
+                    date=r["date"],
+                    amount=float(r["amount"]),
+                    category=r.get("category") or "kasse_income",
+                    payment_method=r.get("payment_method") or "bar",
+                    description=r.get("note") or "",
+                )
+                db.add(entry)
+                imported += 1
+            except Exception:
+                logger.exception("kasse: CashEntry create failed")
+
+        cri.rows_imported = imported
+        cri.status = "imported"
+        db.commit()
+        db.refresh(cri)
+        return {
+            "import_id": cri.id,
+            "status": cri.status,
+            "source": cri.source,
+            "rows_imported": imported,
+            "rows_skipped": parsed["skipped_rows"],
+            "total_amount": cri.total_amount,
+            "period_start": cri.period_start.isoformat() if cri.period_start else None,
+            "period_end": cri.period_end.isoformat() if cri.period_end else None,
+        }
+    finally:
+        db.close()
+
+
+@app.get("/kasse/imports")
+@limiter.limit("30/minute")
+def kasse_imports_list(request: Request,
+                       user: dict = Depends(get_acting_context)):
+    """Recent imports for the user (last 50)."""
+    from autotax.models import CashRegisterImport
+    _require_kasse_access(user)
+    db = SessionLocal()
+    try:
+        items = db.query(CashRegisterImport).filter(
+            CashRegisterImport.user_id == user["sub"]
+        ).order_by(CashRegisterImport.created_at.desc()).limit(50).all()
+        return {
+            "items": [
+                {
+                    "id": i.id,
+                    "source": i.source,
+                    "file_name": i.file_name,
+                    "status": i.status,
+                    "rows_imported": i.rows_imported,
+                    "rows_skipped": i.rows_skipped,
+                    "total_amount": i.total_amount,
+                    "period_start": i.period_start.isoformat() if i.period_start else None,
+                    "period_end": i.period_end.isoformat() if i.period_end else None,
+                    "error_message": i.error_message,
+                    "created_at": i.created_at.isoformat() if i.created_at else None,
+                }
+                for i in items
+            ]
+        }
+    finally:
+        db.close()
+
+
+@app.delete("/kasse/imports/{import_id}")
+@limiter.limit("10/minute")
+def kasse_import_delete(request: Request, import_id: int,
+                        user: dict = Depends(get_acting_context)):
+    """Soft-rollback an import. Does NOT auto-delete CashEntry rows (user
+    keeps booked entries); only marks the import record as deleted."""
+    from autotax.models import CashRegisterImport
+    _require_kasse_access(user)
+    db = SessionLocal()
+    try:
+        cri = db.query(CashRegisterImport).filter(
+            CashRegisterImport.id == import_id,
+            CashRegisterImport.user_id == user["sub"]
+        ).first()
+        if not cri:
+            raise HTTPException(status_code=404, detail="Import nicht gefunden")
+        db.delete(cri)
+        db.commit()
+        return {"deleted": import_id}
+    finally:
+        db.close()
+
+
 @app.post("/admin/steuer/run-now")
 async def admin_run_steuer_now(user: dict = Depends(get_current_user)):
     """Manuel steuer reminder cycle (test icin)."""
