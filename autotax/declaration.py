@@ -91,6 +91,57 @@ FORM_SECTIONS = [
         ],
     },
     {
+        "key": "anlage_n",
+        "title_de": "Anlage N — Lohn aus Anstellung (optional)",
+        "title_tr": "Anlage N — Maaş (varsa, opsiyonel)",
+        "fields": [
+            {"key": "lohn_brutto", "label_de": "Bruttoarbeitslohn (Jahres)", "label_tr": "Yıllık brüt maaş",     "type": "number", "required": False, "default": 0,
+             "hint_de": "Aus deiner Lohnsteuerbescheinigung Zeile 3 (Bruttoarbeitslohn).",
+             "hint_tr": "Lohnsteuerbescheinigung Zeile 3'ten al."},
+            {"key": "lohnsteuer", "label_de": "Einbehaltene Lohnsteuer (€)", "label_tr": "Kesilen Lohnsteuer (€)", "type": "number", "required": False, "default": 0,
+             "hint_de": "Lohnsteuerbescheinigung Zeile 4 (einbehaltene Lohnsteuer).",
+             "hint_tr": "Lohnsteuerbescheinigung Zeile 4."},
+            {"key": "soli_n",     "label_de": "Solidaritätszuschlag (€)",     "label_tr": "Soli vergisi (€)",       "type": "number", "required": False, "default": 0,
+             "hint_de": "Lohnsteuerbescheinigung Zeile 5.", "hint_tr": "Lohnsteuerbescheinigung Zeile 5."},
+            {"key": "kirchensteuer", "label_de": "Kirchensteuer (€)",          "label_tr": "Kilise vergisi (€)",     "type": "number", "required": False, "default": 0,
+             "hint_de": "Falls religiöse Konfession; sonst 0.", "hint_tr": "Dini mensubiyet varsa; yoksa 0."},
+            {"key": "werbungskosten_n", "label_de": "Werbungskosten (Pauschbetrag €1.230 oder höher)", "label_tr": "Werbungskosten (sabit €1.230 veya yüksek)", "type": "number", "required": False, "default": 1230,
+             "hint_de": "Arbeitnehmer-Pauschbetrag (2025: €1.230). Höher nur wenn nachgewiesen.",
+             "hint_tr": "İşçi sabit indirimi (2025: €1.230). Yüksek için kanıt gerekir."},
+        ],
+    },
+    {
+        "key": "anlage_v",
+        "title_de": "Anlage V — Vermietung & Verpachtung (optional)",
+        "title_tr": "Anlage V — Kira gelirleri (varsa, opsiyonel)",
+        "fields": [
+            {"key": "v_adresse",    "label_de": "Adresse Mietobjekt",          "label_tr": "Kiralanan mülk adresi",  "type": "text",   "required": False,
+             "hint_de": "Straße + Hausnummer + PLZ + Ort der vermieteten Immobilie.",
+             "hint_tr": "Kiralanan mülkün sokak + ev no + PLZ + şehri."},
+            {"key": "v_einnahmen", "label_de": "Mieteinnahmen Jahres (€)",     "label_tr": "Yıllık kira geliri (€)",  "type": "number", "required": False, "default": 0,
+             "hint_de": "Summe aller Mieteinnahmen ohne Nebenkosten-Vorauszahlungen.",
+             "hint_tr": "Tüm kira gelirlerinin toplamı (yan giderler ön ödemeleri hariç)."},
+            {"key": "v_nebenkosten", "label_de": "Umlagefähige Nebenkosten erhalten (€)", "label_tr": "Alınan ortak giderler (€)", "type": "number", "required": False, "default": 0,
+             "hint_de": "Vorauszahlungen vom Mieter (Wasser, Heizung etc).",
+             "hint_tr": "Kiracıdan alınan ön ödemeler (su, ısınma vs.)."},
+            {"key": "v_afa",       "label_de": "AfA Gebäude 2% pro Jahr (€)",  "label_tr": "Yıllık bina AfA %2 (€)",   "type": "number", "required": False, "default": 0,
+             "hint_de": "Anschaffungskosten Gebäude × 2% (50 Jahre Nutzungsdauer).",
+             "hint_tr": "Bina edinme bedeli × %2 (50 yıl kullanım ömrü)."},
+            {"key": "v_zinsen",    "label_de": "Schuldzinsen Darlehen (€)",    "label_tr": "Kredi faizleri (€)",       "type": "number", "required": False, "default": 0,
+             "hint_de": "Hypothek-Zinsen für die Mietimmobilie.",
+             "hint_tr": "Kira mülkü için ipotek faizleri."},
+            {"key": "v_erhaltung", "label_de": "Erhaltungsaufwand (Reparatur) (€)", "label_tr": "Bakım/onarım gideri (€)", "type": "number", "required": False, "default": 0,
+             "hint_de": "Reparaturen, Instandhaltung (sofort absetzbar). Größere Umbauten sind Herstellungskosten.",
+             "hint_tr": "Onarım, bakım (hemen düşülebilir). Büyük tadilatlar Herstellungskosten'dir."},
+            {"key": "v_grundsteuer", "label_de": "Grundsteuer + Versicherung (€)", "label_tr": "Emlak vergisi + sigorta (€)", "type": "number", "required": False, "default": 0,
+             "hint_de": "Grundsteuer, Wohngebäudeversicherung etc.",
+             "hint_tr": "Emlak vergisi, bina sigortası vb."},
+            {"key": "v_sonst",     "label_de": "Sonstige Werbungskosten (€)",  "label_tr": "Diğer giderler (€)",       "type": "number", "required": False, "default": 0,
+             "hint_de": "Hausverwaltung, Inserate, Anwaltskosten etc.",
+             "hint_tr": "Yönetim, ilan, avukat masrafları vs."},
+        ],
+    },
+    {
         "key": "anlage_vorsorge",
         "title_de": "Anlage Vorsorgeaufwand",
         "title_tr": "Anlage Vorsorgeaufwand (sigortalar)",
@@ -630,9 +681,77 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
                    "Veräußerungsgewinn", vg_str)
     y -= 1.6 * cm
 
+    # ─── Section: ANLAGE N (Lohnsteuer — falls vorhanden) ───
+    anlage_n = data.get("lohn_brutto") or data.get("lohnsteuer")
+    if anlage_n:
+        y = ensure_space(y, 6 * cm)
+        y = section_band("E — Anlage N (Lohn aus Anstellung)", y)
+        n_rows = [
+            ("lohn_brutto", "Bruttoarbeitslohn (Jahres)"),
+            ("lohnsteuer", "Einbehaltene Lohnsteuer"),
+            ("soli_n", "Solidaritätszuschlag"),
+            ("kirchensteuer", "Kirchensteuer"),
+            ("werbungskosten_n", "Werbungskosten (Pauschbetrag)"),
+        ]
+        for i in range(0, len(n_rows), 2):
+            y = ensure_space(y, 2.5 * cm)
+            for j, (key, label) in enumerate(n_rows[i:i + 2]):
+                x = margin_l + j * (eur_w + col_gap)
+                val = data.get(key)
+                val_str = f"{float(val):.2f} €" if val not in (None, "") else "—"
+                draw_field_box(x, y, eur_w, label, val_str,
+                               show_line_num=(j == 0))
+            y -= 1.25 * cm
+        y -= 0.3 * cm
+
+    # ─── Section: ANLAGE V (Vermietung — falls vorhanden) ───
+    anlage_v = data.get("v_einnahmen") or data.get("v_adresse")
+    if anlage_v:
+        y = ensure_space(y, 10 * cm)
+        y = section_band("F — Anlage V (Vermietung & Verpachtung)", y)
+        # Adresse full-width
+        draw_field_box(margin_l, y, content_w, "Adresse Mietobjekt",
+                       _human_value(data.get("v_adresse"), None, "de"),
+                       show_line_num=True)
+        y -= 1.25 * cm
+        v_rows = [
+            ("v_einnahmen", "Mieteinnahmen"),
+            ("v_nebenkosten", "Umlagef. Nebenkosten erhalten"),
+            ("v_afa", "AfA Gebäude 2%"),
+            ("v_zinsen", "Schuldzinsen"),
+            ("v_erhaltung", "Erhaltungsaufwand"),
+            ("v_grundsteuer", "Grundsteuer + Versicherung"),
+            ("v_sonst", "Sonstige Werbungskosten"),
+        ]
+        for i in range(0, len(v_rows), 2):
+            y = ensure_space(y, 2.5 * cm)
+            for j, (key, label) in enumerate(v_rows[i:i + 2]):
+                x = margin_l + j * (eur_w + col_gap)
+                val = data.get(key)
+                val_str = f"{float(val or 0):.2f} €"
+                draw_field_box(x, y, eur_w, label, val_str,
+                               show_line_num=(j == 0))
+            y -= 1.25 * cm
+        # V net calculation
+        v_net = (
+            float(data.get("v_einnahmen") or 0)
+            + float(data.get("v_nebenkosten") or 0)
+            - float(data.get("v_afa") or 0)
+            - float(data.get("v_zinsen") or 0)
+            - float(data.get("v_erhaltung") or 0)
+            - float(data.get("v_grundsteuer") or 0)
+            - float(data.get("v_sonst") or 0)
+        )
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(margin_l + 0.3 * cm, y,
+                     f"Überschuss Vermietung: {v_net:.2f} €")
+        y -= 0.8 * cm
+
     # ─── Section: ANLAGE VORSORGEAUFWAND ───
+    next_letter = "G" if (anlage_n and anlage_v) else ("F" if (anlage_n or anlage_v) else "E")
     y = ensure_space(y, 8 * cm)
-    y = section_band("E — Anlage Vorsorgeaufwand", y)
+    y = section_band(f"{next_letter} — Anlage Vorsorgeaufwand", y)
 
     vorsorge_rows = [
         ("kv_basis", "Krankenversicherung Basis"),
