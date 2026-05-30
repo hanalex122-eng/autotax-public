@@ -2882,6 +2882,113 @@ def declaration_finalize(request: Request, year: int, user: dict = Depends(get_a
         db.close()
 
 
+@app.get("/steuer/declaration/{year}/bundle")
+@limiter.limit("10/minute")
+def declaration_steuerberater_bundle(
+    request: Request, year: int,
+    user: dict = Depends(get_acting_context),
+):
+    """Steuerberater bundle: ZIP enthält PDF + XML + EÜR-DATEV-CSV.
+
+    Was Steuerberater bekommt:
+    - PDF mit allen Formularangaben
+    - XML mit strukturierten Daten
+    - DATEV CSV mit Buchungsstapel (Invoice/CashEntry des Jahres)
+    """
+    from autotax.models import TaxDeclaration
+    from autotax.declaration import generate_pdf_skeleton, generate_elster_xml
+    import zipfile
+    _require_steuer_declaration_access(user)
+    db = SessionLocal()
+    try:
+        decl = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if not decl:
+            raise HTTPException(status_code=404, detail="Erklärung nicht gefunden")
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        companies = db.query(UserCompany).filter(
+            UserCompany.user_id == user["sub"]).all()
+        pdf_bytes = generate_pdf_skeleton(decl, u, companies)
+        xml_str = generate_elster_xml(decl, u)
+
+        # DATEV CSV (Invoice/CashEntry des Jahres)
+        from autotax.datev import _DATEV_KONTO_MAP, _DATEV_KONTO_MAP_INCOME
+        from sqlalchemy import func as _func
+        year_prefix = f"{year}-"
+        invoices = db.query(Invoice).filter(
+            Invoice.user_id == user["sub"],
+            Invoice.is_deleted.is_(False),
+            Invoice.date.like(f"{year_prefix}%"),
+        ).order_by(Invoice.date.asc()).all()
+        cash = db.query(CashEntry).filter(
+            CashEntry.user_id == user["sub"],
+            CashEntry.is_deleted.is_(False),
+            CashEntry.date.like(f"{year_prefix}%"),
+        ).order_by(CashEntry.date.asc()).all()
+
+        csv_buf = io.StringIO()
+        csv_buf.write("# AutoTax.Cloud - DATEV-Buchungsstapel - Alle Daten pruefen\n")
+        csv_buf.write(f"# Jahr: {year} | Erstellt: {date.today().isoformat()}\n")
+        csv_buf.write("Umsatz;Soll/Haben;Konto;Gegenkonto;BU;Belegdatum;Buchungstext;USt\n")
+        for inv in invoices:
+            sh = "S" if (inv.invoice_type == "expense") else "H"
+            date_str = ""
+            parts = (inv.date or "").split("-")
+            if len(parts) == 3:
+                date_str = f"{parts[2]}{parts[1]}"
+            amt = f"{(inv.total_amount or 0):.2f}".replace(".", ",")
+            vendor = (inv.vendor or "").replace(";", " ")[:80]
+            cat = inv.category or "other"
+            konto = (_DATEV_KONTO_MAP.get(cat, "6800") if inv.invoice_type == "expense"
+                     else _DATEV_KONTO_MAP_INCOME.get(cat, "8400"))
+            vat = (inv.vat_rate or "0").replace("%", "") if inv.vat_rate else "0"
+            csv_buf.write(f"{amt};{sh};{konto};1200;{vat};{date_str};{vendor};{vat}\n")
+        for ce in cash:
+            sh = "H" if (ce.amount or 0) > 0 else "S"
+            date_str = ""
+            parts = (ce.date or "").split("-")
+            if len(parts) == 3:
+                date_str = f"{parts[2]}{parts[1]}"
+            amt = f"{abs(ce.amount or 0):.2f}".replace(".", ",")
+            desc = (ce.description or "Kasse").replace(";", " ")[:80]
+            cat = ce.category or "kasse_income"
+            konto = _DATEV_KONTO_MAP_INCOME.get(cat, "8400")
+            csv_buf.write(f"{amt};{sh};{konto};1000;0;{date_str};{desc};0\n")
+        csv_bytes = csv_buf.getvalue().encode("utf-8")
+
+        # Build ZIP
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(f"Steuererklaerung_{year}.pdf", pdf_bytes)
+            z.writestr(f"ESt_{year}_Daten.xml", xml_str.encode("utf-8"))
+            z.writestr(f"DATEV_Buchungen_{year}.csv", csv_bytes)
+            readme = (
+                f"AutoTax.Cloud - Steuerberater-Bundle\n"
+                f"=====================================\n\n"
+                f"Jahr: {year}\n"
+                f"Kunde: {u.email if u else ''}\n"
+                f"Erstellt: {date.today().isoformat()}\n\n"
+                f"Enthaltene Dateien:\n"
+                f"  Steuererklaerung_{year}.pdf   - Erklärungsformular\n"
+                f"  ESt_{year}_Daten.xml          - Strukturierte Daten\n"
+                f"  DATEV_Buchungen_{year}.csv    - Buchungsstapel (DATEV-Format)\n\n"
+                f"WICHTIG: Vor Übermittlung an ELSTER prüfen.\n"
+                f"Keine rechtsverbindliche Steuerberatung.\n"
+            )
+            z.writestr("README.txt", readme.encode("utf-8"))
+        zip_buf.seek(0)
+    finally:
+        db.close()
+    filename = f"Steuerberater_Bundle_{year}.zip"
+    return Response(
+        content=zip_buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @app.get("/steuer/declaration/{year}/xml")
 @limiter.limit("20/minute")
 def declaration_xml(request: Request, year: int, user: dict = Depends(get_acting_context)):

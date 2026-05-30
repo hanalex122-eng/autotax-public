@@ -108,6 +108,20 @@ FORM_SECTIONS = [
             {"key": "werbungskosten_n", "label_de": "Werbungskosten (Pauschbetrag €1.230 oder höher)", "label_tr": "Werbungskosten (sabit €1.230 veya yüksek)", "type": "number", "required": False, "default": 1230, "zeile_de": "Zeile 31",
              "hint_de": "Arbeitnehmer-Pauschbetrag (2025: €1.230). Höher nur wenn nachgewiesen.",
              "hint_tr": "İşçi sabit indirimi (2025: €1.230). Yüksek için kanıt gerekir."},
+            # Pendlerpauschale — Entfernungspauschale Wohnung-Arbeitsstätte
+            {"key": "pendler_km",    "label_de": "Entfernung Wohnung-Arbeitsstätte (km, einfache Strecke)", "label_tr": "Ev-iş yeri mesafesi (km, tek yön)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 32",
+             "hint_de": "Kürzeste Strecke (Google Maps) zwischen Wohnung und erster Tätigkeitsstätte. NUR einfache Strecke, nicht hin-und-zurück.",
+             "hint_tr": "Ev ve birinci iş yeri arasındaki EN KISA mesafe (tek yön). Gidiş-dönüş değil."},
+            {"key": "pendler_tage",  "label_de": "Arbeitstage pro Jahr (Pendlertage)", "label_tr": "Yıllık iş günü sayısı", "type": "number", "required": False, "default": 220, "zeile_de": "Zeile 33",
+             "hint_de": "2024 typisch 220-230 Tage. Krankheit/Urlaub abziehen. Homeoffice-Tage NICHT zählen.",
+             "hint_tr": "2024 tipik 220-230 gün. Hastalık/tatil çıkar. Homeoffice günleri SAYMA."},
+            {"key": "pendler_mittel", "label_de": "Verkehrsmittel", "label_tr": "Ulaşım türü", "type": "select", "required": False, "zeile_de": "Zeile 34",
+             "options": [{"v":"auto","de":"Auto","tr":"Araba"},{"v":"oeffentlich","de":"Öffentliche Verkehrsmittel","tr":"Toplu taşıma"},{"v":"fahrrad","de":"Fahrrad","tr":"Bisiklet"},{"v":"zu_fuss","de":"Zu Fuß","tr":"Yürüyerek"},{"v":"mix","de":"Gemischt","tr":"Karışık"}],
+             "hint_de": "Entfernungspauschale gilt für alle Verkehrsmittel gleich (€0.30 bis 20km, €0.38 ab 21km, 2024).",
+             "hint_tr": "Entfernungspauschale tüm araçlar için aynı (€0.30 ilk 20km, €0.38 21km üstü, 2024)."},
+            {"key": "homeoffice_tage", "label_de": "Homeoffice-Tage (€6/Tag bis €1.260)", "label_tr": "Ev ofis günü (€6/gün, max €1.260)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 44",
+             "hint_de": "2024: €6/Tag, max 210 Tage = €1.260. Tag mit Homeoffice — keine zusätzliche Pendlerpauschale für denselben Tag.",
+             "hint_tr": "2024: günlük €6, max 210 gün = €1.260. Homeoffice günü — aynı gün için Pendlerpauschale ALMA."},
         ],
     },
     {
@@ -312,6 +326,27 @@ BEHINDERTEN_PAUSCHBETRAG = {
 BEHINDERTEN_PAUSCHBETRAG_ERHOEHT = 7400
 
 
+def pendlerpauschale(entfernung_km: float | None,
+                     arbeitstage: int | None) -> float:
+    """Compute Entfernungspauschale 2024:
+    - First 20 km: €0.30/km/day
+    - Above 20 km: €0.38/km/day (befristet bis 2026)
+    Total = (20 × 0.30 + max(0, km-20) × 0.38) × days
+    """
+    if not entfernung_km or not arbeitstage:
+        return 0.0
+    try:
+        km = float(entfernung_km)
+        tage = int(arbeitstage)
+    except (TypeError, ValueError):
+        return 0.0
+    if km <= 0 or tage <= 0:
+        return 0.0
+    first_20 = min(km, 20) * 0.30
+    above_20 = max(0, km - 20) * 0.38
+    return round((first_20 + above_20) * tage, 2)
+
+
 def pauschbetrag_for_gdb(gdb: int, merkmal: str | None = None) -> int:
     """Return Behindertenpauschbetrag in € for given Grad der Behinderung
     + Merkmal. H/Bl/TBl override regular GdB table."""
@@ -422,6 +457,26 @@ EXPENSE_GUIDE = [
         "explanation_tr": "İşçilik bedelinin %20'si, yıllık €1.200'e kadar. SADECE işçilik (malzeme yok). Fatura + havale zorunlu.",
         "where_de": "Sonderausgaben → §35a Handwerker",
         "where_tr": "Sonderausgaben → §35a Handwerker",
+    },
+    {
+        "category": "hausrenovierung",
+        "label_de": "Hausrenovierung / Tamir-Rechnung",
+        "label_tr": "Ev tamir / yenileme faturası",
+        "explanation_de": "Hängt von der Immobilie ab: (1) Eigenes Heim → Handwerker §35a (20% Lohnanteil, max €1.200). (2) Vermietetes Objekt → Anlage V → Erhaltungsaufwand (voll absetzbar). (3) Neubau / Kauf → NICHT absetzbar (Anschaffungskosten).",
+        "explanation_tr": "Mülke göre değişir: (1) Kendi evin → Handwerker §35a (%20 işçilik, max €1.200). (2) Kiraya verdiğin → Anlage V → Erhaltungsaufwand (tam düşülebilir). (3) Yeni alım/inşaat → düşülemez (Anschaffungskosten).",
+        "where_de": "Eigene = Sonderausgaben §35a · Vermietet = Anlage V Erhaltungsaufwand",
+        "where_tr": "Kendi = Sonderausgaben §35a · Kira = Anlage V Erhaltungsaufwand",
+        "requirements_de": "Rechnung + Banküberweisung Pflicht (Bargeld NICHT). Material und Lohn getrennt ausgewiesen.",
+        "requirements_tr": "Fatura + banka havalesi zorunlu (nakit YOK). Malzeme ve işçilik ayrı belirtilmeli.",
+    },
+    {
+        "category": "pendler",
+        "label_de": "Pendlerpauschale (Weg zur Arbeit)",
+        "label_tr": "Pendlerpauschale (işe gidiş yolu)",
+        "explanation_de": "€0,30 pro km (erste 20km) + €0,38 pro km (ab 21km, befristet bis 2026). Multipliziert mit Arbeitstagen. Pro km Entfernungspauschale unabhängig vom Verkehrsmittel.",
+        "explanation_tr": "Km başına €0,30 (ilk 20km) + €0,38 (21km üstü, 2026'ya kadar). İş günü ile çarpılır. Ulaşım türünden bağımsız.",
+        "where_de": "Anlage N → Pendlerpauschale (Zeile 32-34)",
+        "where_tr": "Anlage N → Pendlerpauschale (Zeile 32-34)",
     },
 ]
 
@@ -943,9 +998,9 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
     y -= 1.6 * cm
 
     # ─── Section: ANLAGE N (Lohnsteuer — falls vorhanden) ───
-    anlage_n = data.get("lohn_brutto") or data.get("lohnsteuer")
+    anlage_n = data.get("lohn_brutto") or data.get("lohnsteuer") or data.get("pendler_km")
     if anlage_n:
-        y = ensure_space(y, 6 * cm)
+        y = ensure_space(y, 8 * cm)
         y = section_band("E — Anlage N (Lohn aus Anstellung)", y)
         n_rows = [
             ("lohn_brutto", "Bruttoarbeitslohn (Jahres)"),
@@ -953,16 +1008,36 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
             ("soli_n", "Solidaritätszuschlag"),
             ("kirchensteuer", "Kirchensteuer"),
             ("werbungskosten_n", "Werbungskosten (Pauschbetrag)"),
+            ("pendler_km", "Entfernung Wohnung-Arbeit (km)"),
+            ("pendler_tage", "Arbeitstage / Jahr"),
+            ("homeoffice_tage", "Homeoffice-Tage (€6/Tag)"),
         ]
         for i in range(0, len(n_rows), 2):
             y = ensure_space(y, 2.5 * cm)
             for j, (key, label) in enumerate(n_rows[i:i + 2]):
                 x = margin_l + j * (eur_w + col_gap)
                 val = data.get(key)
-                val_str = f"{float(val):.2f} €" if val not in (None, "") else "—"
+                if key in ("pendler_km", "pendler_tage", "homeoffice_tage"):
+                    val_str = f"{val}" if val not in (None, "") else "—"
+                else:
+                    val_str = f"{float(val):.2f} €" if val not in (None, "") else "—"
                 draw_field_box(x, y, eur_w, label, val_str,
                                show_line_num=(j == 0))
             y -= 1.25 * cm
+        # Auto-compute Pendlerpauschale + HO-Pauschale
+        pp = pendlerpauschale(data.get("pendler_km"), data.get("pendler_tage"))
+        ho_p = min(float(data.get("homeoffice_tage") or 0) * 6, 1260)
+        if pp > 0 or ho_p > 0:
+            c.setFillColor(INK)
+            c.setFont("Helvetica-Bold", 10)
+            if pp > 0:
+                c.drawString(margin_l + 0.3 * cm, y,
+                             f"Pendlerpauschale: {pp:.2f} € (Werbungskosten zusätzlich)")
+                y -= 0.55 * cm
+            if ho_p > 0:
+                c.drawString(margin_l + 0.3 * cm, y,
+                             f"Homeoffice-Pauschale: {ho_p:.2f} € (Werbungskosten zusätzlich)")
+                y -= 0.55 * cm
         y -= 0.3 * cm
 
     # ─── Section: ANLAGE V (Vermietung — falls vorhanden) ───
@@ -1400,7 +1475,7 @@ def generate_elster_xml(declaration, user) -> str:
     parts.append(amount("Veraeusserungsgewinn", data.get("veraeusserungsgewinn")))
     parts.append('  </AnlageS>')
 
-    if data.get("lohn_brutto") or data.get("lohnsteuer"):
+    if data.get("lohn_brutto") or data.get("lohnsteuer") or data.get("pendler_km"):
         parts.append('')
         parts.append('  <AnlageN>')
         parts.append(amount("Bruttoarbeitslohn", data.get("lohn_brutto")))
@@ -1408,6 +1483,16 @@ def generate_elster_xml(declaration, user) -> str:
         parts.append(amount("Solidaritaetszuschlag", data.get("soli_n")))
         parts.append(amount("Kirchensteuer", data.get("kirchensteuer")))
         parts.append(amount("Werbungskosten", data.get("werbungskosten_n")))
+        if data.get("pendler_km"):
+            pp = pendlerpauschale(data.get("pendler_km"), data.get("pendler_tage"))
+            parts.append(field("EntfernungKm", data.get("pendler_km")))
+            parts.append(field("Arbeitstage", data.get("pendler_tage")))
+            parts.append(field("Verkehrsmittel", data.get("pendler_mittel")))
+            parts.append(amount("Entfernungspauschale", pp))
+        if data.get("homeoffice_tage"):
+            ho_p = min(float(data.get("homeoffice_tage") or 0) * 6, 1260)
+            parts.append(field("HomeofficeTage", data.get("homeoffice_tage")))
+            parts.append(amount("HomeofficePauschale", ho_p))
         parts.append('  </AnlageN>')
 
     if data.get("v_einnahmen") or data.get("v_adresse"):
