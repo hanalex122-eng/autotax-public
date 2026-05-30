@@ -2462,6 +2462,32 @@ def steuer_upcoming(request: Request, user: dict = Depends(get_acting_context)):
 # See autotax/declaration.py + .claude/steuererklaerung_plan.md.
 # ────────────────────────────────────────────────────────────────────
 
+# Plans that include Steuererklärung access. Admin override always.
+_STEUER_DECL_PLANS = {"starter", "pro", "ai_steuer", "premium"}
+
+
+def _require_steuer_declaration_access(user: dict) -> None:
+    """Raise 402 if user's plan does not include Steuererklärung.
+    Admins (in ADMIN_EMAILS) always pass."""
+    email = (user.get("email") or "").strip().lower()
+    if _ADMIN_EMAILS and email in _ADMIN_EMAILS:
+        return
+    plan = _user_plan(user["sub"])
+    if plan in _STEUER_DECL_PLANS:
+        return
+    raise HTTPException(
+        status_code=402,
+        detail={
+            "error": "premium_feature",
+            "feature": "steuererklaerung",
+            "current_plan": plan,
+            "required_plans": sorted(_STEUER_DECL_PLANS),
+            "message": "Steuererklärung ist im aktuellen Plan nicht enthalten — bitte upgraden.",
+            "upgrade_url": "/app#pricing",
+        },
+    )
+
+
 def _eur_profit_for_year(db, user_id: int, year: int) -> float:
     """Compute Gewinn = sum(income invoices) - sum(expense invoices)
     for the given user + tax year. Soft-deleted rows excluded.
@@ -2509,6 +2535,7 @@ def declaration_schema():
 def declaration_get(request: Request, year: int, user: dict = Depends(get_acting_context)):
     """Return existing declaration for the year, or 404 if none yet."""
     from autotax.models import TaxDeclaration
+    _require_steuer_declaration_access(user)
     if year < 2020 or year > 2030:
         raise HTTPException(status_code=400, detail="Jahr außerhalb des unterstützten Bereichs")
     db = SessionLocal()
@@ -2533,6 +2560,7 @@ def declaration_create(request: Request, year: int, user: dict = Depends(get_act
     from autotax.declaration import (
         autofill_from_user_data, serialize_data, detect_insurance_amounts,
     )
+    _require_steuer_declaration_access(user)
     if year < 2020 or year > 2030:
         raise HTTPException(status_code=400, detail="Jahr außerhalb des unterstützten Bereichs")
     db = SessionLocal()
@@ -2570,6 +2598,7 @@ def declaration_autodetect_insurance(request: Request, year: int,
     """Manuel tetikleme: invoice'larda sigorta tara ve toplamlari donsun.
     Frontend bu degerleri yari otomatik onceyle (kullanici onaylayabilir)."""
     from autotax.declaration import detect_insurance_amounts
+    _require_steuer_declaration_access(user)
     db = SessionLocal()
     try:
         out = detect_insurance_amounts(db, user["sub"], year)
@@ -2587,6 +2616,7 @@ def declaration_update(request: Request, year: int,
     Merges with existing data (partial update)."""
     from autotax.models import TaxDeclaration
     from autotax.declaration import serialize_data, deserialize_data
+    _require_steuer_declaration_access(user)
     db = SessionLocal()
     try:
         decl = db.query(TaxDeclaration).filter(
@@ -2616,6 +2646,7 @@ def declaration_validate(request: Request, year: int, user: dict = Depends(get_a
     """Return validation errors (no side effects). For live UI hints."""
     from autotax.models import TaxDeclaration
     from autotax.declaration import deserialize_data, validate
+    _require_steuer_declaration_access(user)
     db = SessionLocal()
     try:
         decl = db.query(TaxDeclaration).filter(
@@ -2636,6 +2667,7 @@ def declaration_finalize(request: Request, year: int, user: dict = Depends(get_a
     """Validate + mark as finalized. Returns errors if validation fails."""
     from autotax.models import TaxDeclaration
     from autotax.declaration import deserialize_data, validate
+    _require_steuer_declaration_access(user)
     db = SessionLocal()
     try:
         decl = db.query(TaxDeclaration).filter(
@@ -2664,6 +2696,7 @@ def declaration_pdf(request: Request, year: int, user: dict = Depends(get_acting
     """Render draft/finalized declaration as PDF (skeleton layout)."""
     from autotax.models import TaxDeclaration
     from autotax.declaration import generate_pdf_skeleton
+    _require_steuer_declaration_access(user)
     db = SessionLocal()
     try:
         decl = db.query(TaxDeclaration).filter(

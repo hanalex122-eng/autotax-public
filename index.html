@@ -4766,6 +4766,7 @@ function DeclarationView(){
   const[errors,setErrors]=useState({}); // field key -> error msg
   const[showEur,setShowEur]=useState(false);
   const[autoDetecting,setAutoDetecting]=useState(false);
+  const[locked,setLocked]=useState(null); // null|{current_plan, required_plans, message}
   const saveTimerRef=useRef(null);
 
   const autoDetectInsurance=async()=>{
@@ -4805,13 +4806,16 @@ function DeclarationView(){
   };
 
   const load=async(yr=year)=>{
-    setLoading(true);setErr("");setErrors({});
+    setLoading(true);setErr("");setErrors({});setLocked(null);
     try{
       const sr=await fetch(API+"/steuer/declaration/schema");
       const sd=await sr.json();
       if(sr.ok)setSchema(sd.sections||[]);
       const r=await _authFetch(API+"/steuer/declaration/"+yr);
-      if(r.status===404){setDecl(null);}
+      if(r.status===402){
+        // Premium feature — kullanıcı plan'ı yeterli değil
+        try{const j=await r.json();setLocked(j.detail||{});}catch(e){setLocked({});}
+      }else if(r.status===404){setDecl(null);}
       else if(r.ok){
         const d=await r.json();
         setDecl(d);
@@ -4877,6 +4881,55 @@ function DeclarationView(){
   };
 
   if(loading)return<div style={{padding:24,color:"var(--text-muted)"}}>{tr("Lädt…","Loading…","Yükleniyor…")}</div>;
+
+  if(locked!==null){
+    const currentPlan=locked.current_plan||"free";
+    const planNames={free:"Free",early:"Early",starter:"Starter",pro:"Pro",ai_steuer:"AI Steuer",premium:"Premium"};
+    return(<div style={{padding:"40px 20px",maxWidth:720,margin:"0 auto"}}>
+      <div style={{background:"linear-gradient(135deg,rgba(139,92,246,0.10),rgba(99,102,241,0.05))",border:"1px solid rgba(139,92,246,0.3)",borderRadius:16,padding:"36px 28px",textAlign:"center"}}>
+        <div style={{fontSize:56,marginBottom:16}}>🔒</div>
+        <h1 style={{margin:"0 0 12px",fontSize:24,fontWeight:800,color:"var(--text)"}}>
+          {tr("Steuererklärung — Premium-Funktion","Steuererklärung — Premium feature","Vergi Beyannamesi — Premium özellik")}
+        </h1>
+        <p style={{margin:"0 0 24px",color:"var(--text-muted)",fontSize:15,lineHeight:1.6,maxWidth:520,marginLeft:"auto",marginRight:"auto"}}>
+          {tr(
+            "Die automatische Erstellung der Einkommensteuererklärung ist in den Plänen Starter und höher enthalten. Dein aktueller Plan: ",
+            "Automatic preparation of the income tax return is included in Starter and higher plans. Your current plan: ",
+            "Otomatik gelir vergisi beyannamesi Starter ve üstü planlarda dahildir. Mevcut planın: "
+          )}
+          <strong>{planNames[currentPlan]||currentPlan}</strong>
+        </p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:28,maxWidth:520,margin:"0 auto 28px"}}>
+          {[
+            {key:"starter",name:"Starter",price:"€15/Monat",hl:"⭐ "+tr("Beliebt","Popular","Popüler")},
+            {key:"pro",name:"Pro",price:"€39/Monat",hl:tr("+ KI-Analyse","+ AI Analysis","+ Akıllı Analiz")},
+            {key:"ai_steuer",name:"AI Steuer",price:"€89/Monat",hl:tr("+ Steuer-Chat","+ Tax Chat","+ Vergi Chat")},
+          ].map(p=>(
+            <div key={p.key} style={{padding:14,background:"var(--card)",border:"1px solid var(--border)",borderRadius:10,textAlign:"left"}}>
+              <div style={{fontSize:14,fontWeight:700,color:"var(--accent)",marginBottom:4}}>{p.name}</div>
+              <div style={{fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:4}}>{p.price}</div>
+              <div style={{fontSize:11,color:"var(--text-muted)"}}>{p.hl}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
+          <button onClick={()=>{window.location.hash="#pricing";if(typeof setPage==="function")setPage("pricing");else window.location.reload();}} style={{padding:"14px 28px",background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer",boxShadow:"0 8px 20px rgba(139,92,246,0.3)"}}>
+            🚀 {tr("Jetzt upgraden","Upgrade now","Şimdi yükselt")}
+          </button>
+          <a href="#pricing" onClick={e=>{e.preventDefault();window.location.hash="#pricing";}} style={{padding:"14px 24px",background:"transparent",color:"var(--text-muted)",border:"1px solid var(--border)",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer",textDecoration:"none",display:"inline-flex",alignItems:"center"}}>
+            {tr("Pläne vergleichen","Compare plans","Planları karşılaştır")} →
+          </a>
+        </div>
+        <div style={{marginTop:24,padding:14,background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.25)",borderRadius:8,fontSize:13,color:"var(--text-muted)"}}>
+          💡 {tr(
+            "Mit jedem bezahlten Plan: Mantelbogen + Anlage S + Anlage Vorsorgeaufwand, automatische Auffüllung aus deinen Belegen, PDF-Export für ELSTER.",
+            "With any paid plan: Main form + Anlage S + Anlage Vorsorgeaufwand, auto-fill from your receipts, PDF export for ELSTER.",
+            "Her ücretli planda: Ana form + Anlage S + Vorsorge, belgelerinden otomatik dolum, ELSTER için PDF dışa aktarım."
+          )}
+        </div>
+      </div>
+    </div>);
+  }
 
   const errorCount=Object.keys(errors).length;
 
