@@ -43,7 +43,7 @@ jobs:
         # Uses dummy env so app initialises without real services.
         env:
           DATABASE_URL: "sqlite:///./test.db"
-          JWT_SECRET: "ci-only-dummy-secret-do-not-use"
+          JWT_SECRET: "ci-only-dummy-jwt-secret-for-testing-only-32plus-chars"
           STRIPE_SECRET_KEY: ""
           ANTHROPIC_API_KEY: ""
           OCR_API_KEY: ""
