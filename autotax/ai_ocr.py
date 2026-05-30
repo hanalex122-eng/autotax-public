@@ -343,28 +343,33 @@ _TABLE_VISION_PROMPT = """You are a parser for German handwritten or scanned Kas
 
 The image shows a table with columns like: Nr, Datum, Beschreibung, Einnahmen, Ausgaben, Saldo.
 
-Extract EVERY visible row as JSON. Return ONLY a JSON array (no markdown, no text before/after):
+Extract EVERY visible data row as JSON. Return ONLY a JSON array — no markdown, no commentary.
+
+CRITICAL: Return ALL rows you can see, including UNCERTAIN ones. Mark uncertainty with "is_uncertain": true.
 
 [
   {
+    "row_no": 1,
     "date": "YYYY-MM-DD",
     "description": "Tragetasche Leukotape",
     "income": 0,
     "expense": 26.99,
-    "saldo": -8148.23
+    "saldo": -8148.23,
+    "is_uncertain": false
   },
   ...
 ]
 
 Rules:
-- date: convert any format (12.9.21, 9.9.21, 13/09/2021, etc.) to YYYY-MM-DD. Use 20YY for 2-digit years (21→2021).
-- income/expense: exactly ONE of them > 0 per row. The other is 0. Round to 2 decimals.
-- saldo: optional, the running balance (last column). 0 or null if not visible.
-- description: clean the text — fix obvious OCR mistakes if confident (e.g. "Tragetache" → "Tragetasche"). Keep as-is if unsure.
-- Skip header rows (Nr/Datum/Beschreibung etc.) and total/sum rows.
-- If a row's amount column is empty, skip the row (don't invent amounts).
-- Return rows in the order they appear on the image.
-- Output ONLY the JSON array. No commentary. No code fences."""
+- row_no: sequential row number from the visible table (1, 2, 3 ...). Helps users locate gaps.
+- date: convert any format (12.9.21, 9.9.21, 13/09/2021) to YYYY-MM-DD. Use 20YY for 2-digit years.
+- income/expense: usually exactly ONE is > 0. If you can't read the amount but the row exists, use null and mark is_uncertain=true.
+- saldo: optional running balance (last column). null if not visible.
+- description: clean if confident, keep as-is if unsure.
+- Skip header rows ("Nr/Datum/Beschreibung") and TOTAL/SUMME rows.
+- DO include partial rows — mark is_uncertain=true if amount/date unclear.
+- Return rows in TABLE ORDER (top to bottom).
+- Output ONLY the JSON array. Be COMPLETE — don't stop early."""
 
 
 async def ai_parse_table_image(image_bytes: bytes, filename: str = "table.jpg") -> Optional[list]:
@@ -391,23 +396,34 @@ async def ai_parse_table_image(image_bytes: bytes, filename: str = "table.jpg") 
         return None
 
     # 5MB üstünü PIL ile yeniden boyutlandır (Anthropic vision limit)
+    # Handwriting için 3500px (önceki 2000 düşüktü, detay kayboluyordu)
     max_size = 5 * 1024 * 1024
-    if len(image_bytes) > max_size:
+    target_width = 3500  # 2000 -> 3500 (handwriting detail)
+    jpeg_quality = 92    # 85 -> 92 (better handwriting recognition)
+    if len(image_bytes) > max_size or True:  # always reprocess for quality
         try:
             from PIL import Image as _Image
             import io as _io
             img = _Image.open(_io.BytesIO(image_bytes))
-            # Genişliği 2000px'e indir (kalite koru)
             w, h = img.size
-            if w > 2000:
-                new_w = 2000
+            if w > target_width:
+                new_w = target_width
                 new_h = int(h * (new_w / w))
                 img = img.resize((new_w, new_h), _Image.LANCZOS)
             buf = _io.BytesIO()
-            img.convert("RGB").save(buf, format="JPEG", quality=85)
-            image_bytes = buf.getvalue()
-            logger.info("Vision table: resized %dx%d → %dx%d (%d KB)",
-                        w, h, img.width, img.height, len(image_bytes) // 1024)
+            img.convert("RGB").save(buf, format="JPEG", quality=jpeg_quality)
+            new_bytes = buf.getvalue()
+            # Only swap if it fits or smaller than original
+            if len(new_bytes) <= max_size:
+                image_bytes = new_bytes
+                logger.info("Vision table: resized %dx%d → %dx%d (%d KB, q=%d)",
+                            w, h, img.width, img.height,
+                            len(image_bytes) // 1024, jpeg_quality)
+            elif len(image_bytes) > max_size:
+                # Original too big, must compress harder
+                buf2 = _io.BytesIO()
+                img.convert("RGB").save(buf2, format="JPEG", quality=75)
+                image_bytes = buf2.getvalue()
         except Exception as e:
             logger.warning("Vision table: resize failed (%s) — sending original", e)
 
@@ -421,7 +437,13 @@ async def ai_parse_table_image(image_bytes: bytes, filename: str = "table.jpg") 
     elif fn_lower.endswith(".gif"):
         media_type = "image/gif"
 
-    model = (os.getenv("AI_OCR_MODEL") or "claude-haiku-4-5-20251001").strip()
+    # Vision tablo modeli için ayri env override (handwriting -> Sonnet/Opus daha iyi).
+    # Default Haiku, Railway env AI_VISION_TABLE_MODEL ile override.
+    model = (
+        os.getenv("AI_VISION_TABLE_MODEL")
+        or os.getenv("AI_OCR_MODEL")
+        or "claude-haiku-4-5-20251001"
+    ).strip()
     content = [
         {
             "type": "image",
@@ -436,7 +458,9 @@ async def ai_parse_table_image(image_bytes: bytes, filename: str = "table.jpg") 
 
     payload = {
         "model": model,
-        "max_tokens": 4096,  # 50 satır için bol miktarda
+        # 8192: 50+ satir el yazisi icin (her satir ~150-200 token).
+        # Eski 4096'de 32 satir kesiliyordu (4800 token > 4096).
+        "max_tokens": 8192,
         "messages": [{"role": "user", "content": content}],
     }
     try:
@@ -459,46 +483,86 @@ async def ai_parse_table_image(image_bytes: bytes, filename: str = "table.jpg") 
             text = _strip_json_fences(text).strip()
             if not text:
                 return None
-            # Parse JSON array
+            # Parse JSON array — robust 3-tier fallback
+            rows = None
+            # 1) Direkt parse
             try:
                 rows = json.loads(text)
             except json.JSONDecodeError:
+                pass
+            # 2) Regex array extract
+            if rows is None:
                 m = re.search(r"\[[\s\S]*\]", text)
-                if not m:
-                    logger.warning("Vision table: no JSON array in response: %s", text[:200])
-                    return None
-                try:
-                    rows = json.loads(m.group(0))
-                except Exception as je:
-                    logger.warning("Vision table: JSON parse failed: %s", je)
-                    return None
-            if not isinstance(rows, list):
-                logger.warning("Vision table: result is not a list (%s)", type(rows))
+                if m:
+                    try:
+                        rows = json.loads(m.group(0))
+                    except Exception:
+                        pass
+            # 3) Tek tek satır kurtarma — { } regex tarayarak her satırı dene
+            if rows is None:
+                rows = []
+                row_pattern = re.compile(
+                    r'\{\s*"row_no".*?\}', re.DOTALL,
+                )
+                for m2 in row_pattern.finditer(text):
+                    try:
+                        single = json.loads(m2.group(0))
+                        if isinstance(single, dict):
+                            rows.append(single)
+                    except Exception:
+                        pass
+                if rows:
+                    logger.warning(
+                        "Vision table: JSON cut off but recovered %d rows via regex for %s",
+                        len(rows), filename,
+                    )
+            if not isinstance(rows, list) or not rows:
+                logger.warning(
+                    "Vision table: zero rows recovered for %s. Response head: %s",
+                    filename, text[:300],
+                )
                 return None
-            # Normalize
+
+            # Normalize — KEEP uncertain rows (don't silently drop)
             cleaned = []
+            uncertain_count = 0
             for r in rows:
                 if not isinstance(r, dict):
                     continue
+                inc_raw = r.get("income")
+                exp_raw = r.get("expense")
                 try:
-                    income = round(float(r.get("income") or 0), 2)
+                    income = round(float(inc_raw), 2) if inc_raw not in (None, "") else None
                 except (TypeError, ValueError):
-                    income = 0.0
+                    income = None
                 try:
-                    expense = round(float(r.get("expense") or 0), 2)
+                    expense = round(float(exp_raw), 2) if exp_raw not in (None, "") else None
                 except (TypeError, ValueError):
-                    expense = 0.0
-                if income == 0 and expense == 0:
-                    continue  # skip rows with no amount
+                    expense = None
+                ai_uncertain = bool(r.get("is_uncertain"))
+                # Mark uncertain if amount fully missing
+                is_uncertain = ai_uncertain or (income is None and expense is None)
+                if is_uncertain:
+                    uncertain_count += 1
                 cleaned.append({
+                    "row_no": r.get("row_no"),
                     "date": (r.get("date") or "").strip(),
                     "description": (r.get("description") or "").strip(),
-                    "income": income,
-                    "expense": expense,
+                    "income": income if income is not None else 0.0,
+                    "expense": expense if expense is not None else 0.0,
                     "saldo": r.get("saldo"),
-                    "is_uncertain": False,
+                    "is_uncertain": is_uncertain,
                 })
-            logger.info("Vision table parse: %d rows extracted from %s", len(cleaned), filename)
+            logger.info(
+                "Vision table parse: %d rows extracted from %s (model=%s, uncertain=%d)",
+                len(cleaned), filename, model, uncertain_count,
+            )
+            # Stash model used so endpoint can include in response
+            try:
+                cleaned[0]["_meta_model"] = model
+                cleaned[0]["_meta_uncertain_count"] = uncertain_count
+            except Exception:
+                pass
             return cleaned
     except httpx.TimeoutException:
         logger.warning("Vision table parse timeout for %s", filename)

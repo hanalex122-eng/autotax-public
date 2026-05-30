@@ -2477,6 +2477,34 @@ function TableImportView({triggerRefresh,showToast,onNav}){
   const[rawTable,setRawTable]=useState([]);// 2D array: [[cell,cell,...],...]
   const[colMap,setColMap]=useState({date:-1,description:-1,expense:-1,income:-1});
   const[showMapping,setShowMapping]=useState(false);
+  // Online / offline detection (iter O)
+  const[online,setOnline]=useState(()=>typeof navigator!=="undefined"?navigator.onLine:true);
+  const[queuedFile,setQueuedFile]=useState(null);
+  const[uncertainCount,setUncertainCount]=useState(0);
+  const[modelUsed,setModelUsed]=useState("");
+  useEffect(()=>{
+    const goOn=()=>setOnline(true);
+    const goOff=()=>setOnline(false);
+    window.addEventListener("online",goOn);
+    window.addEventListener("offline",goOff);
+    return()=>{window.removeEventListener("online",goOn);window.removeEventListener("offline",goOff);};
+  },[]);
+  // Queue file in IndexedDB-like fallback: localStorage (small files only)
+  const queueOfflineUpload=(f)=>{
+    if(!f)return;
+    try{
+      const reader=new FileReader();
+      reader.onload=()=>{
+        try{
+          localStorage.setItem("atx_tableimport_queued",JSON.stringify({
+            name:f.name,type:f.type,data:reader.result,queued_at:Date.now(),
+          }));
+          setQueuedFile({name:f.name,size:f.size,queued:true});
+        }catch(e){/* localStorage quota — skip */}
+      };
+      reader.readAsDataURL(f);
+    }catch(e){}
+  };
 
   const resetAll=()=>{setFile(null);setRows([]);setCsv("");setSaved(0);setErrorMsg("");setShowTable(false);setShowMapping(false);setRawTable([]);setRawRows([]);setShowRaw(false);};
   const handleFile=(e)=>{const f=e.target.files?.[0];if(f){resetAll();setFile(f);}e.target.value="";};

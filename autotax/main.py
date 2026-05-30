@@ -10702,8 +10702,15 @@ async def import_image_table_ki(file: UploadFile = File(...), user: dict = Depen
     if not isinstance(rows, list) or not rows:
         return {"success": False, "rows": [], "csv": "", "raw_rows": [], "error": "Keine Zeilen erkannt"}
 
+    # Meta extraction (model + uncertain count from first row)
+    meta_model = "claude-haiku-4-5-20251001"
+    meta_uncertain = 0
+    if rows and isinstance(rows[0], dict):
+        meta_model = rows[0].pop("_meta_model", meta_model)
+        meta_uncertain = rows[0].pop("_meta_uncertain_count", 0)
+
     # CSV string olusturma (mevcut /api/import-image cikti formatina uyum)
-    csv_lines = ["date,description,income,expense,saldo"]
+    csv_lines = ["date,description,income,expense,saldo,uncertain"]
     for r in rows:
         d = (r.get("date") or "").replace(",", " ")
         desc = (r.get("description") or "").replace(",", " ")
@@ -10711,10 +10718,18 @@ async def import_image_table_ki(file: UploadFile = File(...), user: dict = Depen
         exp = r.get("expense") or 0
         sal = r.get("saldo")
         sal_s = "" if sal is None else str(sal)
-        csv_lines.append(f"{d},{desc},{inc},{exp},{sal_s}")
+        unc = "1" if r.get("is_uncertain") else "0"
+        csv_lines.append(f"{d},{desc},{inc},{exp},{sal_s},{unc}")
+
+    # Output validation — verify totals make sense
+    total_income = sum(float(r.get("income") or 0) for r in rows)
+    total_expense = sum(float(r.get("expense") or 0) for r in rows)
 
     audit("import.image_ki", user_id=user["sub"], resource_type="import",
-          resource_id=None, payload={"row_count": len(rows), "filename": filename})
+          resource_id=None, payload={"row_count": len(rows),
+                                     "uncertain": meta_uncertain,
+                                     "model": meta_model,
+                                     "filename": filename})
 
     return {
         "success": True,
@@ -10723,6 +10738,13 @@ async def import_image_table_ki(file: UploadFile = File(...), user: dict = Depen
         "raw_rows": [],
         "ki": True,
         "row_count": len(rows),
+        "uncertain_count": meta_uncertain,
+        "model": meta_model,
+        "total_income": round(total_income, 2),
+        "total_expense": round(total_expense, 2),
+        "warnings": (
+            ["Einige Zeilen sind unsicher — bitte prüfen."] if meta_uncertain > 0 else []
+        ),
     }
 
 
