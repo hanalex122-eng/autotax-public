@@ -127,18 +127,98 @@ def _flat_fields() -> list[dict]:
 
 
 # ───────────────────────────────────────────────────────────────────
+# Insurance detection — vendor + raw_text patterns for Vorsorge fields.
+# ───────────────────────────────────────────────────────────────────
+
+# Krankenkassen patterns (gesetzlich). Each tuple = (key, pattern).
+_KRANKENKASSE_PATTERNS = [
+    "tk", "techniker krankenkasse", "aok", "barmer", "dak", "ikk",
+    "kkh", "hkk", "bkk", "knappschaft", "siemens-betriebskrankenkasse",
+    "viactiv", "mobil krankenkasse", "audi bkk",
+]
+
+# Privat Krankenversicherung (basis) — wenn vendor PKV insurance gibt
+_PKV_PATTERNS = [
+    "debeka", "allianz private", "axa krankenversicherung", "ergo direkt kranken",
+    "huk-coburg krankenversicherung", "barmenia kranken", "central kranken",
+    "continentale kranken", "dkv", "gothaer kranken", "hallesche", "hanse merkur",
+    "inter krankenversicherung", "nuernberger kranken", "signal iduna kranken",
+    "uniVersa kranken",
+]
+
+_PFLEGE_PATTERNS = ["pflegeversicherung", "pflege-pflichtversicherung"]
+_RENTE_PATTERNS = ["deutsche rentenversicherung", "drv ", "drv-bund",
+                   "rentenversicherung bund", "gesetzliche rente"]
+_RURUP_PATTERNS = ["rürup", "rurup", "basisrente", "basis-rente"]
+_BU_PATTERNS = ["berufsunfähigkeit", "berufsunfaehigkeit", "berufsunfäh",
+                "bu-versicherung", "bu versicherung"]
+
+
+def _match_any(text: str, patterns: list) -> bool:
+    t = (text or "").lower()
+    return any(p in t for p in patterns)
+
+
+def detect_insurance_amounts(db, user_id: int, year: int) -> dict:
+    """Scan year's invoices, group expense amounts by Vorsorge category.
+
+    Heuristic: vendor name + raw_text matched against pattern lists.
+    Returns dict with keys matching form fields (kv_basis, pflege, etc.).
+    Only sums (no field gets overwritten if already partial).
+    """
+    out: dict[str, float] = {}
+    try:
+        # Import models locally to avoid circular import at module load time.
+        from autotax.models import Invoice
+        from sqlalchemy import func as _func
+        year_prefix = f"{year}-"
+        rows = db.query(Invoice).filter(
+            Invoice.user_id == user_id,
+            Invoice.invoice_type == "expense",
+            Invoice.is_deleted.is_(False),
+            Invoice.date.like(f"{year_prefix}%"),
+        ).all()
+        for inv in rows:
+            vendor = (inv.vendor or "")
+            raw = (inv.raw_text or "")[:2000]  # cap to limit work
+            amt = float(inv.total_amount or 0)
+            if amt <= 0:
+                continue
+            combined = f"{vendor} {raw}".lower()
+            if _match_any(combined, _KRANKENKASSE_PATTERNS) or \
+               _match_any(combined, _PKV_PATTERNS):
+                out["kv_basis"] = out.get("kv_basis", 0.0) + amt
+            if _match_any(combined, _PFLEGE_PATTERNS):
+                out["pflege"] = out.get("pflege", 0.0) + amt
+            if _match_any(combined, _RENTE_PATTERNS):
+                out["rente_gesetz"] = out.get("rente_gesetz", 0.0) + amt
+            if _match_any(combined, _RURUP_PATTERNS):
+                out["rurup"] = out.get("rurup", 0.0) + amt
+            if _match_any(combined, _BU_PATTERNS):
+                out["bu"] = out.get("bu", 0.0) + amt
+    except Exception:
+        logger.exception("detect_insurance_amounts failed")
+    # Round 2 decimals
+    return {k: round(v, 2) for k, v in out.items()}
+
+
+# ───────────────────────────────────────────────────────────────────
 # Auto-fill from user/company/invoice data.
 # ───────────────────────────────────────────────────────────────────
 
-def autofill_from_user_data(user, companies: list, eur_profit: float) -> dict:
+def autofill_from_user_data(user, companies: list, eur_profit: float,
+                            *, insurance_amounts: Optional[dict] = None) -> dict:
     """Pre-populate form with data we already have from the app.
 
     Caller passes already-loaded User + UserCompany list + computed
     EÜR profit (sum of income - sum of expenses for the year).
+    Optional `insurance_amounts` dict (from detect_insurance_amounts) is
+    merged into Anlage Vorsorgeaufwand fields.
     """
     out: dict[str, Any] = {}
 
     # Mantelbogen: from User profile
+    full_name = ""
     if user:
         full_name = (getattr(user, "full_name", "") or "").strip()
         if full_name:
@@ -162,6 +242,12 @@ def autofill_from_user_data(user, companies: list, eur_profit: float) -> dict:
     # Anlage S: from EÜR profit
     if eur_profit is not None:
         out["gewinn_eur"] = round(float(eur_profit), 2)
+
+    # Anlage Vorsorgeaufwand: from detected insurance payments
+    if insurance_amounts:
+        for k, v in insurance_amounts.items():
+            if v > 0:
+                out[k] = v
 
     return out
 

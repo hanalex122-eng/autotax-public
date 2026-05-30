@@ -4765,7 +4765,44 @@ function DeclarationView(){
   const[saveState,setSaveState]=useState("idle"); // idle | saving | saved | error
   const[errors,setErrors]=useState({}); // field key -> error msg
   const[showEur,setShowEur]=useState(false);
+  const[autoDetecting,setAutoDetecting]=useState(false);
   const saveTimerRef=useRef(null);
+
+  const autoDetectInsurance=async()=>{
+    if(!decl||autoDetecting)return;
+    setAutoDetecting(true);
+    try{
+      const r=await _authFetch(API+"/steuer/declaration/"+year+"/autodetect-insurance",{method:"POST"});
+      if(r.ok){
+        const j=await r.json();
+        const detected=j.detected||{};
+        const keys=Object.keys(detected);
+        if(keys.length===0){
+          alert(tr("Keine Versicherungs-Belege gefunden — bitte manuell eingeben.",
+                   "No insurance receipts found — please enter manually.",
+                   "Sigorta belgesi bulunamadı — elle gir."));
+        }else{
+          const msg=tr("Folgende Beträge erkannt:","Detected amounts:","Tespit edilen tutarlar:")+
+                    "\\n"+keys.map(k=>k+": "+detected[k]+" €").join("\\n")+
+                    "\\n\\n"+tr("Übernehmen?","Apply?","Uygulansın mı?");
+          if(confirm(msg)){
+            // Merge into current data
+            const newData={...(decl.data||{}),...detected};
+            setDecl({...decl,data:newData});
+            // Patch all at once
+            await _authFetch(API+"/steuer/declaration/"+year,{
+              method:"PATCH",headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({data:detected}),
+            });
+            fetchValidation(year);
+            setSaveState("saved");
+            setTimeout(()=>setSaveState(s=>s==="saved"?"idle":s),1500);
+          }
+        }
+      }
+    }catch(e){alert(e.message);}
+    setAutoDetecting(false);
+  };
 
   const load=async(yr=year)=>{
     setLoading(true);setErr("");setErrors({});
@@ -4894,6 +4931,9 @@ function DeclarationView(){
           </h3>
           {section.key==="anlage_s" && <button onClick={()=>setShowEur(true)} style={{padding:"6px 12px",background:"transparent",border:"1px solid var(--border)",borderRadius:6,color:"var(--accent)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
             📊 {tr("EÜR-Details anzeigen","Show EÜR details","EÜR detayını gör")}
+          </button>}
+          {section.key==="anlage_vorsorge" && <button onClick={autoDetectInsurance} disabled={autoDetecting} style={{padding:"6px 12px",background:autoDetecting?"#444":"transparent",border:"1px solid var(--border)",borderRadius:6,color:"var(--accent)",fontSize:12,fontWeight:600,cursor:autoDetecting?"wait":"pointer"}}>
+            {autoDetecting?tr("Scanne…","Scanning…","Taranıyor…"):"🔎 "+tr("Versicherungen automatisch erkennen","Auto-detect insurances","Sigortaları otomatik tara")}
           </button>}
         </div>
         <div style={{display:"grid",gap:14}}>

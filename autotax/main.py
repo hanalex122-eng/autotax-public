@@ -2527,9 +2527,12 @@ def declaration_get(request: Request, year: int, user: dict = Depends(get_acting
 @app.post("/steuer/declaration/{year}")
 @limiter.limit("10/minute")
 def declaration_create(request: Request, year: int, user: dict = Depends(get_acting_context)):
-    """Create draft declaration. Auto-fills from User + UserCompany + EÜR profit."""
+    """Create draft declaration. Auto-fills from User + UserCompany + EÜR profit
+    + insurance amounts detected from invoices (Krankenkasse, Rente, BU)."""
     from autotax.models import TaxDeclaration
-    from autotax.declaration import autofill_from_user_data, serialize_data
+    from autotax.declaration import (
+        autofill_from_user_data, serialize_data, detect_insurance_amounts,
+    )
     if year < 2020 or year > 2030:
         raise HTTPException(status_code=400, detail="Jahr außerhalb des unterstützten Bereichs")
     db = SessionLocal()
@@ -2543,7 +2546,9 @@ def declaration_create(request: Request, year: int, user: dict = Depends(get_act
         u = db.query(User).filter(User.id == user["sub"]).first()
         companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
         profit = _eur_profit_for_year(db, user["sub"], year)
-        prefill = autofill_from_user_data(u, companies, profit)
+        insurance = detect_insurance_amounts(db, user["sub"], year)
+        prefill = autofill_from_user_data(u, companies, profit,
+                                          insurance_amounts=insurance)
         decl = TaxDeclaration(
             user_id=user["sub"],
             year=year,
@@ -2554,6 +2559,21 @@ def declaration_create(request: Request, year: int, user: dict = Depends(get_act
         db.commit()
         db.refresh(decl)
         return _declaration_to_dict(decl)
+    finally:
+        db.close()
+
+
+@app.post("/steuer/declaration/{year}/autodetect-insurance")
+@limiter.limit("10/minute")
+def declaration_autodetect_insurance(request: Request, year: int,
+                                      user: dict = Depends(get_acting_context)):
+    """Manuel tetikleme: invoice'larda sigorta tara ve toplamlari donsun.
+    Frontend bu degerleri yari otomatik onceyle (kullanici onaylayabilir)."""
+    from autotax.declaration import detect_insurance_amounts
+    db = SessionLocal()
+    try:
+        out = detect_insurance_amounts(db, user["sub"], year)
+        return {"year": year, "detected": out}
     finally:
         db.close()
 
