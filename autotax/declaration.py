@@ -34,42 +34,42 @@ FORM_SECTIONS = [
         "title_de": "Mantelbogen (ESt 1 A)",
         "title_tr": "Ana Form (Mantelbogen)",
         "fields": [
-            {"key": "steuer_id",      "label_de": "Steuer-ID (11-stellig)",       "label_tr": "Vergi kimlik no (11 hane)",          "type": "text",   "required": True,  "pattern": r"^\d{11}$",
+            {"key": "steuer_id",      "label_de": "Steuer-ID (11-stellig)",       "label_tr": "Vergi kimlik no (11 hane)",          "type": "text",   "required": True,  "pattern": r"^\d{11}$", "zeile_de": "Zeile 4",
              "hint_de": "Findest du auf jedem Steuerbescheid oder Lohnabrechnung. Beispiel: 12345678901",
              "hint_tr": "Her Steuerbescheid veya Lohnabrechnung'da bulursun. Örnek: 12345678901"},
-            {"key": "steuer_nummer",  "label_de": "Steuernummer (optional)",       "label_tr": "Steuernummer (opsiyonel)",            "type": "text",   "required": False,
+            {"key": "steuer_nummer",  "label_de": "Steuernummer (optional)",       "label_tr": "Steuernummer (opsiyonel)",            "type": "text",   "required": False, "zeile_de": "Zeile 1",
              "hint_de": "Vom Finanzamt erteilt — anders als Steuer-ID. Format z.B. 040/123/45678",
              "hint_tr": "Finanzamt'tan alınan numara — Steuer-ID'den farklı. Format örn. 040/123/45678"},
-            {"key": "vorname",        "label_de": "Vorname",                       "label_tr": "Ad",                                  "type": "text",   "required": True,
+            {"key": "vorname",        "label_de": "Vorname",                       "label_tr": "Ad",                                  "type": "text",   "required": True, "zeile_de": "Zeile 6",
              "hint_de": "Wie im Personalausweis",
              "hint_tr": "Kimlik kartındaki gibi"},
-            {"key": "nachname",       "label_de": "Nachname",                      "label_tr": "Soyad",                               "type": "text",   "required": True,
+            {"key": "nachname",       "label_de": "Nachname",                      "label_tr": "Soyad",                               "type": "text",   "required": True, "zeile_de": "Zeile 6",
              "hint_de": "Wie im Personalausweis",
              "hint_tr": "Kimlik kartındaki gibi"},
-            {"key": "geburtsdatum",   "label_de": "Geburtsdatum",                  "label_tr": "Doğum tarihi",                        "type": "date",   "required": True,
+            {"key": "geburtsdatum",   "label_de": "Geburtsdatum",                  "label_tr": "Doğum tarihi",                        "type": "date",   "required": True, "zeile_de": "Zeile 8",
              "hint_de": "TT.MM.JJJJ",
              "hint_tr": "GG.AA.YYYY"},
-            {"key": "religion",       "label_de": "Religion",                      "label_tr": "Din",                                 "type": "select", "required": True,
+            {"key": "religion",       "label_de": "Religion",                      "label_tr": "Din",                                 "type": "select", "required": True, "zeile_de": "Zeile 10",
              "options": [{"v": "none", "de": "Keine", "tr": "Yok"}, {"v": "ev", "de": "Evangelisch", "tr": "Evanjelik"}, {"v": "rk", "de": "Römisch-katholisch", "tr": "Katolik"}, {"v": "other", "de": "Andere", "tr": "Diğer"}],
              "hint_de": "Nur Kirchensteuer-pflichtige Konfessionen ankreuzen. Muslime / Atheisten → 'Keine'",
              "hint_tr": "Sadece kilise vergisi yükümlü dinler. Müslüman / Ateist → 'Yok'"},
-            {"key": "strasse",        "label_de": "Straße + Hausnummer",           "label_tr": "Sokak + ev no",                       "type": "text",   "required": True,
+            {"key": "strasse",        "label_de": "Straße + Hausnummer",           "label_tr": "Sokak + ev no",                       "type": "text",   "required": True, "zeile_de": "Zeile 13",
              "hint_de": "Wohnadresse zum 31.12. des Steuerjahres",
              "hint_tr": "Vergi yılı 31.12 itibarıyla ev adresi"},
-            {"key": "plz",            "label_de": "PLZ",                           "label_tr": "Posta kodu",                          "type": "text",   "required": True,  "pattern": r"^\d{5}$",
+            {"key": "plz",            "label_de": "PLZ",                           "label_tr": "Posta kodu",                          "type": "text",   "required": True,  "pattern": r"^\d{5}$", "zeile_de": "Zeile 14",
              "hint_de": "5-stellig",
              "hint_tr": "5 hane"},
-            {"key": "ort",            "label_de": "Ort",                           "label_tr": "Şehir",                               "type": "text",   "required": True,
+            {"key": "ort",            "label_de": "Ort",                           "label_tr": "Şehir",                               "type": "text",   "required": True, "zeile_de": "Zeile 14",
              "hint_de": "Stadt / Gemeinde",
              "hint_tr": "Şehir / belediye"},
-            {"key": "familienstand",  "label_de": "Familienstand",                 "label_tr": "Medeni hal",                          "type": "select", "required": True,
+            {"key": "familienstand",  "label_de": "Familienstand",                 "label_tr": "Medeni hal",                          "type": "select", "required": True, "zeile_de": "Zeile 15",
              "options": [{"v": "ledig", "de": "Ledig", "tr": "Bekar"}, {"v": "verheiratet", "de": "Verheiratet", "tr": "Evli"}, {"v": "geschieden", "de": "Geschieden", "tr": "Boşanmış"}, {"v": "verwitwet", "de": "Verwitwet", "tr": "Dul"}],
              "hint_de": "Status zum 31.12. des Steuerjahres. Verheiratet → Splittingtarif möglich.",
              "hint_tr": "Vergi yılı 31.12 itibarıyla durum. Evli → Splittingtarif olası."},
-            {"key": "iban",           "label_de": "IBAN (Erstattung)",             "label_tr": "IBAN (iade için)",                    "type": "text",   "required": True,  "pattern": r"^DE\d{20}$",
+            {"key": "iban",           "label_de": "IBAN (Erstattung)",             "label_tr": "IBAN (iade için)",                    "type": "text",   "required": True,  "pattern": r"^DE\d{20}$", "zeile_de": "Zeile 23",
              "hint_de": "Wohin soll das Finanzamt eine Erstattung überweisen? Nur deutsche IBAN.",
              "hint_tr": "Finanzamt iade tutarı nereye gönderecek? Sadece Alman IBAN."},
-            {"key": "kontoinhaber",   "label_de": "Kontoinhaber",                  "label_tr": "Hesap sahibi",                        "type": "text",   "required": True,
+            {"key": "kontoinhaber",   "label_de": "Kontoinhaber",                  "label_tr": "Hesap sahibi",                        "type": "text",   "required": True, "zeile_de": "Zeile 24",
              "hint_de": "Name auf dem Konto — bei eigenem Konto: dein Name",
              "hint_tr": "Hesap üstündeki isim — kendi hesabınsa: kendi adın"},
         ],
@@ -79,13 +79,13 @@ FORM_SECTIONS = [
         "title_de": "Anlage S — Selbständige Tätigkeit",
         "title_tr": "Anlage S — Serbest meslek",
         "fields": [
-            {"key": "taetigkeit",         "label_de": "Tätigkeit (z.B. IT-Consulting)", "label_tr": "Meslek (örn. IT danışmanlık)",  "type": "text",   "required": True,
+            {"key": "taetigkeit",         "label_de": "Tätigkeit (z.B. IT-Consulting)", "label_tr": "Meslek (örn. IT danışmanlık)",  "type": "text",   "required": True, "zeile_de": "Zeile 4",
              "hint_de": "Kurze Beschreibung deiner freiberuflichen Tätigkeit (1-3 Wörter)",
              "hint_tr": "Serbest mesleki faaliyetinin kısa açıklaması (1-3 kelime)"},
-            {"key": "gewinn_eur",         "label_de": "Gewinn aus EÜR (€)",             "label_tr": "EÜR kazancı (€)",                "type": "number", "required": True, "auto_fill_from": "eur_profit",
+            {"key": "gewinn_eur",         "label_de": "Gewinn aus EÜR (€)",             "label_tr": "EÜR kazancı (€)",                "type": "number", "required": True, "auto_fill_from": "eur_profit", "zeile_de": "Zeile 5",
              "hint_de": "Einnahmen minus Ausgaben für das gesamte Jahr. Wir füllen automatisch aus deinen Belegen.",
              "hint_tr": "Yıl boyunca gelirler eksi giderler. Belgelerinden otomatik doldurulur."},
-            {"key": "veraeusserungsgewinn", "label_de": "Veräußerungsgewinn (€)",       "label_tr": "Sermaye gain (€)",               "type": "number", "required": False, "default": 0,
+            {"key": "veraeusserungsgewinn", "label_de": "Veräußerungsgewinn (€)",       "label_tr": "Sermaye gain (€)",               "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 21",
              "hint_de": "Verkauf von Praxis / Firma / Wertpapieren. In den meisten Fällen 0.",
              "hint_tr": "Praxis / firma / hisse satışından gelen. Çoğu durumda 0."},
         ],
@@ -95,17 +95,17 @@ FORM_SECTIONS = [
         "title_de": "Anlage N — Lohn aus Anstellung (optional)",
         "title_tr": "Anlage N — Maaş (varsa, opsiyonel)",
         "fields": [
-            {"key": "lohn_brutto", "label_de": "Bruttoarbeitslohn (Jahres)", "label_tr": "Yıllık brüt maaş",     "type": "number", "required": False, "default": 0,
+            {"key": "lohn_brutto", "label_de": "Bruttoarbeitslohn (Jahres)", "label_tr": "Yıllık brüt maaş",     "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 3",
              "hint_de": "Aus deiner Lohnsteuerbescheinigung Zeile 3 (Bruttoarbeitslohn).",
              "hint_tr": "Lohnsteuerbescheinigung Zeile 3'ten al."},
-            {"key": "lohnsteuer", "label_de": "Einbehaltene Lohnsteuer (€)", "label_tr": "Kesilen Lohnsteuer (€)", "type": "number", "required": False, "default": 0,
+            {"key": "lohnsteuer", "label_de": "Einbehaltene Lohnsteuer (€)", "label_tr": "Kesilen Lohnsteuer (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 4",
              "hint_de": "Lohnsteuerbescheinigung Zeile 4 (einbehaltene Lohnsteuer).",
              "hint_tr": "Lohnsteuerbescheinigung Zeile 4."},
-            {"key": "soli_n",     "label_de": "Solidaritätszuschlag (€)",     "label_tr": "Soli vergisi (€)",       "type": "number", "required": False, "default": 0,
+            {"key": "soli_n",     "label_de": "Solidaritätszuschlag (€)",     "label_tr": "Soli vergisi (€)",       "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 5",
              "hint_de": "Lohnsteuerbescheinigung Zeile 5.", "hint_tr": "Lohnsteuerbescheinigung Zeile 5."},
-            {"key": "kirchensteuer", "label_de": "Kirchensteuer (€)",          "label_tr": "Kilise vergisi (€)",     "type": "number", "required": False, "default": 0,
+            {"key": "kirchensteuer", "label_de": "Kirchensteuer (€)",          "label_tr": "Kilise vergisi (€)",     "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 6",
              "hint_de": "Falls religiöse Konfession; sonst 0.", "hint_tr": "Dini mensubiyet varsa; yoksa 0."},
-            {"key": "werbungskosten_n", "label_de": "Werbungskosten (Pauschbetrag €1.230 oder höher)", "label_tr": "Werbungskosten (sabit €1.230 veya yüksek)", "type": "number", "required": False, "default": 1230,
+            {"key": "werbungskosten_n", "label_de": "Werbungskosten (Pauschbetrag €1.230 oder höher)", "label_tr": "Werbungskosten (sabit €1.230 veya yüksek)", "type": "number", "required": False, "default": 1230, "zeile_de": "Zeile 31",
              "hint_de": "Arbeitnehmer-Pauschbetrag (2025: €1.230). Höher nur wenn nachgewiesen.",
              "hint_tr": "İşçi sabit indirimi (2025: €1.230). Yüksek için kanıt gerekir."},
         ],
@@ -115,28 +115,28 @@ FORM_SECTIONS = [
         "title_de": "Anlage V — Vermietung & Verpachtung (optional)",
         "title_tr": "Anlage V — Kira gelirleri (varsa, opsiyonel)",
         "fields": [
-            {"key": "v_adresse",    "label_de": "Adresse Mietobjekt",          "label_tr": "Kiralanan mülk adresi",  "type": "text",   "required": False,
+            {"key": "v_adresse",    "label_de": "Adresse Mietobjekt",          "label_tr": "Kiralanan mülk adresi",  "type": "text",   "required": False, "zeile_de": "Zeile 1",
              "hint_de": "Straße + Hausnummer + PLZ + Ort der vermieteten Immobilie.",
              "hint_tr": "Kiralanan mülkün sokak + ev no + PLZ + şehri."},
-            {"key": "v_einnahmen", "label_de": "Mieteinnahmen Jahres (€)",     "label_tr": "Yıllık kira geliri (€)",  "type": "number", "required": False, "default": 0,
+            {"key": "v_einnahmen", "label_de": "Mieteinnahmen Jahres (€)",     "label_tr": "Yıllık kira geliri (€)",  "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 8",
              "hint_de": "Summe aller Mieteinnahmen ohne Nebenkosten-Vorauszahlungen.",
              "hint_tr": "Tüm kira gelirlerinin toplamı (yan giderler ön ödemeleri hariç)."},
-            {"key": "v_nebenkosten", "label_de": "Umlagefähige Nebenkosten erhalten (€)", "label_tr": "Alınan ortak giderler (€)", "type": "number", "required": False, "default": 0,
+            {"key": "v_nebenkosten", "label_de": "Umlagefähige Nebenkosten erhalten (€)", "label_tr": "Alınan ortak giderler (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 13",
              "hint_de": "Vorauszahlungen vom Mieter (Wasser, Heizung etc).",
              "hint_tr": "Kiracıdan alınan ön ödemeler (su, ısınma vs.)."},
-            {"key": "v_afa",       "label_de": "AfA Gebäude 2% pro Jahr (€)",  "label_tr": "Yıllık bina AfA %2 (€)",   "type": "number", "required": False, "default": 0,
+            {"key": "v_afa",       "label_de": "AfA Gebäude 2% pro Jahr (€)",  "label_tr": "Yıllık bina AfA %2 (€)",   "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 33",
              "hint_de": "Anschaffungskosten Gebäude × 2% (50 Jahre Nutzungsdauer).",
              "hint_tr": "Bina edinme bedeli × %2 (50 yıl kullanım ömrü)."},
-            {"key": "v_zinsen",    "label_de": "Schuldzinsen Darlehen (€)",    "label_tr": "Kredi faizleri (€)",       "type": "number", "required": False, "default": 0,
+            {"key": "v_zinsen",    "label_de": "Schuldzinsen Darlehen (€)",    "label_tr": "Kredi faizleri (€)",       "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 36",
              "hint_de": "Hypothek-Zinsen für die Mietimmobilie.",
              "hint_tr": "Kira mülkü için ipotek faizleri."},
-            {"key": "v_erhaltung", "label_de": "Erhaltungsaufwand (Reparatur) (€)", "label_tr": "Bakım/onarım gideri (€)", "type": "number", "required": False, "default": 0,
+            {"key": "v_erhaltung", "label_de": "Erhaltungsaufwand (Reparatur) (€)", "label_tr": "Bakım/onarım gideri (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 39",
              "hint_de": "Reparaturen, Instandhaltung (sofort absetzbar). Größere Umbauten sind Herstellungskosten.",
              "hint_tr": "Onarım, bakım (hemen düşülebilir). Büyük tadilatlar Herstellungskosten'dir."},
-            {"key": "v_grundsteuer", "label_de": "Grundsteuer + Versicherung (€)", "label_tr": "Emlak vergisi + sigorta (€)", "type": "number", "required": False, "default": 0,
+            {"key": "v_grundsteuer", "label_de": "Grundsteuer + Versicherung (€)", "label_tr": "Emlak vergisi + sigorta (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 47",
              "hint_de": "Grundsteuer, Wohngebäudeversicherung etc.",
              "hint_tr": "Emlak vergisi, bina sigortası vb."},
-            {"key": "v_sonst",     "label_de": "Sonstige Werbungskosten (€)",  "label_tr": "Diğer giderler (€)",       "type": "number", "required": False, "default": 0,
+            {"key": "v_sonst",     "label_de": "Sonstige Werbungskosten (€)",  "label_tr": "Diğer giderler (€)",       "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 50",
              "hint_de": "Hausverwaltung, Inserate, Anwaltskosten etc.",
              "hint_tr": "Yönetim, ilan, avukat masrafları vs."},
         ],
@@ -149,13 +149,61 @@ FORM_SECTIONS = [
         "array_key": "kinder",      # field name in data dict
         "fields": [
             # Per-child schema — used by frontend to render row inputs
-            {"key": "vorname",         "label_de": "Vorname",            "label_tr": "Ad",                  "type": "text", "required": True},
-            {"key": "geburtsdatum",    "label_de": "Geburtsdatum",       "label_tr": "Doğum tarihi",        "type": "date", "required": True},
-            {"key": "steuer_id",       "label_de": "Steuer-ID (optional)", "label_tr": "Vergi kimlik (ops.)", "type": "text", "required": False, "pattern": r"^\d{11}$"},
-            {"key": "kindergeld",      "label_de": "Kindergeld bezogen",  "label_tr": "Kindergeld alındı mı", "type": "select", "required": True,
+            {"key": "vorname",         "label_de": "Vorname",            "label_tr": "Ad",                  "type": "text", "required": True, "zeile_de": "Zeile 4"},
+            {"key": "geburtsdatum",    "label_de": "Geburtsdatum",       "label_tr": "Doğum tarihi",        "type": "date", "required": True, "zeile_de": "Zeile 4"},
+            {"key": "steuer_id",       "label_de": "Steuer-ID (optional)", "label_tr": "Vergi kimlik (ops.)", "type": "text", "required": False, "pattern": r"^\d{11}$", "zeile_de": "Zeile 7"},
+            {"key": "kindergeld",      "label_de": "Kindergeld bezogen",  "label_tr": "Kindergeld alındı mı", "type": "select", "required": True, "zeile_de": "Zeile 13",
              "options": [{"v":"ja","de":"Ja","tr":"Evet"},{"v":"nein","de":"Nein","tr":"Hayır"}]},
-            {"key": "shared_custody",  "label_de": "Geteiltes Sorgerecht (50/50)", "label_tr": "Ortak velayet (50/50)", "type": "select", "required": False,
+            {"key": "shared_custody",  "label_de": "Geteiltes Sorgerecht (50/50)", "label_tr": "Ortak velayet (50/50)", "type": "select", "required": False, "zeile_de": "Zeile 17",
              "options": [{"v":"nein","de":"Nein","tr":"Hayır"},{"v":"ja","de":"Ja","tr":"Evet"}]},
+            # Behinderung des Kindes — wichtig: kann auf Eltern übertragen werden
+            {"key": "behinderung_gdb",  "label_de": "Grad der Behinderung (Kind, %)", "label_tr": "Engelli oranı (çocuk, %)", "type": "select", "required": False, "zeile_de": "Zeile 65",
+             "options": [{"v":"","de":"Keine","tr":"Yok"},{"v":"20","de":"20%","tr":"%20"},{"v":"30","de":"30%","tr":"%30"},{"v":"40","de":"40%","tr":"%40"},{"v":"50","de":"50%","tr":"%50"},{"v":"60","de":"60%","tr":"%60"},{"v":"70","de":"70%","tr":"%70"},{"v":"80","de":"80%","tr":"%80"},{"v":"90","de":"90%","tr":"%90"},{"v":"100","de":"100%","tr":"%100"}]},
+            {"key": "behinderung_merkmal", "label_de": "Merkzeichen (H/Bl/TBl → erhöhter Pauschbetrag €7.400)", "label_tr": "İşaret (H/Bl/TBl)", "type": "select", "required": False, "zeile_de": "Zeile 66",
+             "options": [{"v":"","de":"—","tr":"—"},{"v":"G","de":"G (gehbehindert)","tr":"G"},{"v":"aG","de":"aG (außergewöhnlich gehbehindert)","tr":"aG"},{"v":"H","de":"H (hilflos)","tr":"H"},{"v":"Bl","de":"Bl (blind)","tr":"Bl"},{"v":"TBl","de":"TBl (taubblind)","tr":"TBl"},{"v":"RF","de":"RF (Rundfunkbefreiung)","tr":"RF"}]},
+            {"key": "behindert_uebertrag", "label_de": "Pauschbetrag auf Eltern übertragen?", "label_tr": "Pauschbetrag ebeveynlere mi?", "type": "select", "required": False, "zeile_de": "Zeile 67",
+             "options": [{"v":"ja","de":"Ja (auf mich übertragen)","tr":"Evet"},{"v":"nein","de":"Nein","tr":"Hayır"}]},
+        ],
+    },
+    {
+        "key": "anlage_behinderung",
+        "title_de": "Anlage Außergewöhnliche Belastungen — Behinderung (eigene)",
+        "title_tr": "Olağanüstü yük — Engellilik (kendin)",
+        "fields": [
+            {"key": "eigene_gdb", "label_de": "Grad der Behinderung (eigene, %)", "label_tr": "Kendi engelli oranı (%)", "type": "select", "required": False, "zeile_de": "Zeile 4",
+             "options": [{"v":"","de":"Keine","tr":"Yok"},{"v":"20","de":"20%","tr":"%20"},{"v":"30","de":"30%","tr":"%30"},{"v":"40","de":"40%","tr":"%40"},{"v":"50","de":"50%","tr":"%50"},{"v":"60","de":"60%","tr":"%60"},{"v":"70","de":"70%","tr":"%70"},{"v":"80","de":"80%","tr":"%80"},{"v":"90","de":"90%","tr":"%90"},{"v":"100","de":"100%","tr":"%100"}],
+             "hint_de": "Aus deinem Schwerbehindertenausweis / Bescheid des Versorgungsamts.",
+             "hint_tr": "Engellilik kartından / Versorgungsamt belgesinden."},
+            {"key": "eigene_merkmal", "label_de": "Merkzeichen (H/Bl/TBl → €7.400)", "label_tr": "İşaret (H/Bl/TBl)", "type": "select", "required": False, "zeile_de": "Zeile 5",
+             "options": [{"v":"","de":"—","tr":"—"},{"v":"G","de":"G (gehbehindert)","tr":"G"},{"v":"aG","de":"aG (außergewöhnlich gehbehindert)","tr":"aG"},{"v":"H","de":"H (hilflos)","tr":"H"},{"v":"Bl","de":"Bl (blind)","tr":"Bl"},{"v":"TBl","de":"TBl (taubblind)","tr":"TBl"}],
+             "hint_de": "H / Bl / TBl bedeuten erhöhter Pauschbetrag €7.400 unabhängig vom GdB.",
+             "hint_tr": "H / Bl / TBl: GdB'den bağımsız €7.400 yüksek tazminat."},
+            {"key": "pflege_grad",     "label_de": "Pflegegrad (1-5)",              "label_tr": "Bakım derecesi (1-5)", "type": "select", "required": False, "zeile_de": "Zeile 14",
+             "options": [{"v":"","de":"Keiner","tr":"Yok"},{"v":"1","de":"Pflegegrad 1","tr":"Derece 1"},{"v":"2","de":"Pflegegrad 2","tr":"Derece 2"},{"v":"3","de":"Pflegegrad 3","tr":"Derece 3"},{"v":"4","de":"Pflegegrad 4","tr":"Derece 4"},{"v":"5","de":"Pflegegrad 5","tr":"Derece 5"}],
+             "hint_de": "Pflegegrad 2-5 berechtigt zum Pflege-Pauschbetrag (€600-€1.800).",
+             "hint_tr": "Bakım derecesi 2-5 Pflege-Pauschbetrag hakkı verir (€600-€1.800)."},
+        ],
+    },
+    {
+        "key": "anlage_aussergewohnliche",
+        "title_de": "Außergewöhnliche Belastungen (Krankheit / Pflege)",
+        "title_tr": "Olağanüstü Yük (Hastalık / Bakım)",
+        "fields": [
+            {"key": "krankheitskosten",   "label_de": "Krankheitskosten (€)",       "label_tr": "Hastalık masrafları (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 13",
+             "hint_de": "Selbst getragene Arzt-, Zahn-, Apothekenkosten (nicht erstattet). Über der zumutbaren Belastung absetzbar.",
+             "hint_tr": "Kendi ödediğin doktor, diş, eczane masrafları (geri alınmamış). Makul yük üstü düşülebilir."},
+            {"key": "pflegekosten",       "label_de": "Pflegekosten (eigene/Angehörige) (€)", "label_tr": "Bakım masrafları (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 14",
+             "hint_de": "Kosten für Pflegeheim, ambulante Pflege, etc.",
+             "hint_tr": "Bakım evi, evde bakım masrafları."},
+            {"key": "bestattungskosten", "label_de": "Bestattungskosten (€)",       "label_tr": "Cenaze masrafları (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 16",
+             "hint_de": "Wenn der Nachlass nicht ausreicht, absetzbar.",
+             "hint_tr": "Miras yetmezse düşülebilir."},
+            {"key": "scheidungskosten",  "label_de": "Scheidungskosten (€, eingeschränkt)", "label_tr": "Boşanma masrafları (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 18",
+             "hint_de": "Seit 2013 stark eingeschränkt absetzbar; nur Existenzgrundlage betreffende Anteile.",
+             "hint_tr": "2013'ten sonra çok sınırlı; sadece yaşam gerekliliği kısmı."},
+            {"key": "kurkosten",         "label_de": "Kur / Sanatorium (€)",        "label_tr": "Kür / sanatoryum (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 19",
+             "hint_de": "Vorab amtsärztliches Attest erforderlich.",
+             "hint_tr": "Önceden Amtsarzt raporu gerekli."},
         ],
     },
     {
@@ -163,25 +211,25 @@ FORM_SECTIONS = [
         "title_de": "Sonderausgaben & §35a (haushaltsnahe)",
         "title_tr": "Özel giderler + §35a (ev hizmetleri)",
         "fields": [
-            {"key": "spenden_geld",    "label_de": "Spenden — Geldspenden gemeinnützig (€)",  "label_tr": "Geldspende (€)",        "type": "number", "required": False, "default": 0,
+            {"key": "spenden_geld",    "label_de": "Spenden — Geldspenden gemeinnützig (€)",  "label_tr": "Geldspende (€)",        "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 12",
              "hint_de": "Steuerlich begünstigt bis 20% des Gesamtbetrags der Einkünfte. Spendenbescheinigung Pflicht.",
              "hint_tr": "Toplam gelirin %20'sine kadar düşülebilir. Spendenbescheinigung zorunlu."},
-            {"key": "spenden_partei",  "label_de": "Spenden Parteien (€)",                    "label_tr": "Parti bağışı (€)",       "type": "number", "required": False, "default": 0,
+            {"key": "spenden_partei",  "label_de": "Spenden Parteien (€)",                    "label_tr": "Parti bağışı (€)",       "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 16",
              "hint_de": "50% absetzbar bis €825 Single / €1.650 Verheiratet (§34g EStG).",
              "hint_tr": "%50 düşülebilir; bekar €825 / evli €1.650'ye kadar."},
-            {"key": "steuerberater",   "label_de": "Steuerberaterkosten (privat) (€)",        "label_tr": "Mali müşavir ücreti (€)", "type": "number", "required": False, "default": 0,
+            {"key": "steuerberater",   "label_de": "Steuerberaterkosten (privat) (€)",        "label_tr": "Mali müşavir ücreti (€)", "type": "number", "required": False, "default": 0, "zeile_de": "Anlage SO Zeile 4",
              "hint_de": "Privater Anteil — beruflicher Anteil ist Werbungskosten / Betriebsausgaben.",
              "hint_tr": "Özel kısmı — iş kısmı Werbungskosten/EÜR'de."},
-            {"key": "kirchensteuer_so","label_de": "Kirchensteuer (gezahlt) (€)",             "label_tr": "Kilise vergisi (€)",      "type": "number", "required": False, "default": 0,
+            {"key": "kirchensteuer_so","label_de": "Kirchensteuer (gezahlt) (€)",             "label_tr": "Kilise vergisi (€)",      "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 5",
              "hint_de": "Voll absetzbar als Sonderausgabe (außer auf Kapitalerträge).",
              "hint_tr": "Tam düşülebilir (sermaye gelirlerine ait hariç)."},
-            {"key": "handwerker_lohn", "label_de": "Handwerker-Lohnanteil §35a (€)",          "label_tr": "Esnaf işçilik ücreti (€)","type": "number", "required": False, "default": 0,
+            {"key": "handwerker_lohn", "label_de": "Handwerker-Lohnanteil §35a (€)",          "label_tr": "Esnaf işçilik ücreti (€)","type": "number", "required": False, "default": 0, "zeile_de": "Haushaltsnahe Zeile 6",
              "hint_de": "20% absetzbar bis €1.200/Jahr. Nur Lohn (nicht Material). Rechnung + Überweisung Pflicht.",
              "hint_tr": "%20 düşülebilir, yıllık €1.200'e kadar. Sadece işçilik (malzeme değil). Fatura + havale zorunlu."},
-            {"key": "haushaltsdienst", "label_de": "Haushaltsnahe Dienstleistungen §35a (€)", "label_tr": "Ev hizmeti (€)",          "type": "number", "required": False, "default": 0,
+            {"key": "haushaltsdienst", "label_de": "Haushaltsnahe Dienstleistungen §35a (€)", "label_tr": "Ev hizmeti (€)",          "type": "number", "required": False, "default": 0, "zeile_de": "Haushaltsnahe Zeile 4",
              "hint_de": "20% absetzbar bis €4.000/Jahr. Reinigung, Gartenpflege, Pflegedienst.",
              "hint_tr": "%20 düşülebilir, yıllık €4.000'e kadar. Temizlik, bahçe, bakım."},
-            {"key": "haushaltshilfe_mini", "label_de": "Mini-Job Haushalt §35a (€)",          "label_tr": "Mini-Job ev (€)",         "type": "number", "required": False, "default": 0,
+            {"key": "haushaltshilfe_mini", "label_de": "Mini-Job Haushalt §35a (€)",          "label_tr": "Mini-Job ev (€)",         "type": "number", "required": False, "default": 0, "zeile_de": "Haushaltsnahe Zeile 1",
              "hint_de": "20% absetzbar bis €510/Jahr. Geringfügig Beschäftigte im Haushalt.",
              "hint_tr": "%20 düşülebilir, yıllık €510'a kadar. Küçük istihdamlı ev çalışanı."},
         ],
@@ -191,22 +239,22 @@ FORM_SECTIONS = [
         "title_de": "Anlage Vorsorgeaufwand",
         "title_tr": "Anlage Vorsorgeaufwand (sigortalar)",
         "fields": [
-            {"key": "kv_basis",   "label_de": "Krankenversicherung Basis (€)",       "label_tr": "Temel sağlık sigortası (€)",  "type": "number", "required": True,
+            {"key": "kv_basis",   "label_de": "Krankenversicherung Basis (€)",       "label_tr": "Temel sağlık sigortası (€)",  "type": "number", "required": True, "zeile_de": "Zeile 11",
              "hint_de": "Jahresbeitrag ohne Wahlleistungen. Aus Bescheinigung der Krankenkasse §10 EStG.",
              "hint_tr": "Yıllık prim, ek hizmetler hariç. Sağlık kasası §10 EStG belgesinden."},
-            {"key": "kv_zusatz",  "label_de": "Krankenversicherung Zusatz (€)",      "label_tr": "Ek sağlık sigortası (€)",     "type": "number", "required": False, "default": 0,
+            {"key": "kv_zusatz",  "label_de": "Krankenversicherung Zusatz (€)",      "label_tr": "Ek sağlık sigortası (€)",     "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 12",
              "hint_de": "Krankentagegeld, Chefarzt, Einzelzimmer etc.",
              "hint_tr": "Hastalık günlüğü, baş doktor, tek kişilik oda vs."},
-            {"key": "pflege",     "label_de": "Pflegeversicherung (€)",              "label_tr": "Bakım sigortası (€)",         "type": "number", "required": False, "default": 0,
+            {"key": "pflege",     "label_de": "Pflegeversicherung (€)",              "label_tr": "Bakım sigortası (€)",         "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 18",
              "hint_de": "Pflichtbeitrag + ggf. Zusatz. Aus Beitragsbescheinigung.",
              "hint_tr": "Zorunlu prim + opsiyonel ek. Beitragsbescheinigung'dan."},
-            {"key": "rente_gesetz", "label_de": "Gesetzliche Rentenversicherung (€)", "label_tr": "Yasal emekli sigortası (€)",  "type": "number", "required": False, "default": 0,
+            {"key": "rente_gesetz", "label_de": "Gesetzliche Rentenversicherung (€)", "label_tr": "Yasal emekli sigortası (€)",  "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 4",
              "hint_de": "Eigene Beiträge an Deutsche Rentenversicherung (DRV).",
              "hint_tr": "Deutsche Rentenversicherung'a (DRV) ödenen kendi primler."},
-            {"key": "rurup",      "label_de": "Rürup-Rente (€)",                     "label_tr": "Rürup emekliliği (€)",        "type": "number", "required": False, "default": 0,
+            {"key": "rurup",      "label_de": "Rürup-Rente (€)",                     "label_tr": "Rürup emekliliği (€)",        "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 6",
              "hint_de": "Basis-Rente nach §10 Abs.1 Nr.2 EStG. Aus Jahresbescheinigung.",
              "hint_tr": "§10 Abs.1 Nr.2 EStG'e göre temel emeklilik. Yıllık belge'den."},
-            {"key": "bu",         "label_de": "Berufsunfähigkeitsversicherung (€)",  "label_tr": "Maluliyet sigortası (€)",     "type": "number", "required": False, "default": 0,
+            {"key": "bu",         "label_de": "Berufsunfähigkeitsversicherung (€)",  "label_tr": "Maluliyet sigortası (€)",     "type": "number", "required": False, "default": 0, "zeile_de": "Zeile 49",
              "hint_de": "Berufsunfähigkeitsversicherung — meist absetzbar.",
              "hint_tr": "Maluliyet sigortası — genelde düşülebilir."},
         ],
@@ -219,6 +267,44 @@ FORM_SECTIONS = [
 # User feedback (2026-05-30): "benzin parasi elbise verbung nereye yazacagiz"
 # Frontend renders this as a help panel users can open from any section.
 # ───────────────────────────────────────────────────────────────────
+
+# ───────────────────────────────────────────────────────────────────
+# Behindertenpauschbetrag table per § 33b EStG (2024+ version).
+# Used for self + carry-forward from child.
+# ───────────────────────────────────────────────────────────────────
+
+BEHINDERTEN_PAUSCHBETRAG = {
+    20: 384,
+    30: 620,
+    40: 860,
+    50: 1140,
+    60: 1440,
+    70: 1780,
+    80: 2120,
+    90: 2460,
+    100: 2840,
+}
+# Special markers (Merkzeichen):
+# - H (Hilflos) or Bl (Blind): €7.400 erhöhter Pauschbetrag (Hilflos/Blind/Taubblind)
+# - TBl (Taubblind): €7.400
+BEHINDERTEN_PAUSCHBETRAG_ERHOEHT = 7400
+
+
+def pauschbetrag_for_gdb(gdb: int, merkmal: str | None = None) -> int:
+    """Return Behindertenpauschbetrag in € for given Grad der Behinderung
+    + Merkmal. H/Bl/TBl override regular GdB table."""
+    if not gdb:
+        return 0
+    if merkmal and merkmal.upper() in ("H", "BL", "TBL"):
+        return BEHINDERTEN_PAUSCHBETRAG_ERHOEHT
+    try:
+        gdb_int = int(gdb)
+    except (TypeError, ValueError):
+        return 0
+    # Round down to nearest 10
+    bucket = (gdb_int // 10) * 10
+    return BEHINDERTEN_PAUSCHBETRAG.get(bucket, 0)
+
 
 EXPENSE_GUIDE = [
     {
@@ -1073,6 +1159,8 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
 _PERMANENT_FIELDS = {
     "steuer_id", "steuer_nummer", "vorname", "nachname",
     "geburtsdatum", "religion",
+    # Behinderung: once recognized rarely changes
+    "eigene_gdb", "eigene_merkmal",
 }
 
 # Semi-permanent: yearly confirmation prompted in UI
@@ -1081,6 +1169,8 @@ _SEMI_PERMANENT_FIELDS = {
     "iban", "kontoinhaber", "taetigkeit",
     # Rental property identity (per-property)
     "v_adresse",
+    # Pflegegrad may be reassessed yearly
+    "pflege_grad",
 }
 
 # Everything else is Annual — reset to default each year.
