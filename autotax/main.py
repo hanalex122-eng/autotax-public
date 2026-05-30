@@ -2457,6 +2457,194 @@ def steuer_upcoming(request: Request, user: dict = Depends(get_acting_context)):
     return {"items": upcoming_for_user(user["sub"])}
 
 
+# ────────────────────────────────────────────────────────────────────
+# Steuererklärung (annual tax return) — MVP scaffold (2026-05-30).
+# See autotax/declaration.py + .claude/steuererklaerung_plan.md.
+# ────────────────────────────────────────────────────────────────────
+
+def _eur_profit_for_year(db, user_id: int, year: int) -> float:
+    """Compute Gewinn = sum(income invoices) - sum(expense invoices)
+    for the given user + tax year. Soft-deleted rows excluded.
+
+    Invoice.date is String (ISO YYYY-MM-DD), so we match by prefix."""
+    from sqlalchemy import func as _func
+    year_prefix = f"{year}-"
+    income = db.query(_func.coalesce(_func.sum(Invoice.total_amount), 0.0)).filter(
+        Invoice.user_id == user_id,
+        Invoice.invoice_type == "income",
+        Invoice.is_deleted.is_(False),
+        Invoice.date.like(f"{year_prefix}%"),
+    ).scalar() or 0.0
+    expense = db.query(_func.coalesce(_func.sum(Invoice.total_amount), 0.0)).filter(
+        Invoice.user_id == user_id,
+        Invoice.invoice_type == "expense",
+        Invoice.is_deleted.is_(False),
+        Invoice.date.like(f"{year_prefix}%"),
+    ).scalar() or 0.0
+    return float(income) - float(expense)
+
+
+def _declaration_to_dict(decl, include_data: bool = True) -> dict:
+    from autotax.declaration import deserialize_data
+    return {
+        "id": decl.id,
+        "year": decl.year,
+        "status": decl.status,
+        "data": deserialize_data(decl.data) if include_data else None,
+        "pdf_generated_at": decl.pdf_generated_at.isoformat() if decl.pdf_generated_at else None,
+        "created_at": decl.created_at.isoformat() if decl.created_at else None,
+        "updated_at": decl.updated_at.isoformat() if decl.updated_at else None,
+    }
+
+
+@app.get("/steuer/declaration/schema")
+def declaration_schema():
+    """Form schema (sections + fields). Static config, no auth needed."""
+    from autotax.declaration import FORM_SECTIONS
+    return {"sections": FORM_SECTIONS}
+
+
+@app.get("/steuer/declaration/{year}")
+@limiter.limit("30/minute")
+def declaration_get(request: Request, year: int, user: dict = Depends(get_acting_context)):
+    """Return existing declaration for the year, or 404 if none yet."""
+    from autotax.models import TaxDeclaration
+    if year < 2020 or year > 2030:
+        raise HTTPException(status_code=400, detail="Jahr außerhalb des unterstützten Bereichs")
+    db = SessionLocal()
+    try:
+        decl = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if not decl:
+            raise HTTPException(status_code=404, detail="Noch keine Erklärung für dieses Jahr")
+        return _declaration_to_dict(decl)
+    finally:
+        db.close()
+
+
+@app.post("/steuer/declaration/{year}")
+@limiter.limit("10/minute")
+def declaration_create(request: Request, year: int, user: dict = Depends(get_acting_context)):
+    """Create draft declaration. Auto-fills from User + UserCompany + EÜR profit."""
+    from autotax.models import TaxDeclaration
+    from autotax.declaration import autofill_from_user_data, serialize_data
+    if year < 2020 or year > 2030:
+        raise HTTPException(status_code=400, detail="Jahr außerhalb des unterstützten Bereichs")
+    db = SessionLocal()
+    try:
+        existing = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if existing:
+            return _declaration_to_dict(existing)
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
+        profit = _eur_profit_for_year(db, user["sub"], year)
+        prefill = autofill_from_user_data(u, companies, profit)
+        decl = TaxDeclaration(
+            user_id=user["sub"],
+            year=year,
+            status="draft",
+            data=serialize_data(prefill),
+        )
+        db.add(decl)
+        db.commit()
+        db.refresh(decl)
+        return _declaration_to_dict(decl)
+    finally:
+        db.close()
+
+
+@app.patch("/steuer/declaration/{year}")
+@limiter.limit("60/minute")
+def declaration_update(request: Request, year: int,
+                       payload: dict = Body(...),
+                       user: dict = Depends(get_acting_context)):
+    """Update form fields. Body: {"data": {...field map...}}.
+    Merges with existing data (partial update)."""
+    from autotax.models import TaxDeclaration
+    from autotax.declaration import serialize_data, deserialize_data
+    db = SessionLocal()
+    try:
+        decl = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if not decl:
+            raise HTTPException(status_code=404, detail="Noch keine Erklärung — bitte zuerst erstellen")
+        if decl.status == "finalized":
+            raise HTTPException(status_code=400, detail="Erklärung ist bereits abgeschlossen")
+        incoming = payload.get("data") or {}
+        if not isinstance(incoming, dict):
+            raise HTTPException(status_code=400, detail="data muss ein Objekt sein")
+        merged = deserialize_data(decl.data)
+        merged.update(incoming)
+        decl.data = serialize_data(merged)
+        db.commit()
+        db.refresh(decl)
+        return _declaration_to_dict(decl)
+    finally:
+        db.close()
+
+
+@app.post("/steuer/declaration/{year}/finalize")
+@limiter.limit("5/minute")
+def declaration_finalize(request: Request, year: int, user: dict = Depends(get_acting_context)):
+    """Validate + mark as finalized. Returns errors if validation fails."""
+    from autotax.models import TaxDeclaration
+    from autotax.declaration import deserialize_data, validate
+    db = SessionLocal()
+    try:
+        decl = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if not decl:
+            raise HTTPException(status_code=404, detail="Erklärung nicht gefunden")
+        if decl.status == "finalized":
+            return _declaration_to_dict(decl)
+        errors = validate(deserialize_data(decl.data))
+        if errors:
+            return {"status": "validation_error", "errors": errors}
+        decl.status = "finalized"
+        decl.pdf_generated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(decl)
+        return _declaration_to_dict(decl)
+    finally:
+        db.close()
+
+
+@app.get("/steuer/declaration/{year}/pdf")
+@limiter.limit("20/minute")
+def declaration_pdf(request: Request, year: int, user: dict = Depends(get_acting_context)):
+    """Render draft/finalized declaration as PDF (skeleton layout)."""
+    from autotax.models import TaxDeclaration
+    from autotax.declaration import generate_pdf_skeleton
+    db = SessionLocal()
+    try:
+        decl = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if not decl:
+            raise HTTPException(status_code=404, detail="Erklärung nicht gefunden")
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
+        pdf_bytes = generate_pdf_skeleton(decl, u, companies)
+    finally:
+        db.close()
+    filename = f"Steuererklaerung_{year}_Entwurf.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @app.post("/admin/steuer/run-now")
 async def admin_run_steuer_now(user: dict = Depends(get_current_user)):
     """Manuel steuer reminder cycle (test icin)."""

@@ -591,3 +591,32 @@ class RecurringExpense(Base):
     __table_args__ = (
         Index("ix_recurring_user_active", "user_id", "active"),
     )
+
+
+class TaxDeclaration(Base):
+    """Steuererklärung (annual tax return) per user per year.
+
+    Stores form fields as JSON in `data`. PDF generated on finalize.
+    No ELSTER integration yet — user prints PDF and uploads manually.
+    See .claude/steuererklaerung_plan.md for scope + field schema.
+    """
+    __tablename__ = "tax_declarations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    year = Column(Integer, nullable=False)
+    status = Column(String(20), default="draft", nullable=False)  # draft | finalized
+    data = Column(Text, nullable=True)  # JSON-serialized form fields
+    pdf_path = Column(String, nullable=True)
+    pdf_generated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "year", name="uq_tax_decl_user_year"),
+        Index("ix_tax_decl_user_year", "user_id", "year"),
+    )

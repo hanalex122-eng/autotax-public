@@ -698,6 +698,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     {id:"bookkeeping",icon:I.tax,label:_t("bookkeeping")},
     {id:"vault",icon:I.invoice,label:_t("vault")},
     {id:"steuer_uebersicht",icon:I.tax,label:getLang()==="de"?"Steuer-Übersicht":"Tax Overview"},
+    {id:"declaration",icon:I.invoice,label:getLang()==="de"?"Steuererklärung 2025":getLang()==="tr"?"Vergi Beyannamesi 2025":"Tax Return 2025",badge:"BETA"},
     ...(F.editor!==false?[{id:"editor",icon:I.check,label:_t("editor")}]:[]),
     {id:"export",icon:I.export,label:_t("export")},
     {id:"companies",icon:I.invoice,label:_t("companies")},
@@ -4681,6 +4682,133 @@ function ToastItem({message,type="success",onClose}){
   </div>);
 }
 
+// Steuererklärung 2025 — MVP skeleton (2026-05-30).
+// Full form fields + PDF gen kommen in nächster Iteration (1-2 Tage).
+function DeclarationView(){
+  const _l=getLang();
+  const tr=(de,en,t)=>_l==="de"?de:_l==="tr"?(t||en):en;
+  const YEAR=2025;
+  const[decl,setDecl]=useState(null);
+  const[schema,setSchema]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[saving,setSaving]=useState(false);
+  const[err,setErr]=useState("");
+
+  const load=async()=>{
+    setLoading(true);setErr("");
+    try{
+      const sr=await fetch(API+"/steuer/declaration/schema");
+      const sd=await sr.json();
+      if(sr.ok)setSchema(sd.sections||[]);
+      const r=await _authFetch(API+"/steuer/declaration/"+YEAR);
+      if(r.status===404){setDecl(null);}
+      else if(r.ok){setDecl(await r.json());}
+      else{setErr("Fehler beim Laden");}
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+
+  const create=async()=>{
+    setSaving(true);setErr("");
+    try{
+      const r=await _authFetch(API+"/steuer/declaration/"+YEAR,{method:"POST"});
+      if(r.ok)setDecl(await r.json());
+      else{const e=await r.json();setErr(e.detail||"Erstellung fehlgeschlagen");}
+    }catch(e){setErr(e.message);}
+    setSaving(false);
+  };
+
+  const updateField=async(key,value)=>{
+    if(!decl)return;
+    const newData={...(decl.data||{}),[key]:value};
+    setDecl({...decl,data:newData});
+    // Debounced save (basit: hemen kaydet, daha sonra throttle)
+    try{
+      await _authFetch(API+"/steuer/declaration/"+YEAR,{
+        method:"PATCH",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({data:{[key]:value}}),
+      });
+    }catch(e){}
+  };
+
+  const downloadPDF=()=>{
+    window.open(API+"/steuer/declaration/"+YEAR+"/pdf?_t="+Date.now(),"_blank");
+  };
+
+  if(loading)return<div style={{padding:24,color:"var(--text-muted)"}}>{tr("Lädt…","Loading…","Yükleniyor…")}</div>;
+
+  return(<div style={{padding:"20px",maxWidth:900,margin:"0 auto"}}>
+    <div style={{marginBottom:24}}>
+      <h1 style={{margin:"0 0 8px",fontSize:26,fontWeight:800}}>🧾 {tr("Steuererklärung","Tax Return","Vergi Beyannamesi")} {YEAR}</h1>
+      <p style={{margin:0,color:"var(--text-muted)",fontSize:14,lineHeight:1.5}}>
+        {tr(
+          "Mantelbogen + Anlage S + Anlage Vorsorgeaufwand. Auto-fill aus deinen Belegen. Final-PDF zum manuellen Upload bei ELSTER.",
+          "Main form + Anlage S + Anlage Vorsorgeaufwand. Auto-fill from your receipts. Final PDF for manual upload to ELSTER.",
+          "Ana form + Anlage S + Vorsorgeaufwand. Belgelerinizden otomatik dolum. ELSTER'e elle yüklemek için PDF."
+        )}
+      </p>
+      <div style={{marginTop:8,padding:"8px 12px",background:"rgba(245,158,11,0.10)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:8,fontSize:12,color:"#f59e0b"}}>
+        ⚠️ {tr("Beta — bitte vor Übermittlung an ELSTER prüfen.","Beta — please verify before submitting to ELSTER.","Beta — ELSTER'e göndermeden önce kontrol edin.")}
+      </div>
+    </div>
+
+    {err && <div style={{padding:12,background:"rgba(239,68,68,0.10)",border:"1px solid #ef4444",borderRadius:8,color:"#ef4444",marginBottom:16,fontSize:13}}>{err}</div>}
+
+    {!decl && <div style={{textAlign:"center",padding:"60px 20px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:12}}>
+      <div style={{fontSize:48,marginBottom:16}}>📋</div>
+      <h3 style={{margin:"0 0 8px",fontSize:18}}>{tr("Noch keine Erklärung","No declaration yet","Henüz beyanname yok")} {YEAR}</h3>
+      <p style={{margin:"0 0 20px",color:"var(--text-muted)",fontSize:14}}>
+        {tr("Wir erstellen einen Entwurf und füllen Felder aus deinen Daten automatisch aus.",
+            "We'll create a draft and auto-fill fields from your data.",
+            "Bir taslak oluşturup verilerinizden alanları otomatik dolduracağız.")}
+      </p>
+      <button onClick={create} disabled={saving} style={{padding:"12px 28px",background:saving?"#444":"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,fontSize:15,cursor:saving?"wait":"pointer"}}>
+        {saving?tr("Erstelle…","Creating…","Oluşturuluyor…"):tr("Entwurf erstellen","Create draft","Taslak oluştur")}
+      </button>
+    </div>}
+
+    {decl && schema && schema.map(section=>(
+      <div key={section.key} style={{marginBottom:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:20}}>
+        <h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:700,color:"var(--accent)"}}>
+          {_l==="tr"?section.title_tr:section.title_de}
+        </h3>
+        <div style={{display:"grid",gap:12}}>
+          {section.fields.map(f=>(
+            <div key={f.key} style={{display:"flex",flexDirection:"column",gap:4}}>
+              <label style={{fontSize:12,color:"var(--text-muted)",fontWeight:500}}>
+                {_l==="tr"?f.label_tr:f.label_de}
+                {f.required && <span style={{color:"#ef4444",marginLeft:4}}>*</span>}
+              </label>
+              {f.type==="select" ? (
+                <select value={(decl.data||{})[f.key]||""} onChange={e=>updateField(f.key,e.target.value)} style={{padding:"10px 12px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontSize:14}}>
+                  <option value="">—</option>
+                  {(f.options||[]).map(o=><option key={o.v} value={o.v}>{_l==="tr"?o.tr:o.de}</option>)}
+                </select>
+              ) : (
+                <input type={f.type==="number"?"number":f.type==="date"?"date":"text"}
+                       value={(decl.data||{})[f.key]||""}
+                       onChange={e=>updateField(f.key,e.target.value)}
+                       disabled={decl.status==="finalized"}
+                       style={{padding:"10px 12px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontSize:14,fontFamily:"inherit"}}/>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    ))}
+
+    {decl && <div style={{display:"flex",gap:12,marginTop:24,flexWrap:"wrap"}}>
+      <button onClick={downloadPDF} style={{padding:"12px 24px",background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,cursor:"pointer"}}>
+        📄 {tr("PDF herunterladen","Download PDF","PDF indir")}
+      </button>
+      <div style={{padding:"10px 14px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,fontSize:12,color:"var(--text-muted)"}}>
+        {tr("Status","Status","Durum")}: <strong style={{color:decl.status==="finalized"?"#10b981":"#f59e0b"}}>{decl.status}</strong>
+      </div>
+    </div>}
+  </div>);
+}
+
 function App(){
   const[authed,setAuthed]=useState(!!localStorage.getItem("atx_token"));
   // Acting mode'a girince hangi sayfaya gidilecegi sessionStorage'da tutulur
@@ -4724,7 +4852,7 @@ function App(){
   if(!authed)return<Fragment><AuthScreen onLogin={()=>setAuthed(true)}/><CookieConsent/></Fragment>;
   // SendInvoicesView: InvoicesView'in sendOnly=true ile kopyasi — sadece email gonder buton'u
   const SendInvoicesView=(props)=><InvoicesView {...props} sendOnly={true}/>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView};
+  const views={dashboard:DashboardView,invoices:InvoicesView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView};
   const _t=typeof t==="function"?t:k=>k;
   const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),send_invoices:(getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.
