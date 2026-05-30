@@ -4767,7 +4767,22 @@ function DeclarationView(){
   const[showEur,setShowEur]=useState(false);
   const[autoDetecting,setAutoDetecting]=useState(false);
   const[locked,setLocked]=useState(null); // null|{current_plan, required_plans, message}
+  const[isMobile,setIsMobile]=useState(()=>typeof window!=="undefined"&&window.innerWidth<=600);
+  useEffect(()=>{
+    const h=()=>setIsMobile(window.innerWidth<=600);
+    window.addEventListener("resize",h);
+    return()=>window.removeEventListener("resize",h);
+  },[]);
   const saveTimerRef=useRef(null);
+  // Mobile-aware style tokens
+  const M={
+    pad:isMobile?"14px":"20px",
+    inputPad:isMobile?"14px 14px":"10px 12px",  // 48px+ touch target mobile
+    inputSize:isMobile?16:14,                    // 16px+ to prevent iOS zoom
+    h1:isMobile?22:26,
+    btnPad:isMobile?"14px 22px":"12px 24px",
+    btnSize:isMobile?15:14,
+  };
 
   const autoDetectInsurance=async()=>{
     if(!decl||autoDetecting)return;
@@ -4933,20 +4948,20 @@ function DeclarationView(){
 
   const errorCount=Object.keys(errors).length;
 
-  return(<div style={{padding:"20px",maxWidth:900,margin:"0 auto"}}>
-    <div style={{marginBottom:24,display:"flex",flexWrap:"wrap",alignItems:"flex-start",gap:16,justifyContent:"space-between"}}>
-      <div style={{flex:"1 1 300px"}}>
-        <h1 style={{margin:"0 0 8px",fontSize:26,fontWeight:800}}>🧾 {tr("Steuererklärung","Tax Return","Vergi Beyannamesi")} {year}</h1>
-        <p style={{margin:0,color:"var(--text-muted)",fontSize:14,lineHeight:1.5}}>
+  return(<div style={{padding:M.pad,maxWidth:900,margin:"0 auto"}}>
+    <div style={{marginBottom:isMobile?16:24,display:"flex",flexWrap:"wrap",alignItems:"flex-start",gap:12,justifyContent:"space-between"}}>
+      <div style={{flex:"1 1 240px",minWidth:0}}>
+        <h1 style={{margin:"0 0 6px",fontSize:M.h1,fontWeight:800,wordBreak:"break-word"}}>🧾 {tr("Steuererklärung","Tax Return","Vergi Beyannamesi")} {year}</h1>
+        <p style={{margin:0,color:"var(--text-muted)",fontSize:isMobile?13:14,lineHeight:1.5}}>
           {tr(
-            "Mantelbogen + Anlage S + Anlage Vorsorgeaufwand. Auto-fill aus deinen Belegen. Final-PDF zum manuellen Upload bei ELSTER.",
-            "Main form + Anlage S + Anlage Vorsorgeaufwand. Auto-fill from your receipts. Final PDF for manual upload to ELSTER.",
-            "Ana form + Anlage S + Vorsorgeaufwand. Belgelerinizden otomatik dolum. ELSTER'e elle yüklemek için PDF."
+            "Mantelbogen + Anlage S + Vorsorge. Auto-fill aus Belegen. PDF für ELSTER.",
+            "Main form + Anlage S + Vorsorge. Auto-fill from receipts. PDF for ELSTER.",
+            "Ana form + Anlage S + Vorsorge. Belgelerden otomatik dolum. ELSTER için PDF."
           )}
         </p>
       </div>
-      <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"flex-end"}}>
-        <select value={year} onChange={e=>setYear(parseInt(e.target.value,10))} style={{padding:"8px 14px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontSize:14,fontWeight:600}}>
+      <div style={{display:"flex",flexDirection:isMobile?"row":"column",gap:8,alignItems:isMobile?"center":"flex-end",flexWrap:"wrap"}}>
+        <select value={year} onChange={e=>setYear(parseInt(e.target.value,10))} style={{padding:isMobile?"10px 14px":"8px 14px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontSize:M.inputSize,fontWeight:600,minHeight:isMobile?44:"auto"}}>
           {[2024,2025,2026].filter(y=>y<=CURRENT_YEAR).map(y=><option key={y} value={y}>{tr("Jahr","Year","Yıl")} {y}</option>)}
         </select>
         <SaveBadge/>
@@ -4967,7 +4982,7 @@ function DeclarationView(){
             "We'll create a draft and auto-fill fields from your data.",
             "Bir taslak oluşturup verilerinizden alanları otomatik dolduracağız.")}
       </p>
-      <button onClick={create} disabled={saving} style={{padding:"12px 28px",background:saving?"#444":"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,fontSize:15,cursor:saving?"wait":"pointer"}}>
+      <button onClick={create} disabled={saving} style={{padding:isMobile?"14px 28px":"12px 28px",background:saving?"#444":"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,fontSize:M.btnSize+1,cursor:saving?"wait":"pointer",minHeight:isMobile?48:"auto"}}>
         {saving?tr("Erstelle…","Creating…","Oluşturuluyor…"):tr("Entwurf erstellen","Create draft","Taslak oluştur")}
       </button>
     </div>}
@@ -4977,7 +4992,7 @@ function DeclarationView(){
     </div>}
 
     {decl && schema && schema.map(section=>(
-      <div key={section.key} style={{marginBottom:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:20}}>
+      <div key={section.key} style={{marginBottom:isMobile?14:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:isMobile?14:20}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
           <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"var(--accent)"}}>
             {_l==="tr"?section.title_tr:section.title_de}
@@ -5000,7 +5015,7 @@ function DeclarationView(){
                 {f.required && <span style={{color:"#ef4444",marginLeft:4}}>*</span>}
               </label>
               {f.type==="select" ? (
-                <select value={(decl.data||{})[f.key]||""} onChange={e=>updateField(f.key,e.target.value)} style={{padding:"10px 12px",background:"var(--surface)",border:`1px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:8,color:"var(--text)",fontSize:14}}>
+                <select value={(decl.data||{})[f.key]||""} onChange={e=>updateField(f.key,e.target.value)} style={{padding:M.inputPad,background:"var(--surface)",border:`1px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:8,color:"var(--text)",fontSize:M.inputSize,minHeight:isMobile?48:"auto"}}>
                   <option value="">—</option>
                   {(f.options||[]).map(o=><option key={o.v} value={o.v}>{_l==="tr"?o.tr:o.de}</option>)}
                 </select>
@@ -5009,7 +5024,7 @@ function DeclarationView(){
                        value={(decl.data||{})[f.key]||""}
                        onChange={e=>updateField(f.key,e.target.value)}
                        disabled={decl.status==="finalized"}
-                       style={{padding:"10px 12px",background:"var(--surface)",border:`1px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:8,color:"var(--text)",fontSize:14,fontFamily:"inherit"}}/>
+                       style={{padding:M.inputPad,background:"var(--surface)",border:`1px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:8,color:"var(--text)",fontSize:M.inputSize,fontFamily:"inherit",minHeight:isMobile?48:"auto"}}/>
               )}
               {hint && !hasError && <div style={{fontSize:11,color:"var(--text-dim)",marginTop:2,fontStyle:"italic"}}>💡 {hint}</div>}
               {hasError && <div style={{fontSize:11,color:"#ef4444",marginTop:2}}>{fieldErr}</div>}
@@ -5022,7 +5037,7 @@ function DeclarationView(){
     {showEur && <EurDetailModal year={year} onClose={()=>setShowEur(false)} tr={tr}/>}
 
     {decl && <div style={{display:"flex",gap:12,marginTop:24,flexWrap:"wrap",alignItems:"center"}}>
-      <button onClick={downloadPDF} style={{padding:"12px 24px",background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,cursor:"pointer"}}>
+      <button onClick={downloadPDF} style={{padding:M.btnPad,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,cursor:"pointer",fontSize:M.btnSize,minHeight:isMobile?48:"auto"}}>
         📄 {tr("PDF herunterladen","Download PDF","PDF indir")}
       </button>
       <div style={{padding:"10px 14px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,fontSize:12,color:"var(--text-muted)"}}>
