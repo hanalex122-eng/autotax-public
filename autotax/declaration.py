@@ -142,6 +142,34 @@ FORM_SECTIONS = [
         ],
     },
     {
+        "key": "anlage_sonderausgaben",
+        "title_de": "Sonderausgaben & §35a (haushaltsnahe)",
+        "title_tr": "Özel giderler + §35a (ev hizmetleri)",
+        "fields": [
+            {"key": "spenden_geld",    "label_de": "Spenden — Geldspenden gemeinnützig (€)",  "label_tr": "Geldspende (€)",        "type": "number", "required": False, "default": 0,
+             "hint_de": "Steuerlich begünstigt bis 20% des Gesamtbetrags der Einkünfte. Spendenbescheinigung Pflicht.",
+             "hint_tr": "Toplam gelirin %20'sine kadar düşülebilir. Spendenbescheinigung zorunlu."},
+            {"key": "spenden_partei",  "label_de": "Spenden Parteien (€)",                    "label_tr": "Parti bağışı (€)",       "type": "number", "required": False, "default": 0,
+             "hint_de": "50% absetzbar bis €825 Single / €1.650 Verheiratet (§34g EStG).",
+             "hint_tr": "%50 düşülebilir; bekar €825 / evli €1.650'ye kadar."},
+            {"key": "steuerberater",   "label_de": "Steuerberaterkosten (privat) (€)",        "label_tr": "Mali müşavir ücreti (€)", "type": "number", "required": False, "default": 0,
+             "hint_de": "Privater Anteil — beruflicher Anteil ist Werbungskosten / Betriebsausgaben.",
+             "hint_tr": "Özel kısmı — iş kısmı Werbungskosten/EÜR'de."},
+            {"key": "kirchensteuer_so","label_de": "Kirchensteuer (gezahlt) (€)",             "label_tr": "Kilise vergisi (€)",      "type": "number", "required": False, "default": 0,
+             "hint_de": "Voll absetzbar als Sonderausgabe (außer auf Kapitalerträge).",
+             "hint_tr": "Tam düşülebilir (sermaye gelirlerine ait hariç)."},
+            {"key": "handwerker_lohn", "label_de": "Handwerker-Lohnanteil §35a (€)",          "label_tr": "Esnaf işçilik ücreti (€)","type": "number", "required": False, "default": 0,
+             "hint_de": "20% absetzbar bis €1.200/Jahr. Nur Lohn (nicht Material). Rechnung + Überweisung Pflicht.",
+             "hint_tr": "%20 düşülebilir, yıllık €1.200'e kadar. Sadece işçilik (malzeme değil). Fatura + havale zorunlu."},
+            {"key": "haushaltsdienst", "label_de": "Haushaltsnahe Dienstleistungen §35a (€)", "label_tr": "Ev hizmeti (€)",          "type": "number", "required": False, "default": 0,
+             "hint_de": "20% absetzbar bis €4.000/Jahr. Reinigung, Gartenpflege, Pflegedienst.",
+             "hint_tr": "%20 düşülebilir, yıllık €4.000'e kadar. Temizlik, bahçe, bakım."},
+            {"key": "haushaltshilfe_mini", "label_de": "Mini-Job Haushalt §35a (€)",          "label_tr": "Mini-Job ev (€)",         "type": "number", "required": False, "default": 0,
+             "hint_de": "20% absetzbar bis €510/Jahr. Geringfügig Beschäftigte im Haushalt.",
+             "hint_tr": "%20 düşülebilir, yıllık €510'a kadar. Küçük istihdamlı ev çalışanı."},
+        ],
+    },
+    {
         "key": "anlage_vorsorge",
         "title_de": "Anlage Vorsorgeaufwand",
         "title_tr": "Anlage Vorsorgeaufwand (sigortalar)",
@@ -748,8 +776,57 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
                      f"Überschuss Vermietung: {v_net:.2f} €")
         y -= 0.8 * cm
 
+    # ─── Section: ANLAGE SONDERAUSGABEN (only if any field filled) ───
+    so_keys = ("spenden_geld", "spenden_partei", "steuerberater",
+               "kirchensteuer_so", "handwerker_lohn", "haushaltsdienst",
+               "haushaltshilfe_mini")
+    has_so = any(data.get(k) for k in so_keys)
+    section_counter = ord("E")  # E is base after mandatory sections
+    if anlage_n:
+        section_counter += 1
+    if anlage_v:
+        section_counter += 1
+    if has_so:
+        letter_so = chr(section_counter)
+        y = ensure_space(y, 6 * cm)
+        y = section_band(f"{letter_so} — Sonderausgaben & §35a", y)
+        so_rows = [
+            ("spenden_geld", "Spenden Gemeinnützig"),
+            ("spenden_partei", "Spenden Parteien"),
+            ("steuerberater", "Steuerberater (privat)"),
+            ("kirchensteuer_so", "Kirchensteuer gezahlt"),
+            ("handwerker_lohn", "Handwerker §35a"),
+            ("haushaltsdienst", "Haushaltsdienst §35a"),
+            ("haushaltshilfe_mini", "Mini-Job Haushalt §35a"),
+        ]
+        for i in range(0, len(so_rows), 2):
+            y = ensure_space(y, 2.5 * cm)
+            for j, (key, label) in enumerate(so_rows[i:i + 2]):
+                x = margin_l + j * (eur_w + col_gap)
+                val = data.get(key)
+                val_str = f"{float(val or 0):.2f} €"
+                draw_field_box(x, y, eur_w, label, val_str,
+                               show_line_num=(j == 0))
+            y -= 1.25 * cm
+        # §35a savings calculation
+        so_handwerker = float(data.get("handwerker_lohn") or 0)
+        so_haushalt = float(data.get("haushaltsdienst") or 0)
+        so_mini = float(data.get("haushaltshilfe_mini") or 0)
+        so_savings = (
+            min(so_handwerker * 0.20, 1200)
+            + min(so_haushalt * 0.20, 4000)
+            + min(so_mini * 0.20, 510)
+        )
+        if so_savings > 0:
+            c.setFillColor(INK)
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(margin_l + 0.3 * cm, y,
+                         f"§35a Steuerermäßigung (geschätzt): {so_savings:.2f} €")
+            y -= 0.8 * cm
+        section_counter += 1
+
     # ─── Section: ANLAGE VORSORGEAUFWAND ───
-    next_letter = "G" if (anlage_n and anlage_v) else ("F" if (anlage_n or anlage_v) else "E")
+    next_letter = chr(section_counter)
     y = ensure_space(y, 8 * cm)
     y = section_band(f"{next_letter} — Anlage Vorsorgeaufwand", y)
 

@@ -355,6 +355,19 @@ def declaration_fields_from_extraction(extraction: dict) -> dict:
         if amt:
             out["rente_gesetz"] = float(amt)
 
+    elif doc_type == "spendenbescheinigung":
+        betrag = extraction.get("betrag")
+        if betrag:
+            empfaenger = (extraction.get("empfaenger") or "").lower()
+            # Heuristic: if recipient is a political party → spenden_partei
+            party_keywords = ("partei", "spd", "cdu", "csu", "fdp", "linke",
+                              "gruene", "grüne", "afd", "freie waehler",
+                              "freie wähler", "die partei")
+            if any(k in empfaenger for k in party_keywords):
+                out["spenden_partei"] = float(betrag)
+            else:
+                out["spenden_geld"] = float(betrag)
+
     return out
 
 

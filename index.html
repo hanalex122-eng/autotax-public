@@ -4787,6 +4787,26 @@ function DeclarationView(){
   const[uploading,setUploading]=useState(false);
   const[lsbResult,setLsbResult]=useState(null); // {extraction, suggested_fields, confidence}
   const lsbInputRef=useRef(null);
+  const spendeInputRef=useRef(null);
+
+  const uploadTaxDoc=async(file,docType)=>{
+    if(!file||!decl)return;
+    setUploading(true);setLsbResult(null);
+    try{
+      const fd=new FormData();fd.append("file",file);
+      const r=await _authFetch(API+"/steuer/document/extract?doc_type="+encodeURIComponent(docType),{
+        method:"POST",body:fd,
+      });
+      if(!r.ok){
+        const e=await r.json().catch(()=>({}));
+        alert(tr("Extraktion fehlgeschlagen: ","Extraction failed: ","Çıkarım hatası: ")+(e.detail||"unknown"));
+      }else{
+        const data=await r.json();
+        setLsbResult(data);
+      }
+    }catch(e){alert(e.message);}
+    setUploading(false);
+  };
 
   const uploadLSB=async(file)=>{
     if(!file||!decl)return;
@@ -5048,6 +5068,9 @@ function DeclarationView(){
           {section.key==="anlage_n" && <button onClick={()=>lsbInputRef.current&&lsbInputRef.current.click()} disabled={uploading} style={{padding:"6px 12px",background:uploading?"#444":"linear-gradient(135deg,#8b5cf6,#6366f1)",border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:uploading?"wait":"pointer"}}>
             {uploading?tr("Analyse…","Analyzing…","Analiz…"):"📄 "+tr("Lohnsteuerbescheinigung hochladen","Upload wage statement","Bordro yükle")}
           </button>}
+          {section.key==="anlage_sonderausgaben" && <button onClick={()=>spendeInputRef.current&&spendeInputRef.current.click()} disabled={uploading} style={{padding:"6px 12px",background:uploading?"#444":"linear-gradient(135deg,#8b5cf6,#6366f1)",border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:uploading?"wait":"pointer"}}>
+            {uploading?tr("Analyse…","Analyzing…","Analiz…"):"💝 "+tr("Spendenbescheinigung hochladen","Upload donation receipt","Bağış belgesi yükle")}
+          </button>}
         </div>
         <div style={{display:"grid",gap:14}}>
           {section.fields.map(f=>{
@@ -5084,6 +5107,10 @@ function DeclarationView(){
     <input ref={lsbInputRef} type="file" accept="application/pdf,image/png,image/jpeg" onChange={e=>{
       const f=e.target.files&&e.target.files[0];if(f)uploadLSB(f);
       if(lsbInputRef.current)lsbInputRef.current.value="";
+    }} style={{display:"none"}}/>
+    <input ref={spendeInputRef} type="file" accept="application/pdf,image/png,image/jpeg" onChange={e=>{
+      const f=e.target.files&&e.target.files[0];if(f)uploadTaxDoc(f,"spendenbescheinigung");
+      if(spendeInputRef.current)spendeInputRef.current.value="";
     }} style={{display:"none"}}/>
 
     {lsbResult && <div onClick={()=>setLsbResult(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1100,padding:20}}>
