@@ -272,12 +272,29 @@ def deserialize_data(raw: Optional[str]) -> dict:
 # PDF generation — SKELETON only. Real layout next iteration.
 # ───────────────────────────────────────────────────────────────────
 
-def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
-    """Render declaration as PDF with form-like layout (tax-office inspired).
+def _human_value(value, options: list | None = None, lang: str = "de") -> str:
+    """Format raw form value for display (Religion → 'Keine', etc)."""
+    if value in (None, ""):
+        return "—"
+    if options:
+        for o in options:
+            if str(o.get("v")) == str(value):
+                return o.get(lang) or o.get("de") or str(value)
+    return str(value)
 
-    Each section has a header band, labeled rows with underline-style value
-    boxes. Cover page has year + status. Footer disclaimer on every page.
-    Not the actual ESt 1 A scan but close enough for review-before-ELSTER.
+
+def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
+    """Render declaration as ESt 1 A-inspired PDF.
+
+    Structure mimics official ELSTER form:
+    - Header band: "Einkommensteuererklärung YYYY" + tax office (Finanzamt)
+      placeholder + Steuernummer/Steuer-ID boxes.
+    - Numbered Zeilen (lines) like real form (Zeile 1, 2, 3 ...).
+    - 2-column field layout where it fits.
+    - Checkbox-style options for select fields (Familienstand, Religion).
+    - Section dividers with title bands.
+    - Summary block + Anlagen tick list at end.
+    - Footer disclaimer.
     """
     import io
     from reportlab.lib.pagesizes import A4
@@ -288,113 +305,327 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
     NAVY = HexColor("#0f1a2e")
     INK = HexColor("#1a2d4a")
     MUTED = HexColor("#7a8ba8")
+    DIM = HexColor("#9aa5b5")
     ACCENT = HexColor("#10b981")
-    LIGHT_BG = HexColor("#f3f6fa")
-    BORDER = HexColor("#cdd5e0")
+    BAND_BG = HexColor("#eaeff5")
+    LIGHT_BG = HexColor("#f7f9fc")
+    BORDER = HexColor("#c5cfdb")
+    BOX_BORDER = HexColor("#9aa5b5")
+    LINE_NUM = HexColor("#788599")
 
     buf = io.BytesIO()
     c = pdf_canvas.Canvas(buf, pagesize=A4)
     w, h = A4
     data = deserialize_data(declaration.data)
-    margin_l = 1.8 * cm
-    margin_r = 1.8 * cm
-    content_w = w - margin_l - margin_r
 
-    def draw_footer():
+    margin_l = 1.5 * cm
+    margin_r = 1.5 * cm
+    content_w = w - margin_l - margin_r
+    col_gap = 0.5 * cm
+    col_w = (content_w - col_gap) / 2
+
+    line_counter = [1]
+
+    def draw_footer(pageno: int):
         c.setFillColor(MUTED)
         c.setFont("Helvetica", 7)
-        c.drawString(margin_l, 1.4 * cm,
-                     f"AutoTax.Cloud · {user.email if user else ''} · "
-                     f"Erstellt {date.today().strftime('%d.%m.%Y')}")
-        c.drawString(margin_l, 1.0 * cm,
-                     "Entwurf — Keine Steuerberatung. Bitte vor Übermittlung an ELSTER prüfen.")
-        c.drawRightString(w - margin_r, 1.0 * cm,
-                          f"Steuererklärung {declaration.year}")
+        c.drawString(margin_l, 1.3 * cm,
+                     f"AutoTax.Cloud · Entwurf · Erstellt {date.today().strftime('%d.%m.%Y')}")
+        c.drawString(margin_l, 0.95 * cm,
+                     "Keine rechtsverbindliche Steuerberatung — bitte vor ELSTER-Übermittlung prüfen.")
+        c.drawRightString(w - margin_r, 0.95 * cm,
+                          f"Seite {pageno} · ESt {declaration.year}")
+
+    page_no = [1]
 
     def new_page():
-        draw_footer()
+        draw_footer(page_no[0])
         c.showPage()
-        return h - 2.5 * cm
+        page_no[0] += 1
+        # Slim header band on continuation pages
+        c.setFillColor(NAVY)
+        c.rect(0, h - 1.4 * cm, w, 1.4 * cm, fill=1, stroke=0)
+        c.setFillColor(HexColor("#ffffff"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(margin_l, h - 0.95 * cm,
+                     f"Einkommensteuererklärung {declaration.year} (Fortsetzung)")
+        c.setFont("Helvetica", 9)
+        c.setFillColor(HexColor("#a8b8d0"))
+        c.drawRightString(w - margin_r, h - 0.95 * cm,
+                          f"{user.email if user else ''}")
+        return h - 2.2 * cm
 
-    # ─── Cover band ───
+    def ensure_space(y, needed):
+        if y - needed < 2 * cm:
+            return new_page()
+        return y
+
+    def draw_line_num(y, x=None):
+        if x is None:
+            x = margin_l - 0.0 * cm
+        c.setFillColor(LINE_NUM)
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(x - 0.7 * cm, y, f"{line_counter[0]}")
+        line_counter[0] += 1
+
+    def draw_field_box(x, y, box_w, label, value, *, show_line_num=False):
+        """Single field: tiny uppercase label above a bordered value box."""
+        if show_line_num:
+            draw_line_num(y)
+        c.setFillColor(LIGHT_BG)
+        c.setStrokeColor(BOX_BORDER)
+        c.setLineWidth(0.5)
+        c.roundRect(x, y - 0.95 * cm, box_w, 0.85 * cm, 0.08 * cm, fill=1, stroke=1)
+        c.setFillColor(MUTED)
+        c.setFont("Helvetica", 6.5)
+        c.drawString(x + 0.18 * cm, y - 0.2 * cm, label.upper())
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold" if value and value != "—" else "Helvetica", 10.5)
+        c.drawString(x + 0.18 * cm, y - 0.7 * cm, str(value)[:60])
+
+    def draw_checkbox_row(x, y, options, selected, lang="de"):
+        """Render select field as horizontal checkbox row (ELSTER style)."""
+        cur_x = x
+        for o in options:
+            is_sel = str(o.get("v")) == str(selected)
+            # Box
+            c.setStrokeColor(BOX_BORDER)
+            c.setLineWidth(0.5)
+            c.setFillColor(INK if is_sel else HexColor("#ffffff"))
+            c.rect(cur_x, y - 0.32 * cm, 0.32 * cm, 0.32 * cm, fill=1, stroke=1)
+            if is_sel:
+                c.setStrokeColor(HexColor("#ffffff"))
+                c.setLineWidth(1.4)
+                c.line(cur_x + 0.06 * cm, y - 0.16 * cm,
+                       cur_x + 0.13 * cm, y - 0.26 * cm)
+                c.line(cur_x + 0.13 * cm, y - 0.26 * cm,
+                       cur_x + 0.27 * cm, y - 0.05 * cm)
+            c.setFillColor(INK)
+            c.setFont("Helvetica-Bold" if is_sel else "Helvetica", 9)
+            label = o.get(lang) or o.get("de") or o.get("v")
+            c.drawString(cur_x + 0.45 * cm, y - 0.22 * cm, label)
+            cur_x += 0.45 * cm + c.stringWidth(label, "Helvetica", 9) + 0.6 * cm
+
+    # ─────────────────────────────────────────────────────────
+    # PAGE 1 — HEADER + Steuerpflichtige (Mantelbogen part 1)
+    # ─────────────────────────────────────────────────────────
+
+    # Top header band
     c.setFillColor(NAVY)
-    c.rect(0, h - 4 * cm, w, 4 * cm, fill=1, stroke=0)
+    c.rect(0, h - 3.5 * cm, w, 3.5 * cm, fill=1, stroke=0)
     c.setFillColor(HexColor("#ffffff"))
-    c.setFont("Helvetica-Bold", 22)
-    c.drawString(margin_l, h - 2.5 * cm, f"Steuererklärung {declaration.year}")
-    c.setFont("Helvetica", 11)
+    c.setFont("Helvetica-Bold", 19)
+    c.drawString(margin_l, h - 1.7 * cm, "Einkommensteuererklärung")
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(margin_l, h - 2.5 * cm, str(declaration.year))
+    c.setFont("Helvetica", 9)
     c.setFillColor(HexColor("#a8b8d0"))
-    c.drawString(margin_l, h - 3.3 * cm,
-                 f"Entwurf — {user.email if user else ''} — "
-                 f"Stand {date.today().strftime('%d.%m.%Y')}")
-    # Status badge
+    c.drawString(margin_l, h - 3.1 * cm,
+                 "Entwurf, erstellt mit AutoTax.Cloud — kein offizielles ELSTER-Formular")
+
+    # Status badge top-right
     status_label = "ABGESCHLOSSEN" if declaration.status == "finalized" else "ENTWURF"
     badge_color = ACCENT if declaration.status == "finalized" else HexColor("#f59e0b")
-    badge_w = 3.5 * cm
+    badge_w = 3.2 * cm
     c.setFillColor(badge_color)
-    c.roundRect(w - margin_r - badge_w, h - 3.0 * cm, badge_w, 0.7 * cm, 0.15 * cm, fill=1, stroke=0)
-    c.setFillColor(HexColor("#0f1a2e"))
+    c.roundRect(w - margin_r - badge_w, h - 2.4 * cm, badge_w, 0.7 * cm,
+                0.15 * cm, fill=1, stroke=0)
+    c.setFillColor(NAVY)
     c.setFont("Helvetica-Bold", 9)
-    c.drawCentredString(w - margin_r - badge_w / 2, h - 2.8 * cm, status_label)
+    c.drawCentredString(w - margin_r - badge_w / 2, h - 2.2 * cm, status_label)
 
-    y = h - 5 * cm
+    # Steuernummer / Steuer-ID boxes
+    c.setFillColor(HexColor("#ffffff"))
+    box_y = h - 3.2 * cm
+    c.setFont("Helvetica", 7)
+    c.drawRightString(w - margin_r - 4.7 * cm, box_y + 0.5 * cm, "Steuer-ID")
+    c.setFont("Helvetica-Bold", 10)
+    c.drawRightString(w - margin_r, box_y + 0.5 * cm,
+                      data.get("steuer_id", "—"))
 
-    # ─── Sections ───
-    for section in FORM_SECTIONS:
-        # Section header band
-        if y < 5 * cm:
-            y = new_page()
-        c.setFillColor(LIGHT_BG)
-        c.rect(margin_l, y - 0.7 * cm, content_w, 0.9 * cm, fill=1, stroke=0)
+    y = h - 4.2 * cm
+
+    # ─── Section: STEUERPFLICHTIGE / Wohnanschrift ───
+    def section_band(title, y_pos):
+        c.setFillColor(BAND_BG)
+        c.rect(margin_l, y_pos - 0.65 * cm, content_w, 0.7 * cm, fill=1, stroke=0)
+        c.setStrokeColor(INK)
+        c.setLineWidth(0.6)
+        c.line(margin_l, y_pos - 0.65 * cm,
+               margin_l + content_w, y_pos - 0.65 * cm)
         c.setFillColor(INK)
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(margin_l + 0.3 * cm, y - 0.45 * cm, section["title_de"])
-        y -= 1.3 * cm
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(margin_l + 0.2 * cm, y_pos - 0.45 * cm, title.upper())
+        return y_pos - 1.1 * cm
 
-        # Fields as label + value rows
-        for f in section["fields"]:
-            if y < 3.5 * cm:
-                y = new_page()
-            label = f["label_de"]
-            value = data.get(f["key"], "")
-            value_str = str(value) if value not in (None, "") else "—"
+    y = section_band("A — Steuerpflichtige Person", y)
 
-            c.setFillColor(MUTED)
-            c.setFont("Helvetica", 8)
-            c.drawString(margin_l + 0.3 * cm, y, label.upper())
-            # Value with underline
-            c.setFillColor(INK)
-            c.setFont("Helvetica-Bold" if value not in (None, "") else "Helvetica", 11)
-            c.drawString(margin_l + 0.3 * cm, y - 0.5 * cm, value_str)
-            c.setStrokeColor(BORDER)
-            c.setLineWidth(0.4)
-            c.line(margin_l + 0.3 * cm, y - 0.65 * cm,
-                   margin_l + content_w - 0.3 * cm, y - 0.65 * cm)
-            y -= 1.1 * cm
-        y -= 0.3 * cm
+    # Row 1: Vorname | Nachname (2 cols)
+    draw_field_box(margin_l, y, col_w, "Vorname",
+                   _human_value(data.get("vorname"), None, "de"), show_line_num=True)
+    draw_field_box(margin_l + col_w + col_gap, y, col_w, "Nachname",
+                   _human_value(data.get("nachname"), None, "de"))
+    y -= 1.25 * cm
 
-    # ─── Summary box at the end ───
-    if y < 5 * cm:
-        y = new_page()
-    c.setFillColor(LIGHT_BG)
-    c.rect(margin_l, y - 2.5 * cm, content_w, 2.5 * cm, fill=1, stroke=0)
-    c.setStrokeColor(BORDER)
-    c.setLineWidth(0.6)
-    c.rect(margin_l, y - 2.5 * cm, content_w, 2.5 * cm, fill=0, stroke=1)
+    # Row 2: Geburtsdatum | Steuernummer
+    draw_field_box(margin_l, y, col_w, "Geburtsdatum",
+                   _human_value(data.get("geburtsdatum"), None, "de"), show_line_num=True)
+    draw_field_box(margin_l + col_w + col_gap, y, col_w, "Steuernummer",
+                   _human_value(data.get("steuer_nummer"), None, "de"))
+    y -= 1.25 * cm
+
+    # Religion — checkbox row (with Zeile number)
+    draw_line_num(y - 0.1 * cm)
+    c.setFillColor(MUTED)
+    c.setFont("Helvetica", 7)
+    c.drawString(margin_l + 0.18 * cm, y, "RELIGION (KIRCHENSTEUER)")
+    religion_options = next((f["options"] for f in FORM_SECTIONS[0]["fields"]
+                            if f["key"] == "religion"), [])
+    draw_checkbox_row(margin_l + 0.18 * cm, y - 0.55 * cm,
+                      religion_options, data.get("religion"))
+    y -= 1.4 * cm
+
+    # Familienstand — checkbox row
+    draw_line_num(y - 0.1 * cm)
+    c.setFillColor(MUTED)
+    c.setFont("Helvetica", 7)
+    c.drawString(margin_l + 0.18 * cm, y, "FAMILIENSTAND")
+    fs_options = next((f["options"] for f in FORM_SECTIONS[0]["fields"]
+                      if f["key"] == "familienstand"), [])
+    draw_checkbox_row(margin_l + 0.18 * cm, y - 0.55 * cm,
+                      fs_options, data.get("familienstand"))
+    y -= 1.7 * cm
+
+    # ─── Section: WOHNANSCHRIFT ───
+    y = ensure_space(y, 4 * cm)
+    y = section_band("B — Wohnanschrift (Stand 31.12.)", y)
+
+    # Strasse (full width) — Zeile
+    draw_field_box(margin_l, y, content_w, "Straße + Hausnummer",
+                   _human_value(data.get("strasse"), None, "de"), show_line_num=True)
+    y -= 1.25 * cm
+    # PLZ (kurz) + Ort (rest)
+    plz_w = 3.5 * cm
+    ort_w = content_w - plz_w - col_gap
+    draw_field_box(margin_l, y, plz_w, "PLZ",
+                   _human_value(data.get("plz"), None, "de"), show_line_num=True)
+    draw_field_box(margin_l + plz_w + col_gap, y, ort_w, "Ort",
+                   _human_value(data.get("ort"), None, "de"))
+    y -= 1.6 * cm
+
+    # ─── Section: BANKVERBINDUNG (Erstattung) ───
+    y = ensure_space(y, 4 * cm)
+    y = section_band("C — Bankverbindung für Erstattung", y)
+
+    draw_field_box(margin_l, y, content_w, "IBAN",
+                   _human_value(data.get("iban"), None, "de"), show_line_num=True)
+    y -= 1.25 * cm
+    draw_field_box(margin_l, y, content_w, "Kontoinhaber",
+                   _human_value(data.get("kontoinhaber"), None, "de"), show_line_num=True)
+    y -= 1.6 * cm
+
+    # ─── Section: ANLAGE S ───
+    y = ensure_space(y, 5 * cm)
+    y = section_band("D — Anlage S (Selbständige Tätigkeit)", y)
+
+    # Tätigkeit full width
+    draw_field_box(margin_l, y, content_w, "Tätigkeit",
+                   _human_value(data.get("taetigkeit"), None, "de"), show_line_num=True)
+    y -= 1.25 * cm
+    # Gewinn (left) + Veräußerungsgewinn (right)
+    eur_w = (content_w - col_gap) / 2
+    gewinn_val = data.get("gewinn_eur")
+    gewinn_str = f"{float(gewinn_val):.2f} €" if gewinn_val not in (None, "") else "—"
+    vg_val = data.get("veraeusserungsgewinn")
+    vg_str = f"{float(vg_val):.2f} €" if vg_val not in (None, "") else "—"
+    draw_field_box(margin_l, y, eur_w, "Gewinn aus EÜR",
+                   gewinn_str, show_line_num=True)
+    draw_field_box(margin_l + eur_w + col_gap, y, eur_w,
+                   "Veräußerungsgewinn", vg_str)
+    y -= 1.6 * cm
+
+    # ─── Section: ANLAGE VORSORGEAUFWAND ───
+    y = ensure_space(y, 8 * cm)
+    y = section_band("E — Anlage Vorsorgeaufwand", y)
+
+    vorsorge_rows = [
+        ("kv_basis", "Krankenversicherung Basis"),
+        ("kv_zusatz", "Krankenversicherung Zusatz"),
+        ("pflege", "Pflegeversicherung"),
+        ("rente_gesetz", "Gesetzliche Rente"),
+        ("rurup", "Rürup-Rente"),
+        ("bu", "Berufsunfähigkeit"),
+    ]
+    # 2-column layout for these
+    for i in range(0, len(vorsorge_rows), 2):
+        y = ensure_space(y, 2.5 * cm)
+        for j, (key, label) in enumerate(vorsorge_rows[i:i + 2]):
+            x = margin_l + j * (eur_w + col_gap)
+            val = data.get(key)
+            val_str = f"{float(val):.2f} €" if val not in (None, "") else "—"
+            draw_field_box(x, y, eur_w, label, val_str,
+                           show_line_num=(j == 0))
+        y -= 1.25 * cm
+    y -= 0.4 * cm
+
+    # ─── Section: SUMMARY + Anlagen tick list ───
+    y = ensure_space(y, 6 * cm)
+    c.setStrokeColor(INK)
+    c.setLineWidth(0.8)
+    c.setFillColor(BAND_BG)
+    c.rect(margin_l, y - 4.5 * cm, content_w, 4.5 * cm, fill=1, stroke=1)
     c.setFillColor(INK)
     c.setFont("Helvetica-Bold", 11)
-    c.drawString(margin_l + 0.3 * cm, y - 0.6 * cm, "ZUSAMMENFASSUNG")
-    c.setFont("Helvetica", 9)
-    gewinn = data.get("gewinn_eur", "—")
-    kv_basis = data.get("kv_basis", "—")
-    c.drawString(margin_l + 0.3 * cm, y - 1.2 * cm,
-                 f"Gewinn aus selbständiger Tätigkeit:  {gewinn} €")
-    c.drawString(margin_l + 0.3 * cm, y - 1.7 * cm,
-                 f"Krankenversicherung Basis:           {kv_basis} €")
-    c.drawString(margin_l + 0.3 * cm, y - 2.2 * cm,
-                 "Diese Angaben dienen als Übersicht. Verbindlich nur nach Einreichung bei ELSTER.")
+    c.drawString(margin_l + 0.3 * cm, y - 0.6 * cm,
+                 f"ZUSAMMENFASSUNG — VERANLAGUNG {declaration.year}")
 
-    draw_footer()
+    c.setFont("Helvetica", 9)
+    rows = [
+        ("Gewinn aus selbständiger Tätigkeit (Anlage S)", gewinn_str),
+        ("Krankenversicherung Basis (§10 Abs.1 Nr.3 EStG)",
+         f"{float(data.get('kv_basis') or 0):.2f} €"),
+        ("Krankenversicherung Zusatz",
+         f"{float(data.get('kv_zusatz') or 0):.2f} €"),
+        ("Pflegeversicherung",
+         f"{float(data.get('pflege') or 0):.2f} €"),
+        ("Gesetzliche Rentenversicherung",
+         f"{float(data.get('rente_gesetz') or 0):.2f} €"),
+        ("Rürup-Rente / Berufsunfähigkeitsversicherung",
+         f"{float(data.get('rurup') or 0) + float(data.get('bu') or 0):.2f} €"),
+    ]
+    row_y = y - 1.2 * cm
+    for label, val in rows:
+        c.setFillColor(INK)
+        c.setFont("Helvetica", 9)
+        c.drawString(margin_l + 0.4 * cm, row_y, label)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawRightString(margin_l + content_w - 0.4 * cm, row_y, val)
+        row_y -= 0.5 * cm
+    y -= 5.0 * cm
+
+    # Anlagen tick list
+    y = ensure_space(y, 3 * cm)
+    c.setFillColor(MUTED)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(margin_l, y, "ABGEGEBENE ANLAGEN")
+    y -= 0.45 * cm
+    anlagen = ["Anlage S", "Anlage EÜR", "Anlage Vorsorgeaufwand"]
+    ax = margin_l
+    c.setFont("Helvetica", 9)
+    for a in anlagen:
+        c.setFillColor(INK)
+        c.rect(ax, y - 0.3 * cm, 0.3 * cm, 0.3 * cm, fill=1, stroke=1)
+        c.setStrokeColor(HexColor("#ffffff"))
+        c.setLineWidth(1.3)
+        c.line(ax + 0.05 * cm, y - 0.15 * cm, ax + 0.12 * cm, y - 0.25 * cm)
+        c.line(ax + 0.12 * cm, y - 0.25 * cm, ax + 0.25 * cm, y - 0.04 * cm)
+        c.setFillColor(INK)
+        c.setStrokeColor(BOX_BORDER)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(ax + 0.45 * cm, y - 0.2 * cm, a)
+        ax += 0.45 * cm + c.stringWidth(a, "Helvetica-Bold", 9) + 0.8 * cm
+
+    draw_footer(page_no[0])
     c.save()
     buf.seek(0)
     return buf.getvalue()
