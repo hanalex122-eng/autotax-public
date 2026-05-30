@@ -2759,6 +2759,40 @@ def declaration_finalize(request: Request, year: int, user: dict = Depends(get_a
         db.close()
 
 
+@app.get("/steuer/declaration/{year}/xml")
+@limiter.limit("20/minute")
+def declaration_xml(request: Request, year: int, user: dict = Depends(get_acting_context)):
+    """ELSTER-style XML export (NOT submittable — for review/import only).
+
+    Returns XML body with same structure as ELSTER ESt 1 A but without ERiC
+    signature/encryption. Customers can use for:
+    - Review structured data
+    - Import into other tax software
+    - Future ERiC integration
+    """
+    from autotax.models import TaxDeclaration
+    from autotax.declaration import generate_elster_xml
+    _require_steuer_declaration_access(user)
+    db = SessionLocal()
+    try:
+        decl = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if not decl:
+            raise HTTPException(status_code=404, detail="Erklärung nicht gefunden")
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        xml_str = generate_elster_xml(decl, u)
+    finally:
+        db.close()
+    filename = f"ESt_{year}_Entwurf.xml"
+    return Response(
+        content=xml_str,
+        media_type="application/xml",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @app.get("/steuer/declaration/{year}/pdf")
 @limiter.limit("20/minute")
 def declaration_pdf(request: Request, year: int, user: dict = Depends(get_acting_context)):

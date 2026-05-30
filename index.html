@@ -4964,6 +4964,10 @@ function DeclarationView(){
     window.open(API+"/steuer/declaration/"+year+"/pdf?_t="+Date.now(),"_blank");
   };
 
+  const downloadXML=()=>{
+    window.open(API+"/steuer/declaration/"+year+"/xml?_t="+Date.now(),"_blank");
+  };
+
   const SaveBadge=()=>{
     if(saveState==="saving")return<span style={{color:"#f59e0b",fontSize:12}}>● {tr("Speichern…","Saving…","Kaydediliyor…")}</span>;
     if(saveState==="saved")return<span style={{color:"#10b981",fontSize:12}}>✓ {tr("Gespeichert","Saved","Kaydedildi")}</span>;
@@ -5246,6 +5250,9 @@ function DeclarationView(){
     {decl && <div style={{display:"flex",gap:12,marginTop:24,flexWrap:"wrap",alignItems:"center"}}>
       <button onClick={downloadPDF} style={{padding:M.btnPad,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,cursor:"pointer",fontSize:M.btnSize,minHeight:isMobile?48:"auto"}}>
         📄 {tr("PDF herunterladen","Download PDF","PDF indir")}
+      </button>
+      <button onClick={downloadXML} style={{padding:M.btnPad,background:"transparent",color:"var(--accent)",border:"1px solid var(--accent)",borderRadius:10,fontWeight:600,cursor:"pointer",fontSize:M.btnSize,minHeight:isMobile?48:"auto"}}>
+        ⚙ {tr("ELSTER-XML","ELSTER XML","ELSTER XML")}
       </button>
       <div style={{padding:"10px 14px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,fontSize:12,color:"var(--text-muted)"}}>
         {tr("Status","Status","Durum")}: <strong style={{color:decl.status==="finalized"?"#10b981":"#f59e0b"}}>{decl.status}</strong>

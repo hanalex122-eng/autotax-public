@@ -991,6 +991,166 @@ def carry_forward_fields(prev_data: dict) -> dict:
     return {k: v for k, v in prev_data.items() if k in keep and v not in (None, "")}
 
 
+# ───────────────────────────────────────────────────────────────────
+# ELSTER XML export — SKELETON only.
+# Real ELSTER ERiC integration (Java/C++ library + certificate +
+# Finanzamt server) is out of MVP scope. This produces an ELSTER-style
+# XML body so the user can inspect the data structure. Direct submission
+# requires ERiC; this output is for manual review or DATEV import.
+# ───────────────────────────────────────────────────────────────────
+
+def _xml_escape(s: str) -> str:
+    if s is None:
+        return ""
+    return (str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def generate_elster_xml(declaration, user) -> str:
+    """Render TaxDeclaration as ELSTER-style ESt 1 A XML.
+
+    NOT a real ELSTER submission — that requires ERiC library + cert.
+    This is a structured XML dump customers can use for:
+    - Manual review of structured data
+    - Import into other tax software (DATEV, lexware)
+    - Future ELSTER ERiC integration (Phase 10)
+    """
+    data = deserialize_data(declaration.data)
+    year = declaration.year
+
+    def field(tag: str, value, indent: int = 4) -> str:
+        if value in (None, ""):
+            return ""
+        return f"{' ' * indent}<{tag}>{_xml_escape(value)}</{tag}>\n"
+
+    def amount(tag: str, value, indent: int = 4) -> str:
+        if value in (None, ""):
+            return ""
+        try:
+            v = float(value)
+            if v == 0:
+                return ""
+            return f"{' ' * indent}<{tag}>{v:.2f}</{tag}>\n"
+        except Exception:
+            return ""
+
+    kinder_xml = ""
+    kinder = data.get("kinder") or []
+    if isinstance(kinder, list) and kinder:
+        kinder_xml = "  <Kinder>\n"
+        for k in kinder:
+            if not isinstance(k, dict):
+                continue
+            kinder_xml += "    <Kind>\n"
+            kinder_xml += field("Vorname", k.get("vorname"), 6)
+            kinder_xml += field("Geburtsdatum", k.get("geburtsdatum"), 6)
+            kinder_xml += field("SteuerID", k.get("steuer_id"), 6)
+            kinder_xml += field("Kindergeld", k.get("kindergeld"), 6)
+            kinder_xml += field("GeteiltesSorgerecht", k.get("shared_custody"), 6)
+            kinder_xml += "    </Kind>\n"
+        kinder_xml += "  </Kinder>\n"
+
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!-- AutoTax.Cloud Entwurf — KEIN OFFIZIELLES ELSTER-XML -->',
+        '<!-- Generated for user review; not submittable to Finanzamt without ERiC -->',
+        f'<Steuererklaerung jahr="{year}" formular="ESt_1_A" version="autotax-1.0">',
+        '  <Erstellt>',
+        f'    <Datum>{date.today().isoformat()}</Datum>',
+        f'    <Quelle>AutoTax.Cloud</Quelle>',
+        f'    <Kunde>{_xml_escape(user.email if user else "")}</Kunde>',
+        '  </Erstellt>',
+        '',
+        '  <Mantelbogen>',
+    ]
+    parts.append(field("SteuerID", data.get("steuer_id")))
+    parts.append(field("Steuernummer", data.get("steuer_nummer")))
+    parts.append(field("Vorname", data.get("vorname")))
+    parts.append(field("Nachname", data.get("nachname")))
+    parts.append(field("Geburtsdatum", data.get("geburtsdatum")))
+    parts.append(field("Religion", data.get("religion")))
+    parts.append(field("Familienstand", data.get("familienstand")))
+    parts.append('    <Wohnanschrift>')
+    parts.append(field("Strasse", data.get("strasse"), 6))
+    parts.append(field("PLZ", data.get("plz"), 6))
+    parts.append(field("Ort", data.get("ort"), 6))
+    parts.append('    </Wohnanschrift>')
+    parts.append('    <Bankverbindung>')
+    parts.append(field("IBAN", data.get("iban"), 6))
+    parts.append(field("Kontoinhaber", data.get("kontoinhaber"), 6))
+    parts.append('    </Bankverbindung>')
+    parts.append('  </Mantelbogen>')
+    parts.append('')
+
+    if kinder_xml:
+        parts.append(kinder_xml.rstrip("\n"))
+        parts.append('')
+
+    parts.append('  <AnlageS>')
+    parts.append(field("Taetigkeit", data.get("taetigkeit")))
+    parts.append(amount("GewinnAusEUR", data.get("gewinn_eur")))
+    parts.append(amount("Veraeusserungsgewinn", data.get("veraeusserungsgewinn")))
+    parts.append('  </AnlageS>')
+
+    if data.get("lohn_brutto") or data.get("lohnsteuer"):
+        parts.append('')
+        parts.append('  <AnlageN>')
+        parts.append(amount("Bruttoarbeitslohn", data.get("lohn_brutto")))
+        parts.append(amount("Lohnsteuer", data.get("lohnsteuer")))
+        parts.append(amount("Solidaritaetszuschlag", data.get("soli_n")))
+        parts.append(amount("Kirchensteuer", data.get("kirchensteuer")))
+        parts.append(amount("Werbungskosten", data.get("werbungskosten_n")))
+        parts.append('  </AnlageN>')
+
+    if data.get("v_einnahmen") or data.get("v_adresse"):
+        parts.append('')
+        parts.append('  <AnlageV>')
+        parts.append(field("Mietobjekt", data.get("v_adresse")))
+        parts.append(amount("Mieteinnahmen", data.get("v_einnahmen")))
+        parts.append(amount("NebenkostenErhalten", data.get("v_nebenkosten")))
+        parts.append(amount("AfA", data.get("v_afa")))
+        parts.append(amount("Schuldzinsen", data.get("v_zinsen")))
+        parts.append(amount("Erhaltungsaufwand", data.get("v_erhaltung")))
+        parts.append(amount("Grundsteuer", data.get("v_grundsteuer")))
+        parts.append(amount("SonstigeWerbungskosten", data.get("v_sonst")))
+        parts.append('  </AnlageV>')
+
+    so_keys = ("spenden_geld", "spenden_partei", "steuerberater",
+               "kirchensteuer_so", "handwerker_lohn", "haushaltsdienst",
+               "haushaltshilfe_mini")
+    if any(data.get(k) for k in so_keys):
+        parts.append('')
+        parts.append('  <Sonderausgaben>')
+        parts.append(amount("SpendenGeld", data.get("spenden_geld")))
+        parts.append(amount("SpendenPartei", data.get("spenden_partei")))
+        parts.append(amount("Steuerberater", data.get("steuerberater")))
+        parts.append(amount("KirchensteuerGezahlt", data.get("kirchensteuer_so")))
+        parts.append(amount("HandwerkerLohn35a", data.get("handwerker_lohn")))
+        parts.append(amount("Haushaltsdienst35a", data.get("haushaltsdienst")))
+        parts.append(amount("HaushaltshilfeMini35a", data.get("haushaltshilfe_mini")))
+        parts.append('  </Sonderausgaben>')
+
+    vorsorge_keys = ("kv_basis", "kv_zusatz", "pflege", "rente_gesetz",
+                     "rurup", "bu")
+    if any(data.get(k) for k in vorsorge_keys):
+        parts.append('')
+        parts.append('  <AnlageVorsorgeaufwand>')
+        parts.append(amount("KrankenversicherungBasis", data.get("kv_basis")))
+        parts.append(amount("KrankenversicherungZusatz", data.get("kv_zusatz")))
+        parts.append(amount("Pflegeversicherung", data.get("pflege")))
+        parts.append(amount("GesetzlicheRente", data.get("rente_gesetz")))
+        parts.append(amount("RuerupRente", data.get("rurup")))
+        parts.append(amount("Berufsunfaehigkeit", data.get("bu")))
+        parts.append('  </AnlageVorsorgeaufwand>')
+
+    parts.append('</Steuererklaerung>')
+    # Filter empty lines from amount() returning "" (no value)
+    return "".join(p if p.endswith("\n") else p + "\n" for p in parts if p != "")
+
+
 __all__ = [
     "FORM_SECTIONS",
     "autofill_from_user_data",
@@ -1000,4 +1160,5 @@ __all__ = [
     "generate_pdf_skeleton",
     "carry_forward_fields",
     "detect_insurance_amounts",
+    "generate_elster_xml",
 ]
