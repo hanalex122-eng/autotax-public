@@ -214,6 +214,110 @@ FORM_SECTIONS = [
 ]
 
 
+# ───────────────────────────────────────────────────────────────────
+# Expense Category Guide — "Wo gehören meine Belege hin?"
+# User feedback (2026-05-30): "benzin parasi elbise verbung nereye yazacagiz"
+# Frontend renders this as a help panel users can open from any section.
+# ───────────────────────────────────────────────────────────────────
+
+EXPENSE_GUIDE = [
+    {
+        "category": "fuel",
+        "label_de": "Benzin / Diesel",
+        "label_tr": "Benzin / Mazot",
+        "explanation_de": "Geht in die EÜR als 'KFZ-Kosten'. Wird automatisch in 'Gewinn aus EÜR' (Anlage S) eingerechnet, sobald du den Beleg hochlädst.",
+        "explanation_tr": "EÜR'de 'KFZ-Kosten' olarak gider. Belgeyi yüklediğinde otomatik 'Anlage S → Gewinn aus EÜR'e dahil olur.",
+        "where_de": "Anlage S → Gewinn aus EÜR (automatisch)",
+        "where_tr": "Anlage S → EÜR Gewinn (otomatik)",
+        "requirements_de": "Fahrtenbuch oder 1%-Regel. Privatanteil herausrechnen.",
+        "requirements_tr": "Fahrtenbuch veya %1 kuralı. Özel pay düşülmeli.",
+    },
+    {
+        "category": "advertising",
+        "label_de": "Werbung / Marketing",
+        "label_tr": "Reklam / Pazarlama",
+        "explanation_de": "Voll absetzbar als Betriebsausgabe. Google Ads, Facebook, Visitenkarten, Inserate.",
+        "explanation_tr": "Tam düşülebilir işletme gideri. Google Ads, Facebook, kartvizit, ilan.",
+        "where_de": "Anlage S → Gewinn aus EÜR (automatisch)",
+        "where_tr": "Anlage S → EÜR Gewinn (otomatik)",
+    },
+    {
+        "category": "clothing",
+        "label_de": "Kleidung",
+        "label_tr": "Giyim",
+        "explanation_de": "NUR absetzbar wenn typische Berufskleidung (Sicherheitsschuhe, Friseur-Schürze, Arzt-Kittel) ODER mit Firmenlogo. Normale Kleidung NICHT.",
+        "explanation_tr": "SADECE tipik iş kıyafeti (güvenlik ayakkabısı, kuaför önlüğü, doktor önlüğü) VEYA firma logosuyla varsa düşülebilir. Normal kıyafet HAYIR.",
+        "where_de": "Anlage S → Gewinn aus EÜR (wenn berufsspezifisch)",
+        "where_tr": "Anlage S → EÜR Gewinn (iş için ise)",
+        "requirements_de": "Bei privater Mischverwendung: NICHT absetzbar.",
+        "requirements_tr": "Özel karışık kullanımda: düşülemez.",
+    },
+    {
+        "category": "entertainment",
+        "label_de": "Bewirtung / Geschäftsessen",
+        "label_tr": "İş yemeği / İkram",
+        "explanation_de": "70% absetzbar bei Geschäftsessen mit Kunden. Vorsteuer (MwSt) 100%. Anlass + Teilnehmer + Datum auf Beleg notieren.",
+        "explanation_tr": "Müşteri ile iş yemeğinde %70 düşülebilir. Vergi (KDV) %100. Vesile + katılımcı + tarih belgede yazılmalı.",
+        "where_de": "Anlage S → Gewinn aus EÜR (automatisch)",
+        "where_tr": "Anlage S → EÜR Gewinn (otomatik)",
+    },
+    {
+        "category": "travel",
+        "label_de": "Reisekosten",
+        "label_tr": "Seyahat masrafları",
+        "explanation_de": "Hotel, Bahn, Flug, Verpflegungsmehraufwand bei Geschäftsreisen. Voll absetzbar.",
+        "explanation_tr": "Otel, tren, uçak, iş seyahatinde günlük yemek tazminatı. Tam düşülebilir.",
+        "where_de": "Anlage S → Gewinn aus EÜR (automatisch)",
+        "where_tr": "Anlage S → EÜR Gewinn (otomatik)",
+    },
+    {
+        "category": "office",
+        "label_de": "Büromaterial / Arbeitsmittel",
+        "label_tr": "Ofis malzemesi / İş aleti",
+        "explanation_de": "Stifte, Drucker, Papier: sofort absetzbar. >€800 netto: AfA über 3-5 Jahre.",
+        "explanation_tr": "Kalem, yazıcı, kağıt: hemen düşülebilir. >€800 net: 3-5 yıl AfA.",
+        "where_de": "Anlage S → Gewinn aus EÜR (kleine sofort, große AfA)",
+        "where_tr": "Anlage S → EÜR Gewinn (küçük hemen, büyük AfA)",
+    },
+    {
+        "category": "homeoffice",
+        "label_de": "Homeoffice-Tagespauschale",
+        "label_tr": "Ev ofis günlük tazminat",
+        "explanation_de": "€6 pro Tag (max 1.260€/Jahr = 210 Tage). NUR wenn überwiegend zu Hause gearbeitet. Anlage N für Arbeitnehmer.",
+        "explanation_tr": "Günlük €6 (yıllık max €1.260 = 210 gün). SADECE çoğunlukla evde çalışmışsan. Anlage N işçi için.",
+        "where_de": "Anlage N → Werbungskosten",
+        "where_tr": "Anlage N → Werbungskosten",
+    },
+    {
+        "category": "krankenkasse",
+        "label_de": "Krankenversicherung",
+        "label_tr": "Sağlık sigortası",
+        "explanation_de": "Beiträge Basisabsicherung voll absetzbar als Sonderausgabe. Aus Beitragsbescheinigung der Krankenkasse.",
+        "explanation_tr": "Temel teminat primleri özel gider olarak tam düşülebilir. Sağlık kasası belgesinden.",
+        "where_de": "Anlage Vorsorgeaufwand → KV Basis",
+        "where_tr": "Anlage Vorsorgeaufwand → KV Basis",
+    },
+    {
+        "category": "donation",
+        "label_de": "Spenden",
+        "label_tr": "Bağış",
+        "explanation_de": "An gemeinnützige Vereine. Bis 20% des Gesamteinkommens. Spendenbescheinigung Pflicht.",
+        "explanation_tr": "Hayır kurumlarına. Toplam gelirin %20'sine kadar. Spendenbescheinigung zorunlu.",
+        "where_de": "Sonderausgaben → Spenden Geld",
+        "where_tr": "Sonderausgaben → Spende",
+    },
+    {
+        "category": "handwerker",
+        "label_de": "Handwerker (privat)",
+        "label_tr": "Esnaf (özel)",
+        "explanation_de": "20% des Lohnanteils absetzbar bis €1.200/Jahr. NUR Lohn, nicht Material. Rechnung + Überweisung Pflicht.",
+        "explanation_tr": "İşçilik bedelinin %20'si, yıllık €1.200'e kadar. SADECE işçilik (malzeme yok). Fatura + havale zorunlu.",
+        "where_de": "Sonderausgaben → §35a Handwerker",
+        "where_tr": "Sonderausgaben → §35a Handwerker",
+    },
+]
+
+
 def _flat_fields() -> list[dict]:
     """Flat list of fields for validation — SKIPS repeated-array sections
     (those are validated per-row by the frontend)."""

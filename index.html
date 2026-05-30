@@ -4924,8 +4924,28 @@ function DeclarationView(){
 
   const[uploading,setUploading]=useState(false);
   const[lsbResult,setLsbResult]=useState(null); // {extraction, suggested_fields, confidence}
+  const[expenseGuide,setExpenseGuide]=useState([]);
+  const[showExpenseGuide,setShowExpenseGuide]=useState(false);
+  const[askField,setAskField]=useState(null); // {key,label} when modal open
+  const[askQuestion,setAskQuestion]=useState("");
+  const[askAnswer,setAskAnswer]=useState("");
+  const[asking,setAsking]=useState(false);
   const lsbInputRef=useRef(null);
   const spendeInputRef=useRef(null);
+
+  const askAI=async()=>{
+    if(!askField||!askQuestion.trim())return;
+    setAsking(true);setAskAnswer("");
+    try{
+      const r=await _authFetch(API+"/steuer/declaration/ask",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({field_key:askField.key,field_label:askField.label,question:askQuestion.trim()}),
+      });
+      if(r.ok){const j=await r.json();setAskAnswer(j.answer||"");}
+      else{const j=await r.json().catch(()=>({}));setAskAnswer("Fehler: "+(j.detail||"unknown"));}
+    }catch(e){setAskAnswer("Fehler: "+e.message);}
+    setAsking(false);
+  };
 
   const uploadTaxDoc=async(file,docType)=>{
     if(!file||!decl)return;
@@ -5025,7 +5045,7 @@ function DeclarationView(){
     try{
       const sr=await fetch(API+"/steuer/declaration/schema");
       const sd=await sr.json();
-      if(sr.ok)setSchema(sd.sections||[]);
+      if(sr.ok){setSchema(sd.sections||[]);setExpenseGuide(sd.expense_guide||[]);}
       const r=await _authFetch(API+"/steuer/declaration/"+yr);
       if(r.status===402){
         // Premium feature — kullanıcı plan'ı yeterli değil
@@ -5186,6 +5206,15 @@ function DeclarationView(){
       </div>
     </div>
 
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+      <button onClick={()=>setShowExpenseGuide(true)} style={{padding:"10px 16px",background:"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+        💡 {tr("Wo gehören meine Belege hin?","Where do my receipts go?","Belgelerim nereye gider?")}
+      </button>
+      <button onClick={()=>{setAskField({key:"_general",label:tr("Allgemeine Steuerfrage","General tax question","Genel vergi sorusu")});setAskQuestion("");setAskAnswer("");}} style={{padding:"10px 16px",background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+        🤖 {tr("KI-Steuerassistent","AI Tax Assistant","KI Vergi Asistanı")}
+      </button>
+    </div>
+
     <div style={{marginBottom:16,padding:"8px 12px",background:"rgba(245,158,11,0.10)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:8,fontSize:12,color:"#f59e0b"}}>
       ⚠️ {tr("Beta — bitte vor Übermittlung an ELSTER prüfen.","Beta — please verify before submitting to ELSTER.","Beta — ELSTER'e göndermeden önce kontrol edin.")}
     </div>
@@ -5304,11 +5333,17 @@ function DeclarationView(){
             const fieldErr=errors[f.key];
             const hasError=!!fieldErr;
             const hint=_l==="tr"?f.hint_tr:f.hint_de;
+            const fLabel=_l==="tr"?f.label_tr:f.label_de;
             return(<div key={f.key} style={{display:"flex",flexDirection:"column",gap:4}}>
-              <label style={{fontSize:12,color:hasError?"#ef4444":"var(--text-muted)",fontWeight:500}}>
-                {_l==="tr"?f.label_tr:f.label_de}
-                {f.required && <span style={{color:"#ef4444",marginLeft:4}}>*</span>}
-              </label>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                <label style={{fontSize:12,color:hasError?"#ef4444":"var(--text-muted)",fontWeight:500}}>
+                  {fLabel}
+                  {f.required && <span style={{color:"#ef4444",marginLeft:4}}>*</span>}
+                </label>
+                <button onClick={(e)=>{e.preventDefault();setAskField({key:f.key,label:fLabel});setAskQuestion("");setAskAnswer("");}} type="button" title={tr("KI-Hilfe zu diesem Feld","Ask AI about this field","Bu alan için KI sor")} style={{background:"transparent",border:"1px solid var(--border)",color:"var(--text-muted)",padding:"2px 8px",borderRadius:6,fontSize:11,cursor:"pointer",lineHeight:1}}>
+                  🤖 {tr("KI fragen","Ask AI","KI sor")}
+                </button>
+              </div>
               {f.type==="select" ? (
                 <select value={(decl.data||{})[f.key]||""} onChange={e=>updateField(f.key,e.target.value)} style={{padding:M.inputPad,background:"var(--surface)",border:`1px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:8,color:"var(--text)",fontSize:M.inputSize,minHeight:isMobile?48:"auto"}}>
                   <option value="">—</option>
@@ -5321,8 +5356,8 @@ function DeclarationView(){
                        disabled={decl.status==="finalized"}
                        style={{padding:M.inputPad,background:"var(--surface)",border:`1px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:8,color:"var(--text)",fontSize:M.inputSize,fontFamily:"inherit",minHeight:isMobile?48:"auto"}}/>
               )}
-              {hint && !hasError && <div style={{fontSize:11,color:"var(--text-dim)",marginTop:2,fontStyle:"italic"}}>💡 {hint}</div>}
-              {hasError && <div style={{fontSize:11,color:"#ef4444",marginTop:2}}>{fieldErr}</div>}
+              {hint && <div style={{fontSize:12,color:"var(--text-muted)",marginTop:6,padding:"6px 10px",background:"rgba(99,102,241,0.06)",border:"1px solid rgba(99,102,241,0.15)",borderRadius:6,lineHeight:1.5}}>💡 {hint}</div>}
+              {hasError && <div style={{fontSize:11,color:"#ef4444",marginTop:2,fontWeight:600}}>⚠ {fieldErr}</div>}
             </div>);
           })}
         </div>
@@ -5331,6 +5366,69 @@ function DeclarationView(){
     ))}
 
     {showEur && <EurDetailModal year={year} onClose={()=>setShowEur(false)} tr={tr}/>}
+
+    {showExpenseGuide && <div onClick={()=>setShowExpenseGuide(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1200,padding:20}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card)",borderRadius:14,padding:24,maxWidth:720,width:"100%",maxHeight:"85vh",overflow:"auto",border:"1px solid var(--border)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <h2 style={{margin:0,fontSize:20,fontWeight:700}}>💡 {tr("Wo gehören meine Belege hin?","Where do my receipts go?","Belgelerim nereye gider?")}</h2>
+          <button onClick={()=>setShowExpenseGuide(false)} style={{background:"transparent",border:"none",color:"var(--text-muted)",fontSize:24,cursor:"pointer"}}>×</button>
+        </div>
+        <p style={{margin:"0 0 16px",color:"var(--text-muted)",fontSize:13,lineHeight:1.5}}>
+          {tr("Typische Belege und in welche Form sie gehören. Die meisten Geschäftsausgaben werden automatisch über deine hochgeladenen Belege in 'Gewinn aus EÜR' eingerechnet.",
+              "Typical receipts and which form they belong to. Most business expenses are automatically included in 'Gewinn aus EÜR' via your uploaded receipts.",
+              "Tipik belgeler ve hangi forma giderler. Çoğu işletme gideri yüklenen belgelerinden 'Gewinn aus EÜR'ye otomatik dahil olur.")}
+        </p>
+        <div style={{display:"grid",gap:12}}>
+          {expenseGuide.map(g=>(
+            <div key={g.category} style={{padding:14,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:10}}>
+              <div style={{fontSize:15,fontWeight:700,color:"var(--accent)",marginBottom:6}}>
+                {_l==="tr"?g.label_tr:g.label_de}
+              </div>
+              <div style={{fontSize:12,color:"var(--text)",lineHeight:1.5,marginBottom:8}}>
+                {_l==="tr"?g.explanation_tr:g.explanation_de}
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                <div style={{fontSize:11,padding:"4px 10px",background:"rgba(16,185,129,0.10)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,color:"#10b981",fontWeight:600}}>
+                  → {_l==="tr"?g.where_tr:g.where_de}
+                </div>
+                {g.requirements_de && <div style={{fontSize:11,color:"var(--text-muted)",fontStyle:"italic"}}>
+                  ℹ {_l==="tr"?g.requirements_tr:g.requirements_de}
+                </div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>}
+
+    {askField && <div onClick={()=>setAskField(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1200,padding:20}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--card)",borderRadius:14,padding:24,maxWidth:600,width:"100%",maxHeight:"85vh",overflow:"auto",border:"1px solid var(--border)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <h3 style={{margin:0,fontSize:18,fontWeight:700}}>🤖 {tr("KI-Hilfe","AI Help","KI Yardım")}: {askField.label}</h3>
+          <button onClick={()=>setAskField(null)} style={{background:"transparent",border:"none",color:"var(--text-muted)",fontSize:24,cursor:"pointer"}}>×</button>
+        </div>
+        <p style={{margin:"0 0 12px",color:"var(--text-muted)",fontSize:13}}>
+          {tr("Frag die KI zu diesem Feld. Beispiele: 'Was muss ich hier eintragen?', 'Wo finde ich den Wert?', 'Was bedeutet das?'",
+              "Ask the AI about this field. Examples: 'What do I enter?', 'Where do I find the value?', 'What does this mean?'",
+              "Bu alan için KI'ya sor. Örnek: 'Ne yazacağım?', 'Değeri nerede bulurum?', 'Ne demek?'")}
+        </p>
+        <textarea value={askQuestion} onChange={e=>setAskQuestion(e.target.value)} placeholder={tr("Deine Frage…","Your question…","Sorunuz…")} rows={3} style={{width:"100%",padding:12,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontSize:14,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box"}}/>
+        <div style={{display:"flex",gap:10,marginTop:12}}>
+          <button onClick={askAI} disabled={asking||!askQuestion.trim()} style={{padding:"10px 20px",background:asking?"#444":"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",border:"none",borderRadius:8,fontWeight:600,cursor:asking?"wait":"pointer",fontSize:14}}>
+            {asking?tr("Frage läuft…","Asking…","Sorgulanıyor…"):tr("Frage stellen","Ask","Sor")}
+          </button>
+          <button onClick={()=>setAskField(null)} style={{padding:"10px 20px",background:"transparent",color:"var(--text-muted)",border:"1px solid var(--border)",borderRadius:8,fontSize:14,cursor:"pointer"}}>
+            {tr("Schließen","Close","Kapat")}
+          </button>
+        </div>
+        {askAnswer && <div style={{marginTop:16,padding:14,background:"rgba(99,102,241,0.10)",border:"1px solid rgba(99,102,241,0.3)",borderRadius:8,fontSize:14,color:"var(--text)",lineHeight:1.6,whiteSpace:"pre-wrap"}}>
+          {askAnswer}
+          <div style={{marginTop:10,fontSize:11,color:"var(--text-muted)",fontStyle:"italic"}}>
+            ⚠ {tr("Keine rechtsverbindliche Steuerberatung","Not legal tax advice","Hukuki bağlayıcı vergi danışmanlığı değildir")}
+          </div>
+        </div>}
+      </div>
+    </div>}
 
     <input ref={lsbInputRef} type="file" accept="application/pdf,image/png,image/jpeg" onChange={e=>{
       const f=e.target.files&&e.target.files[0];if(f)uploadLSB(f);

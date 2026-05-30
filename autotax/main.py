@@ -2525,9 +2525,78 @@ def _declaration_to_dict(decl, include_data: bool = True) -> dict:
 
 @app.get("/steuer/declaration/schema")
 def declaration_schema():
-    """Form schema (sections + fields). Static config, no auth needed."""
-    from autotax.declaration import FORM_SECTIONS
-    return {"sections": FORM_SECTIONS}
+    """Form schema (sections + fields) + expense category guide.
+    Static config, no auth needed."""
+    from autotax.declaration import FORM_SECTIONS, EXPENSE_GUIDE
+    return {"sections": FORM_SECTIONS, "expense_guide": EXPENSE_GUIDE}
+
+
+@app.post("/steuer/declaration/ask")
+@limiter.limit("20/minute")
+async def declaration_ask(
+    request: Request,
+    payload: dict = Body(...),
+    user: dict = Depends(get_acting_context),
+):
+    """Ask AI a question about a tax field. Provides context (which field,
+    user's question). Returns a German-tax-aware answer.
+
+    Body: {"field_key": str, "field_label": str, "question": str}
+    """
+    import httpx as _httpx
+    _require_steuer_declaration_access(user)
+    api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="AI nicht konfiguriert")
+    field_key = (payload.get("field_key") or "").strip()[:64]
+    field_label = (payload.get("field_label") or "").strip()[:128]
+    question = (payload.get("question") or "").strip()[:1000]
+    if not question:
+        raise HTTPException(status_code=400, detail="question erforderlich")
+
+    system = (
+        "Du bist ein freundlicher deutscher Steuer-Assistent für Selbständige "
+        "und Arbeitnehmer in der Einkommensteuererklärung. Antworten kurz, "
+        "präzise, in einfachem Deutsch (oder Türkisch wenn auf Türkisch "
+        "gefragt). Maximal 5 Sätze. Bei Unsicherheit: 'bitte Steuerberater "
+        "fragen'. KEINE rechtsverbindliche Steuerberatung — nur Orientierung."
+    )
+    user_msg = f"Feld: {field_label} ({field_key})\nFrage: {question}"
+
+    model = "claude-haiku-4-5-20251001"
+    payload_anthropic = {
+        "model": model,
+        "max_tokens": 600,
+        "system": system,
+        "messages": [{"role": "user", "content": user_msg}],
+    }
+    try:
+        async with _httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                json=payload_anthropic,
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+            )
+            if r.status_code != 200:
+                logger.warning("declaration_ask AI %d: %s", r.status_code, r.text[:200])
+                raise HTTPException(status_code=502, detail="AI-Antwort fehlgeschlagen")
+            data = r.json()
+            blocks = data.get("content") or []
+            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+            return {
+                "answer": text.strip(),
+                "field_key": field_key,
+                "disclaimer": "Keine rechtsverbindliche Steuerberatung — nur Orientierung.",
+            }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("declaration_ask failed")
+        raise HTTPException(status_code=502, detail="AI-Service nicht erreichbar")
 
 
 @app.get("/steuer/declaration/{year}")
