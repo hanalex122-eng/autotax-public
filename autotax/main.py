@@ -2882,6 +2882,32 @@ def declaration_finalize(request: Request, year: int, user: dict = Depends(get_a
         db.close()
 
 
+@app.get("/steuer/declaration/{year}/calc")
+@limiter.limit("60/minute")
+def declaration_calc(request: Request, year: int,
+                     user: dict = Depends(get_acting_context)):
+    """Live tax estimation (WISO-tarzı). ESt + Soli + KiSt hesabı per
+    § 32a EStG. Returns full breakdown — bereits gezahlt vs gesamt steuer
+    → Erstattung oder Nachzahlung."""
+    from autotax.models import TaxDeclaration
+    from autotax.declaration import deserialize_data
+    from autotax.tax_calc import estimate_full
+    _require_steuer_declaration_access(user)
+    db = SessionLocal()
+    try:
+        decl = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if not decl:
+            raise HTTPException(status_code=404, detail="Erklärung nicht gefunden")
+        data = deserialize_data(decl.data)
+        result = estimate_full(data, year=year)
+        return result
+    finally:
+        db.close()
+
+
 @app.get("/steuer/declaration/{year}/bundle")
 @limiter.limit("10/minute")
 def declaration_steuerberater_bundle(

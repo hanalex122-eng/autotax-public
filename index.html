@@ -4905,6 +4905,8 @@ function DeclarationView(){
   const[showEur,setShowEur]=useState(false);
   const[autoDetecting,setAutoDetecting]=useState(false);
   const[locked,setLocked]=useState(null); // null|{current_plan, required_plans, message}
+  const[calc,setCalc]=useState(null);
+  const calcTimerRef=useRef(null);
   const[isMobile,setIsMobile]=useState(()=>typeof window!=="undefined"&&window.innerWidth<=600);
   useEffect(()=>{
     const h=()=>setIsMobile(window.innerWidth<=600);
@@ -5054,8 +5056,9 @@ function DeclarationView(){
       else if(r.ok){
         const d=await r.json();
         setDecl(d);
-        // İlk yüklendiğinde validation çek
+        // İlk yüklendiğinde validation + canlı vergi hesabı çek
         fetchValidation(yr);
+        fetchCalc(yr);
       }else{setErr("Fehler beim Laden");}
     }catch(e){setErr(e.message);}
     setLoading(false);
@@ -5070,6 +5073,19 @@ function DeclarationView(){
         setErrors(v.errors||{});
       }
     }catch(e){}
+  };
+
+  const fetchCalc=async(yr=year)=>{
+    try{
+      const r=await _authFetch(API+"/steuer/declaration/"+yr+"/calc");
+      if(r.ok){setCalc(await r.json());}
+    }catch(e){}
+  };
+
+  // Debounced calc refresh — kullanıcı her değişiklikten 800ms sonra
+  const scheduleCalcRefresh=()=>{
+    if(calcTimerRef.current)clearTimeout(calcTimerRef.current);
+    calcTimerRef.current=setTimeout(()=>fetchCalc(year),800);
   };
 
   const create=async()=>{
@@ -5113,6 +5129,7 @@ function DeclarationView(){
           setSaveState("saved");
           setTimeout(()=>setSaveState(s=>s==="saved"?"idle":s),1500);
           fetchValidation(year);
+          scheduleCalcRefresh();
         }else{setSaveState("error");}
       }catch(e){setSaveState("error");}
     },600);
@@ -5250,6 +5267,26 @@ function DeclarationView(){
 
     {decl && errorCount>0 && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,marginBottom:16,fontSize:13,color:"#ef4444"}}>
       ⚠ {errorCount} {tr("Felder benötigen Aufmerksamkeit","fields need attention","alan dikkat gerektiriyor")}
+    </div>}
+
+    {decl && calc && <div style={{padding:"16px 20px",background:calc.differenz>=0?"linear-gradient(135deg,rgba(16,185,129,0.15),rgba(16,185,129,0.05))":"linear-gradient(135deg,rgba(239,68,68,0.15),rgba(239,68,68,0.05))",border:`2px solid ${calc.differenz>=0?"rgba(16,185,129,0.4)":"rgba(239,68,68,0.4)"}`,borderRadius:14,marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+      <div>
+        <div style={{fontSize:12,color:calc.differenz>=0?"#10b981":"#ef4444",fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>
+          {calc.differenz>=0
+            ? tr("✓ Geschätzte Erstattung","✓ Estimated refund","✓ Tahmini iade")
+            : tr("⚠ Geschätzte Nachzahlung","⚠ Estimated additional tax","⚠ Tahmini ek ödeme")}
+        </div>
+        <div style={{fontSize:28,fontWeight:800,color:calc.differenz>=0?"#10b981":"#ef4444"}}>
+          {calc.differenz>=0 ? "+" : "-"}
+          {Math.abs(calc.differenz).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})} €
+        </div>
+      </div>
+      <div style={{textAlign:"right",fontSize:11,color:"var(--text-muted)",lineHeight:1.6}}>
+        <div>{tr("Gesamt-Einkommen","Total income","Toplam gelir")}: <strong>{calc.einkommen.gesamt.toLocaleString("de-DE")} €</strong></div>
+        <div>{tr("zvE","taxable income","Vergi matrahı")}: <strong>{calc.zvE.toLocaleString("de-DE")} €</strong></div>
+        <div>{tr("ESt + Soli + KiSt","Income tax + Soli + Church tax","Vergi + Soli + Kilise")}: <strong>{calc.gesamt_steuer.toLocaleString("de-DE")} €</strong></div>
+        <div>{tr("Bereits gezahlt","Already paid","Önceden ödenmiş")}: <strong>{calc.bereits_gezahlt.toLocaleString("de-DE")} €</strong></div>
+      </div>
     </div>}
 
     {decl && (()=>{
