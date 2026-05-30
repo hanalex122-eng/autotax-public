@@ -2591,6 +2591,75 @@ def declaration_create(request: Request, year: int, user: dict = Depends(get_act
         db.close()
 
 
+@app.post("/steuer/declaration/{year}/copy-from/{from_year}")
+@limiter.limit("5/minute")
+def declaration_copy_from_previous(
+    request: Request, year: int, from_year: int,
+    user: dict = Depends(get_acting_context),
+):
+    """Carry-forward: fetch from_year declaration and copy Permanent +
+    Semi-Permanent fields to a new draft for `year`. Annual fields reset.
+
+    If `year` declaration already exists, merge (don't overwrite existing
+    user-entered fields). Returns the resulting declaration."""
+    from autotax.models import TaxDeclaration
+    from autotax.declaration import (
+        carry_forward_fields, autofill_from_user_data,
+        serialize_data, deserialize_data, detect_insurance_amounts,
+    )
+    _require_steuer_declaration_access(user)
+    if year < 2020 or year > 2030 or from_year < 2020 or from_year > 2030:
+        raise HTTPException(status_code=400, detail="Jahr ungültig")
+    if from_year >= year:
+        raise HTTPException(status_code=400, detail="from_year muss vor year liegen")
+    db = SessionLocal()
+    try:
+        prev = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == from_year,
+        ).first()
+        if not prev:
+            raise HTTPException(status_code=404,
+                                detail=f"Keine Erklärung für {from_year} gefunden")
+        prev_data = deserialize_data(prev.data)
+        carried = carry_forward_fields(prev_data)
+
+        # Also auto-fill new year's annual data from current sources
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        companies = db.query(UserCompany).filter(
+            UserCompany.user_id == user["sub"]).all()
+        profit = _eur_profit_for_year(db, user["sub"], year)
+        insurance = detect_insurance_amounts(db, user["sub"], year)
+        fresh = autofill_from_user_data(u, companies, profit,
+                                        insurance_amounts=insurance)
+
+        existing = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if existing:
+            # Merge: existing user data wins, then carried, then fresh
+            merged = {**carried, **fresh, **deserialize_data(existing.data)}
+            existing.data = serialize_data(merged)
+            db.commit()
+            db.refresh(existing)
+            return _declaration_to_dict(existing)
+        # No existing — create new
+        merged = {**carried, **fresh}
+        decl = TaxDeclaration(
+            user_id=user["sub"],
+            year=year,
+            status="draft",
+            data=serialize_data(merged),
+        )
+        db.add(decl)
+        db.commit()
+        db.refresh(decl)
+        return _declaration_to_dict(decl)
+    finally:
+        db.close()
+
+
 @app.post("/steuer/declaration/{year}/autodetect-insurance")
 @limiter.limit("10/minute")
 def declaration_autodetect_insurance(request: Request, year: int,

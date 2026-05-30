@@ -4924,6 +4924,20 @@ function DeclarationView(){
     setSaving(false);
   };
 
+  const copyFromPrevYear=async()=>{
+    setSaving(true);setErr("");
+    try{
+      const r=await _authFetch(API+"/steuer/declaration/"+year+"/copy-from/"+(year-1),{method:"POST"});
+      if(r.ok){setDecl(await r.json());fetchValidation(year);}
+      else{
+        const e=await r.json();
+        if(r.status===404)alert(tr("Keine Erklärung für ","No declaration for ","Önceki yıl beyannamesi yok: ")+(year-1));
+        else setErr(e.detail||"Carry-forward fehlgeschlagen");
+      }
+    }catch(e){setErr(e.message);}
+    setSaving(false);
+  };
+
   const updateField=(key,value)=>{
     if(!decl)return;
     const newData={...(decl.data||{}),[key]:value};
@@ -5044,9 +5058,19 @@ function DeclarationView(){
             "We'll create a draft and auto-fill fields from your data.",
             "Bir taslak oluşturup verilerinizden alanları otomatik dolduracağız.")}
       </p>
-      <button onClick={create} disabled={saving} style={{padding:isMobile?"14px 28px":"12px 28px",background:saving?"#444":"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,fontSize:M.btnSize+1,cursor:saving?"wait":"pointer",minHeight:isMobile?48:"auto"}}>
-        {saving?tr("Erstelle…","Creating…","Oluşturuluyor…"):tr("Entwurf erstellen","Create draft","Taslak oluştur")}
-      </button>
+      <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
+        <button onClick={create} disabled={saving} style={{padding:isMobile?"14px 28px":"12px 28px",background:saving?"#444":"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,fontSize:M.btnSize+1,cursor:saving?"wait":"pointer",minHeight:isMobile?48:"auto"}}>
+          {saving?tr("Erstelle…","Creating…","Oluşturuluyor…"):tr("Neuen Entwurf erstellen","Create new draft","Yeni taslak oluştur")}
+        </button>
+        {year>2024 && <button onClick={copyFromPrevYear} disabled={saving} style={{padding:isMobile?"14px 28px":"12px 28px",background:saving?"#444":"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,fontSize:M.btnSize+1,cursor:saving?"wait":"pointer",minHeight:isMobile?48:"auto"}}>
+          📋 {tr("Aus","From","")} {year-1} {tr("übernehmen","carry over","verisini al")}
+        </button>}
+      </div>
+      {year>2024 && <p style={{margin:"16px auto 0",color:"var(--text-dim)",fontSize:12,maxWidth:480}}>
+        {tr("Mit 'übernehmen' kopieren wir persönliche Daten + Adresse + Bank aus deiner Vorjahres-Erklärung. Einkommen + Vorsorge wird neu erfasst.",
+            "Carry-over copies personal data + address + bank from prior year. Income + insurance is collected fresh.",
+            "Devral kişisel veri + adres + banka önceki yıldan. Gelir + sigortalar baştan toplanır.")}
+      </p>}
     </div>}
 
     {decl && errorCount>0 && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,marginBottom:16,fontSize:13,color:"#ef4444"}}>

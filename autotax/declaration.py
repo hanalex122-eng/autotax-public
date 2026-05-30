@@ -913,6 +913,37 @@ def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
     return buf.getvalue()
 
 
+# ───────────────────────────────────────────────────────────────────
+# Year-over-year copy — Permanent + Semi fields are carried forward,
+# Annual fields are reset to default. Maps from architecture doc.
+# ───────────────────────────────────────────────────────────────────
+
+# Permanent: rarely change (one-time set, may need confirmation)
+_PERMANENT_FIELDS = {
+    "steuer_id", "steuer_nummer", "vorname", "nachname",
+    "geburtsdatum", "religion",
+}
+
+# Semi-permanent: yearly confirmation prompted in UI
+_SEMI_PERMANENT_FIELDS = {
+    "strasse", "plz", "ort", "familienstand",
+    "iban", "kontoinhaber", "taetigkeit",
+    # Rental property identity (per-property)
+    "v_adresse",
+}
+
+# Everything else is Annual — reset to default each year.
+
+
+def carry_forward_fields(prev_data: dict) -> dict:
+    """Filter prev year's data to only Permanent + Semi-Permanent fields.
+    Returns dict suitable for prefilling a new TaxDeclaration."""
+    if not prev_data:
+        return {}
+    keep = _PERMANENT_FIELDS | _SEMI_PERMANENT_FIELDS
+    return {k: v for k, v in prev_data.items() if k in keep and v not in (None, "")}
+
+
 __all__ = [
     "FORM_SECTIONS",
     "autofill_from_user_data",
@@ -920,4 +951,6 @@ __all__ = [
     "serialize_data",
     "deserialize_data",
     "generate_pdf_skeleton",
+    "carry_forward_fields",
+    "detect_insurance_amounts",
 ]
