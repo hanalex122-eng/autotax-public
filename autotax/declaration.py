@@ -128,8 +128,60 @@ def autofill_from_user_data(user, companies: list, eur_profit: float) -> dict:
 # Validation.
 # ───────────────────────────────────────────────────────────────────
 
+def _validate_iban_de(iban: str) -> bool:
+    """DE IBAN checksum (mod 97). DE + 20 digits, total 22 chars."""
+    iban = iban.replace(" ", "").upper()
+    if not iban.startswith("DE") or len(iban) != 22:
+        return False
+    if not iban[2:].isdigit():
+        return False
+    # Move first 4 chars to end, replace letters with digits (A=10..Z=35)
+    rearranged = iban[4:] + iban[:4]
+    converted = ""
+    for ch in rearranged:
+        if ch.isdigit():
+            converted += ch
+        else:
+            converted += str(ord(ch) - ord("A") + 10)
+    try:
+        return int(converted) % 97 == 1
+    except ValueError:
+        return False
+
+
+def _validate_steuer_id(sid: str) -> bool:
+    """Steuer-ID 11 digits with check-digit rule (Faktorenverfahren).
+    One digit appears 2x or 3x in first 10 (rest unique). The 11th digit
+    is the check digit computed via mod 11 on first 10."""
+    sid = "".join(c for c in sid if c.isdigit())
+    if len(sid) != 11:
+        return False
+    # Count digit frequency in first 10
+    counts: dict[str, int] = {}
+    for d in sid[:10]:
+        counts[d] = counts.get(d, 0) + 1
+    # Must have exactly one digit appearing 2x or 3x and others 1x.
+    twos = sum(1 for v in counts.values() if v == 2)
+    threes = sum(1 for v in counts.values() if v == 3)
+    if not ((twos == 1 and threes == 0) or (twos == 0 and threes == 1)):
+        return False
+    # Check digit (mod 11/10 algorithm — ISO 7064 variant used by BZSt)
+    product = 10
+    for d in sid[:10]:
+        s = (int(d) + product) % 10
+        if s == 0:
+            s = 10
+        product = (2 * s) % 11
+    check = (11 - product) % 10
+    return check == int(sid[10])
+
+
 def validate(data: dict) -> dict:
-    """Return {field_key: error_message} for invalid/missing fields."""
+    """Return {field_key: error_message} for invalid/missing fields.
+
+    Multi-level checks: required + regex pattern + semantic (IBAN checksum,
+    Steuer-ID check digit). Labels in German for matching UI tone.
+    """
     import re as _re
     errors: dict[str, str] = {}
     for f in _flat_fields():
@@ -139,11 +191,20 @@ def validate(data: dict) -> dict:
         if f.get("required") and (value is None or value == ""):
             errors[key] = f"Pflichtfeld fehlt ({f['label_de']})"
             continue
-        # Pattern check
+        # Pattern check (raw regex)
         pat = f.get("pattern")
         if pat and value:
             if not _re.match(pat, str(value)):
                 errors[key] = f"Format ungültig ({f['label_de']})"
+                continue
+        # Semantic checks for specific fields
+        if value:
+            if key == "iban":
+                if not _validate_iban_de(str(value)):
+                    errors[key] = "IBAN ungültig (Prüfziffer)"
+            elif key == "steuer_id":
+                if not _validate_steuer_id(str(value)):
+                    errors[key] = "Steuer-ID ungültig (Prüfziffer)"
     return errors
 
 
@@ -170,52 +231,128 @@ def deserialize_data(raw: Optional[str]) -> dict:
 # ───────────────────────────────────────────────────────────────────
 
 def generate_pdf_skeleton(declaration, user, companies: list) -> bytes:
-    """Minimal PDF that proves the data flows. Not tax-office final layout."""
+    """Render declaration as PDF with form-like layout (tax-office inspired).
+
+    Each section has a header band, labeled rows with underline-style value
+    boxes. Cover page has year + status. Footer disclaimer on every page.
+    Not the actual ESt 1 A scan but close enough for review-before-ELSTER.
+    """
     import io
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas as pdf_canvas
     from reportlab.lib.units import cm
     from reportlab.lib.colors import HexColor
 
+    NAVY = HexColor("#0f1a2e")
+    INK = HexColor("#1a2d4a")
+    MUTED = HexColor("#7a8ba8")
+    ACCENT = HexColor("#10b981")
+    LIGHT_BG = HexColor("#f3f6fa")
+    BORDER = HexColor("#cdd5e0")
+
     buf = io.BytesIO()
     c = pdf_canvas.Canvas(buf, pagesize=A4)
     w, h = A4
     data = deserialize_data(declaration.data)
+    margin_l = 1.8 * cm
+    margin_r = 1.8 * cm
+    content_w = w - margin_l - margin_r
 
-    c.setFillColor(HexColor("#1a2d4a"))
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(2 * cm, h - 2.5 * cm, f"Steuererklärung {declaration.year}")
-    c.setFont("Helvetica", 10)
-    c.setFillColor(HexColor("#7a8ba8"))
-    c.drawString(2 * cm, h - 3.2 * cm,
-                 "Entwurf — kein offizielles Formular. Bitte Inhalt manuell in ELSTER übertragen.")
+    def draw_footer():
+        c.setFillColor(MUTED)
+        c.setFont("Helvetica", 7)
+        c.drawString(margin_l, 1.4 * cm,
+                     f"AutoTax.Cloud · {user.email if user else ''} · "
+                     f"Erstellt {date.today().strftime('%d.%m.%Y')}")
+        c.drawString(margin_l, 1.0 * cm,
+                     "Entwurf — Keine Steuerberatung. Bitte vor Übermittlung an ELSTER prüfen.")
+        c.drawRightString(w - margin_r, 1.0 * cm,
+                          f"Steuererklärung {declaration.year}")
 
-    y = h - 4.5 * cm
+    def new_page():
+        draw_footer()
+        c.showPage()
+        return h - 2.5 * cm
+
+    # ─── Cover band ───
+    c.setFillColor(NAVY)
+    c.rect(0, h - 4 * cm, w, 4 * cm, fill=1, stroke=0)
+    c.setFillColor(HexColor("#ffffff"))
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(margin_l, h - 2.5 * cm, f"Steuererklärung {declaration.year}")
+    c.setFont("Helvetica", 11)
+    c.setFillColor(HexColor("#a8b8d0"))
+    c.drawString(margin_l, h - 3.3 * cm,
+                 f"Entwurf — {user.email if user else ''} — "
+                 f"Stand {date.today().strftime('%d.%m.%Y')}")
+    # Status badge
+    status_label = "ABGESCHLOSSEN" if declaration.status == "finalized" else "ENTWURF"
+    badge_color = ACCENT if declaration.status == "finalized" else HexColor("#f59e0b")
+    badge_w = 3.5 * cm
+    c.setFillColor(badge_color)
+    c.roundRect(w - margin_r - badge_w, h - 3.0 * cm, badge_w, 0.7 * cm, 0.15 * cm, fill=1, stroke=0)
+    c.setFillColor(HexColor("#0f1a2e"))
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString(w - margin_r - badge_w / 2, h - 2.8 * cm, status_label)
+
+    y = h - 5 * cm
+
+    # ─── Sections ───
     for section in FORM_SECTIONS:
-        c.setFillColor(HexColor("#1a2d4a"))
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(2 * cm, y, section["title_de"])
-        y -= 0.7 * cm
-        c.setFont("Helvetica", 10)
+        # Section header band
+        if y < 5 * cm:
+            y = new_page()
+        c.setFillColor(LIGHT_BG)
+        c.rect(margin_l, y - 0.7 * cm, content_w, 0.9 * cm, fill=1, stroke=0)
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(margin_l + 0.3 * cm, y - 0.45 * cm, section["title_de"])
+        y -= 1.3 * cm
+
+        # Fields as label + value rows
         for f in section["fields"]:
+            if y < 3.5 * cm:
+                y = new_page()
             label = f["label_de"]
-            value = data.get(f["key"], "—")
-            c.drawString(2.3 * cm, y, f"{label}:")
-            c.drawString(11 * cm, y, str(value))
-            y -= 0.5 * cm
-            if y < 3 * cm:
-                c.showPage()
-                y = h - 2.5 * cm
-        y -= 0.4 * cm
+            value = data.get(f["key"], "")
+            value_str = str(value) if value not in (None, "") else "—"
 
-    c.setFillColor(HexColor("#7a8ba8"))
-    c.setFont("Helvetica", 7)
-    c.drawString(2 * cm, 1.5 * cm,
-                 f"AutoTax.Cloud · {user.email if user else ''} · "
-                 f"Entwurf erstellt am {date.today().strftime('%d.%m.%Y')}")
-    c.drawString(2 * cm, 1.0 * cm,
-                 "Keine Steuerberatung. Bitte vor Übermittlung an ELSTER prüfen.")
+            c.setFillColor(MUTED)
+            c.setFont("Helvetica", 8)
+            c.drawString(margin_l + 0.3 * cm, y, label.upper())
+            # Value with underline
+            c.setFillColor(INK)
+            c.setFont("Helvetica-Bold" if value not in (None, "") else "Helvetica", 11)
+            c.drawString(margin_l + 0.3 * cm, y - 0.5 * cm, value_str)
+            c.setStrokeColor(BORDER)
+            c.setLineWidth(0.4)
+            c.line(margin_l + 0.3 * cm, y - 0.65 * cm,
+                   margin_l + content_w - 0.3 * cm, y - 0.65 * cm)
+            y -= 1.1 * cm
+        y -= 0.3 * cm
 
+    # ─── Summary box at the end ───
+    if y < 5 * cm:
+        y = new_page()
+    c.setFillColor(LIGHT_BG)
+    c.rect(margin_l, y - 2.5 * cm, content_w, 2.5 * cm, fill=1, stroke=0)
+    c.setStrokeColor(BORDER)
+    c.setLineWidth(0.6)
+    c.rect(margin_l, y - 2.5 * cm, content_w, 2.5 * cm, fill=0, stroke=1)
+    c.setFillColor(INK)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(margin_l + 0.3 * cm, y - 0.6 * cm, "ZUSAMMENFASSUNG")
+    c.setFont("Helvetica", 9)
+    gewinn = data.get("gewinn_eur", "—")
+    kv_basis = data.get("kv_basis", "—")
+    c.drawString(margin_l + 0.3 * cm, y - 1.2 * cm,
+                 f"Gewinn aus selbständiger Tätigkeit:  {gewinn} €")
+    c.drawString(margin_l + 0.3 * cm, y - 1.7 * cm,
+                 f"Krankenversicherung Basis:           {kv_basis} €")
+    c.drawString(margin_l + 0.3 * cm, y - 2.2 * cm,
+                 "Diese Angaben dienen als Übersicht. Verbindlich nur nach Einreichung bei ELSTER.")
+
+    draw_footer()
     c.save()
     buf.seek(0)
     return buf.getvalue()

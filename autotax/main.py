@@ -2590,6 +2590,26 @@ def declaration_update(request: Request, year: int,
         db.close()
 
 
+@app.get("/steuer/declaration/{year}/validate")
+@limiter.limit("60/minute")
+def declaration_validate(request: Request, year: int, user: dict = Depends(get_acting_context)):
+    """Return validation errors (no side effects). For live UI hints."""
+    from autotax.models import TaxDeclaration
+    from autotax.declaration import deserialize_data, validate
+    db = SessionLocal()
+    try:
+        decl = db.query(TaxDeclaration).filter(
+            TaxDeclaration.user_id == user["sub"],
+            TaxDeclaration.year == year,
+        ).first()
+        if not decl:
+            raise HTTPException(status_code=404, detail="Erklärung nicht gefunden")
+        errors = validate(deserialize_data(decl.data))
+        return {"errors": errors, "ok": len(errors) == 0}
+    finally:
+        db.close()
+
+
 @app.post("/steuer/declaration/{year}/finalize")
 @limiter.limit("5/minute")
 def declaration_finalize(request: Request, year: int, user: dict = Depends(get_acting_context)):
