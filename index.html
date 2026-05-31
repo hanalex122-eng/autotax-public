@@ -699,7 +699,10 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     {id:"vault",icon:I.invoice,label:_t("vault")},
     {id:"steuer_uebersicht",icon:I.tax,label:getLang()==="de"?"Steuer-Übersicht":"Tax Overview"},
     {id:"declaration",icon:I.invoice,label:getLang()==="de"?"Steuererklärung 2025":getLang()==="tr"?"Vergi Beyannamesi 2025":"Tax Return 2025",badge:"BETA"},
-    {id:"kasse",icon:I.upload,label:getLang()==="de"?"Kassensystem":getLang()==="tr"?"Kasiyer Sistemi":"Cash Register",badge:"NEU"},
+    // Kassensystem — sidebar'dan gizlendi (user 2026-05-31: MVP yetersiz,
+    // site+programda göstermek acemilik). View kayıtlı kalıyor (admin /app#kasse
+    // ile erişebilir), Phase 2'de Pos Parser v2 production-ready olunca açılacak.
+    // {id:"kasse",icon:I.upload,label:getLang()==="de"?"Kassensystem":getLang()==="tr"?"Kasiyer Sistemi":"Cash Register",badge:"NEU"},
     ...(F.editor!==false?[{id:"editor",icon:I.check,label:_t("editor")}]:[]),
     {id:"export",icon:I.export,label:_t("export")},
     {id:"companies",icon:I.invoice,label:_t("companies")},
