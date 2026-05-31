@@ -13,6 +13,9 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
+import json as _json
+import os
+
 from sqlalchemy import func
 
 from autotax.models import CashCategory, CashEntry
@@ -161,6 +164,66 @@ def trend_30d(db, user_id: int, today: date) -> list[dict]:
              "income": 0.0, "expense": 0.0})}
         for i in range(30)
     ]
+
+
+def _to_float(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_date(s, fallback: date) -> datetime:
+    try:
+        return datetime.strptime(str(s)[:10], "%Y-%m-%d")
+    except Exception:
+        return datetime(fallback.year, fallback.month, fallback.day)
+
+
+def autobook_enabled() -> bool:
+    """Pilot default OFF: NO automatic accounting entries — every extraction is
+    reviewable. Flip KASSE_AUTOBOOK=1 only after pilot trust is established."""
+    return (os.getenv("KASSE_AUTOBOOK") or "0").strip() in ("1", "true", "yes", "on")
+
+
+def create_entry_from_extraction(db, user_id: int, extract: dict, document_id=None, today: date | None = None) -> CashEntry:
+    """Create a CashEntry from an ExtractResult. Pilot: status=pending_review
+    unless autobook is enabled AND band=='auto'. Never silently books."""
+    today = today or date.today()
+    fields = extract.get("fields") or {}
+    kind = extract.get("kind")
+    band = extract.get("band")
+    status = "confirmed" if (autobook_enabled() and band == "auto") else "pending_review"
+    meta = {
+        "confidence": extract.get("confidence"),
+        "model": extract.get("model"),
+        "band": band,
+        "fallback_used": extract.get("fallback_used"),
+        "raw": fields,
+    }
+    if kind == "expense":
+        gross, vat = _to_float(fields.get("total_amount")), _to_float(fields.get("vat_amount"))
+        entry = CashEntry(
+            user_id=user_id, entry_type="expense",
+            description=(fields.get("vendor") or "Beleg"), vendor=fields.get("vendor"),
+            gross_amount=gross, vat_amount=vat, vat_rate=str(fields.get("vat_rate") or "") or None,
+            net_amount=(gross - vat) if (gross is not None and vat is not None) else None,
+            category=fields.get("category"), date=_parse_date(fields.get("date"), today),
+            source="ocr", status=status, ocr_document_id=document_id,
+            extraction_meta=_json.dumps(meta, ensure_ascii=False),
+        )
+    else:  # pos income
+        gross, vat, net = _to_float(fields.get("gross_revenue")), _to_float(fields.get("vat_total")), _to_float(fields.get("net_revenue"))
+        entry = CashEntry(
+            user_id=user_id, entry_type="income",
+            description=("Tagesumsatz " + (fields.get("business_name") or "")).strip(),
+            gross_amount=gross, vat_amount=vat, net_amount=net,
+            date=_parse_date(fields.get("date"), today),
+            source="ocr", status=status, ocr_document_id=document_id,
+            extraction_meta=_json.dumps(meta, ensure_ascii=False),
+        )
+    db.add(entry); db.commit(); db.refresh(entry)
+    return entry
 
 
 def dashboard(db, user_id: int, today: date) -> dict:

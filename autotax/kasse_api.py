@@ -17,19 +17,21 @@ Endpoints:
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 
-from autotax import kasse_service
+from autotax import kasse_extract, kasse_r2, kasse_service
 from autotax.auth import get_current_user
 from autotax.config import kasse_v2_enabled
 from autotax.db import SessionLocal
-from autotax.models import CashCategory
+from autotax.models import BackgroundJob, CashCategory, KasseDocument
 
 router = APIRouter(prefix="/kasse", tags=["kasse-v2 (flag-gated, default OFF)"])
 
@@ -196,5 +198,100 @@ def delete_category(category_id: int, user: dict = Depends(get_current_user)) ->
         c.is_active = False  # soft: preserves historical entry links
         db.commit()
         return {"success": True, "id": category_id}
+    finally:
+        db.close()
+
+
+# ── document upload + extraction ─────────────────────────────────────
+_MAX_UPLOAD = 10 * 1024 * 1024  # 10 MB
+
+
+def _entry_preview(entry, extract: dict) -> dict:
+    return {
+        "id": entry.id, "entry_type": entry.entry_type, "description": entry.description,
+        "gross_amount": entry.gross_amount, "vat_amount": entry.vat_amount,
+        "net_amount": entry.net_amount, "date": entry.date.isoformat() if entry.date else None,
+        "status": entry.status, "source": entry.source,
+        "confidence": extract.get("confidence"), "band": extract.get("band"),
+        "model": extract.get("model"), "fallback_used": extract.get("fallback_used"),
+    }
+
+
+def _store_document(db, uid: int, content: bytes, content_type: str, doc_kind: str, business_type: str) -> KasseDocument:
+    """Dedup by (user_id, sha256); store in R2 (or local fallback) if new."""
+    digest = kasse_r2.sha256(content)
+    existing = db.query(KasseDocument).filter(KasseDocument.user_id == uid, KasseDocument.sha256 == digest).first()
+    if existing:
+        return existing
+    stored = kasse_r2.put_image(uid, content, content_type)
+    doc = KasseDocument(
+        user_id=uid, r2_key=stored["key"], content_type=content_type, sha256=digest,
+        doc_kind=doc_kind, business_type=(business_type or None),
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(doc); db.commit(); db.refresh(doc)
+    return doc
+
+
+async def _extract_for(content: bytes, content_type: str, doc_kind: str, business_type: str) -> dict:
+    if doc_kind == "pos":
+        return await kasse_extract.extract_pos(content, business_type=business_type, content_type=content_type)
+    # expense: OCR text for images, raw bytes for PDF
+    pdf_bytes = content if (content_type or "").lower() == "application/pdf" else None
+    ocr_text = ""
+    if pdf_bytes is None:
+        try:
+            from autotax.ocr import extract_image_text
+            ocr_text = await extract_image_text(content, "expense") or ""
+        except Exception:
+            ocr_text = ""
+    return await kasse_extract.extract_expense(pdf_bytes=pdf_bytes, ocr_text=ocr_text)
+
+
+@router.post("/upload", summary="Upload one document → extract → reviewable Kasa entry (sync)")
+async def kasse_upload(
+    file: UploadFile = File(...),
+    doc_kind: str = Form("expense"),
+    business_type: str = Form(""),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    _require_flag()
+    if doc_kind not in ("expense", "pos"):
+        raise HTTPException(status_code=422, detail="doc_kind must be expense|pos")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="empty file")
+    if len(content) > _MAX_UPLOAD:
+        raise HTTPException(status_code=413, detail="file too large (max 10MB)")
+    content_type = file.content_type or "image/jpeg"
+    uid = _uid(user)
+
+    extract = await _extract_for(content, content_type, doc_kind, business_type)
+
+    db = SessionLocal()
+    try:
+        doc = _store_document(db, uid, content, content_type, doc_kind, business_type)
+        entry = kasse_service.create_entry_from_extraction(db, uid, extract, document_id=doc.id)
+        return {"document_id": doc.id, "entry": _entry_preview(entry, extract),
+                "review_required": entry.status != "confirmed"}
+    finally:
+        db.close()
+
+
+@router.get("/jobs/{job_id}", summary="Batch upload job status")
+def kasse_job_status(job_id: int, user: dict = Depends(get_current_user)) -> dict:
+    _require_flag()
+    db = SessionLocal()
+    try:
+        job = db.query(BackgroundJob).filter(BackgroundJob.id == job_id, BackgroundJob.user_id == _uid(user)).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        payload = {}
+        try:
+            payload = json.loads(job.payload) if job.payload else {}
+        except Exception:
+            payload = {}
+        return {"job_id": job.id, "status": job.status, "started_at": job.started_at.isoformat() if job.started_at else None,
+                "finished_at": job.finished_at.isoformat() if job.finished_at else None, "result": payload}
     finally:
         db.close()
