@@ -788,6 +788,16 @@ def cash_entry_to_dict(e):
 @app.on_event("startup")
 def startup():
     init_db()
+    # Seed Kasa system categories (idempotent; never blocks startup).
+    try:
+        from autotax.kasse_seed import seed_system_categories
+        _db = SessionLocal()
+        try:
+            seed_system_categories(_db)
+        finally:
+            _db.close()
+    except Exception as _e:  # pragma: no cover - defensive
+        logger.warning("kasse system-category seed skipped: %s", _e)
 
 
 @app.on_event("startup")
