@@ -40,6 +40,14 @@ FEATURES: dict[str, bool | str] = {
 }
 
 
+def tax_engine_v2_enabled() -> bool:
+    """Backend-only feature flag for the knowledge-driven tax engine v2 API
+    (tax_engine package + /tax/* read-only routers). Default OFF — when off,
+    the new endpoints return 404 and behave as if not present. Intentionally
+    NOT part of FEATURES / window.FEATURES: no UI/SPA exposure yet."""
+    return _flag("TAX_ENGINE_V2_ENABLED", "0")
+
+
 def features_js_literal() -> str:
     """JSON-serialise the FEATURES dict so it can be embedded into the
     served HTML as `window.FEATURES = {...};`. Adds runtime-resolved

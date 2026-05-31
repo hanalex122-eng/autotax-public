@@ -137,6 +137,16 @@ app.add_middleware(
     max_age=3600,
 )
 
+# Additive, read-only tax-engine v2 router (flag-gated, default OFF).
+# Endpoints return 404 unless TAX_ENGINE_V2_ENABLED is set. Wrapped so a
+# failure here can never prevent the existing app from starting.
+try:
+    from autotax.tax_engine_api import router as _tax_engine_v2_router
+    app.include_router(_tax_engine_v2_router)
+    logger.info("tax_engine_v2 router registered (flag-gated, default OFF)")
+except Exception as _e:  # pragma: no cover - defensive
+    logger.warning("tax_engine_v2 router not registered: %s", _e)
+
 
 _CSP_POLICY = (
     "default-src 'self'; "
