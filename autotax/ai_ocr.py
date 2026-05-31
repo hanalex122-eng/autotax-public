@@ -86,6 +86,7 @@ async def ai_extract_invoice(
     pdf_bytes: Optional[bytes] = None,
     ocr_text: str = "",
     filename: str = "",
+    model: Optional[str] = None,
 ) -> Optional[dict]:
     """Anthropic API'sine PDF + OCR text gondererek invoice data extract et.
 
@@ -114,7 +115,7 @@ async def ai_extract_invoice(
         logger.debug("AI OCR skip: AI_OCR_FALLBACK=0")
         return None
 
-    model = (os.getenv("AI_OCR_MODEL") or "claude-haiku-4-5-20251001").strip()
+    model = (model or os.getenv("AI_OCR_MODEL") or "claude-haiku-4-5-20251001").strip()
     # OCR text cap — prompt cok uzun olmasin
     ocr_text = (ocr_text or "")[:4000]
 
@@ -217,6 +218,108 @@ async def ai_extract_invoice(
         return None
     except Exception:
         logger.exception("AI OCR fallback failed for %s", filename)
+        return None
+
+
+# ─── POS / Z-Report parser (Kasa MVP Sprint 2, income side) ───────────
+
+_POS_PROMPT = """You are a German POS daily-closing (Tagesabschluss / Z-Bon) parser for a {business_type} business.
+
+From the attached image/PDF of a daily POS report or receipt, return ONE JSON object with EXACTLY these keys (use null when truly unknown, never invent):
+  - business_name: string or null
+  - date: "YYYY-MM-DD" or null (the closing/business day)
+  - gross_revenue: number (total gross turnover for the day, EUR)
+  - net_revenue: number (gross minus VAT)
+  - vat_total: number (total VAT)
+  - vat_rates: array of objects [{{"rate":"19","net":0,"vat":0}}, {{"rate":"7","net":0,"vat":0}}] — split per VAT rate
+  - cash: number (Bar)
+  - card: number (Karte/EC/Kreditkarte)
+  - tips: number (Trinkgeld) or 0
+  - confidence: integer 0-100 (your confidence in the overall extraction)
+
+Rules:
+- Amounts as numbers (dot decimal), rounded to 2 decimals. No currency symbols.
+- German gastronomy: Speisen außer Haus 7%, Verzehr vor Ort 19%, Getränke usually 19%.
+- If gross = net + vat_total does not hold or the figures look inconsistent, LOWER confidence accordingly.
+- Return ONLY the JSON object. No fences, no commentary.
+"""
+
+
+async def ai_parse_pos_receipt(
+    image_bytes: bytes,
+    business_type: str = "",
+    content_type: str = "image/jpeg",
+    model: Optional[str] = None,
+    filename: str = "pos",
+) -> Optional[dict]:
+    """Parse a POS daily-closing / Z-Report image|PDF into the Kasa income schema.
+
+    Vision-first (Tesseract is weak on receipts). `model` lets the caller route
+    (Sonnet default, Opus fallback). Returns the POS dict or None on failure.
+    """
+    api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        logger.debug("POS parse skip: ANTHROPIC_API_KEY not set")
+        return None
+    model = (model or os.getenv("KASSE_MODEL_DEFAULT") or "claude-sonnet-4-6").strip()
+
+    block_type = "document" if (content_type or "").lower() == "application/pdf" else "image"
+    media_type = "application/pdf" if block_type == "document" else (content_type or "image/jpeg")
+    try:
+        source = {"type": "base64", "media_type": media_type, "data": base64.b64encode(image_bytes).decode()}
+    except Exception as e:
+        logger.warning("POS parse: attach failed: %s", e)
+        return None
+
+    prompt = _POS_PROMPT.format(business_type=(business_type or "general retail/gastronomy"))
+    payload = {
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": [{"type": block_type, "source": source}, {"type": "text", "text": prompt}]}],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                json=payload,
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            )
+            if r.status_code != 200:
+                logger.warning("POS parse Anthropic %d for %s: %s", r.status_code, filename, r.text[:300])
+                return None
+            blocks = (r.json().get("content") or [])
+            text = "".join(b.get("text") or "" for b in blocks if b.get("type") == "text")
+            text = _strip_json_fences(text)
+            if not text:
+                return None
+            try:
+                result = json.loads(text)
+            except json.JSONDecodeError:
+                m = re.search(r"\{[\s\S]*\}", text)
+                if not m:
+                    return None
+                try:
+                    result = json.loads(m.group(0))
+                except Exception:
+                    return None
+            if not isinstance(result, dict):
+                return None
+            for k in ("gross_revenue", "net_revenue", "vat_total", "cash", "card", "tips"):
+                v = result.get(k)
+                if v is not None:
+                    try:
+                        result[k] = float(v)
+                    except (TypeError, ValueError):
+                        result[k] = None
+            result["_model"] = model
+            logger.info("POS parse %s: gross=%s date=%s conf=%s model=%s",
+                        filename, result.get("gross_revenue"), result.get("date"), result.get("confidence"), model)
+            return result
+    except httpx.TimeoutException:
+        logger.warning("POS parse timeout for %s", filename)
+        return None
+    except Exception:
+        logger.exception("POS parse failed for %s", filename)
         return None
 
 
