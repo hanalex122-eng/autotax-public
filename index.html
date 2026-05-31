@@ -5653,7 +5653,19 @@ function App(){
     window.addEventListener("hashchange",checkHash);
     return()=>window.removeEventListener("hashchange",checkHash);
   },[]);
-  if(!authed)return<Fragment><AuthScreen onLogin={()=>setAuthed(true)}/><CookieConsent/></Fragment>;
+  if(!authed)return<Fragment><AuthScreen onLogin={()=>{
+    setAuthed(true);
+    // Login sonrasi ?next=URL varsa oraya yonlendir (admin sayfasindan
+    // redirect olunduysa /admin'e geri done).
+    try{
+      const params=new URLSearchParams(window.location.search);
+      const nextUrl=params.get("next");
+      if(nextUrl && nextUrl.startsWith("/")){
+        // Same-origin safety check (slash ile baslamali, hostname yok)
+        setTimeout(()=>{window.location.href=nextUrl;},100);
+      }
+    }catch(e){}
+  }}/><CookieConsent/></Fragment>;
   // SendInvoicesView: InvoicesView'in sendOnly=true ile kopyasi — sadece email gonder buton'u
   const SendInvoicesView=(props)=><InvoicesView {...props} sendOnly={true}/>;
   const views={dashboard:DashboardView,invoices:InvoicesView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView};
