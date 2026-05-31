@@ -1528,6 +1528,22 @@ async function api(path, opts) {
   const r = await fetch(API+path, opts);
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
+    // Token expired veya invalid -> otomatik logout + redirect
+    if (r.status === 401 || (r.status === 403 && /token/i.test(txt))) {
+      try {
+        localStorage.removeItem("atx_token");
+        localStorage.removeItem("atx_refresh");
+        localStorage.removeItem("token");
+        sessionStorage.removeItem("atx_token");
+        sessionStorage.removeItem("token");
+      } catch(e) {}
+      // Friendly message + redirect
+      const banner = document.createElement("div");
+      banner.style.cssText = "position:fixed;top:0;left:0;right:0;padding:14px;background:#f59e0b;color:#000;font-weight:600;text-align:center;z-index:99999;font-family:-apple-system,sans-serif";
+      banner.textContent = "Session abgelaufen — Du wirst zur Anmeldung weitergeleitet…";
+      document.body.appendChild(banner);
+      setTimeout(() => { window.location.href = "/app?action=login&next=/admin"; }, 1500);
+    }
     throw new Error("HTTP "+r.status+(txt?": "+txt.slice(0,200):""));
   }
   return r.json();
