@@ -43,7 +43,10 @@ TRIGGERS: dict[str, Callable[[dict], bool]] = {
     "anlage_so": lambda p: bool(_g(p, "unterhalt_received") or _g(p, "private_sale")),
     "anlage_kind": lambda p: int(_g(p, "children", 0) or 0) > 0,
     "anlage_av": lambda p: bool(_g(p, "riester")),
-    "anlage_vorsorge": lambda p: bool(_g(p, "employment") or _g(p, "freelance") or _g(p, "gewerbe") or _g(p, "pension")),
+    # Insurance contributions are deductible for virtually every filer
+    # (everyone carries Kranken-/Pflegeversicherung), so Vorsorgeaufwand is
+    # broadly applicable. Suppress only for an explicitly empty profile.
+    "anlage_vorsorge": lambda p: bool(p) and _g(p, "no_insurance") is not True,
     "ust_1a": lambda p: bool((_g(p, "freelance") or _g(p, "gewerbe")) and not _g(p, "kleinunternehmer")),
     "gewst_1a": lambda p: bool(_g(p, "gewerbe") and (int(_g(p, "profit", 0) or 0) > 24500)),
     "aussergewoehnliche": lambda p: bool(_g(p, "disability") or _g(p, "medical")),
