@@ -24,14 +24,15 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 
-from autotax import kasse_extract, kasse_r2, kasse_service
+from autotax import kasse_extract, kasse_r2, kasse_reports, kasse_service
 from autotax.auth import get_current_user
 from autotax.config import kasse_v2_enabled
 from autotax.db import SessionLocal
-from autotax.models import BackgroundJob, CashCategory, CashEntry, KasseDocument
+from autotax.models import BackgroundJob, CashCategory, CashEntry, CashReport, KasseDocument
 
 router = APIRouter(prefix="/kasse", tags=["kasse-v2 (flag-gated, default OFF)"])
 
@@ -417,6 +418,71 @@ async def kasse_upload_batch(
         db.close()
     asyncio.create_task(_process_batch(uid, items, job_id))
     return {"job_id": job_id, "queued": len(items), "status": "running"}
+
+
+class ReportCreate(BaseModel):
+    report_type: str = Field(..., description="daily | weekly | monthly")
+    period: Optional[str] = Field(None, description="daily/weekly=YYYY-MM-DD, monthly=YYYY-MM; default=today")
+
+
+def _default_period(report_type: str) -> str:
+    today = date.today()
+    return today.strftime("%Y-%m") if report_type == "monthly" else today.isoformat()
+
+
+@router.post("/report", summary="Generate a PDF report (daily/weekly/monthly)")
+def kasse_create_report(body: ReportCreate, user: dict = Depends(get_current_user)) -> dict:
+    _require_flag()
+    if body.report_type not in ("daily", "weekly", "monthly"):
+        raise HTTPException(status_code=422, detail="report_type must be daily|weekly|monthly")
+    period = body.period or _default_period(body.report_type)
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        try:
+            pdf, summary = kasse_reports.build_report(db, uid, body.report_type, period)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        rep = kasse_reports.store_report(db, uid, body.report_type, summary, pdf)
+        return {"report_id": rep.id, "download_url": f"/kasse/report/{rep.id}/download",
+                "totals": {"income": summary["total_income"], "expense": summary["total_expense"], "profit": summary["profit"]}}
+    finally:
+        db.close()
+
+
+@router.get("/reports", summary="List generated reports")
+def kasse_list_reports(user: dict = Depends(get_current_user)) -> dict:
+    _require_flag()
+    db = SessionLocal()
+    try:
+        rows = db.query(CashReport).filter(CashReport.user_id == _uid(user)).order_by(CashReport.created_at.desc()).limit(100).all()
+        return {"reports": [{
+            "id": r.id, "report_type": r.report_type,
+            "period_start": r.period_start.isoformat() if r.period_start else None,
+            "period_end": r.period_end.isoformat() if r.period_end else None,
+            "total_income": r.total_income, "total_expense": r.total_expense, "profit": r.profit,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        } for r in rows]}
+    finally:
+        db.close()
+
+
+@router.get("/report/{report_id}/download", summary="Download a report PDF")
+def kasse_download_report(report_id: int, user: dict = Depends(get_current_user)):
+    _require_flag()
+    db = SessionLocal()
+    try:
+        rep = db.query(CashReport).filter(CashReport.id == report_id, CashReport.user_id == _uid(user)).first()
+        if not rep or not rep.r2_key:
+            raise HTTPException(status_code=404, detail="Report nicht gefunden")
+        url = kasse_r2.presign(rep.r2_key)
+        if url:
+            return RedirectResponse(url)
+        pdf = kasse_r2.get_image(rep.r2_key)
+        return Response(content=pdf, media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="kasse_{rep.report_type}_{rep.id}.pdf"'})
+    finally:
+        db.close()
 
 
 @router.get("/jobs/{job_id}", summary="Batch upload job status")
