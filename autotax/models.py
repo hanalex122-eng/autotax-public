@@ -407,6 +407,46 @@ class CashCategory(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class KasseDocument(Base):
+    """Kasa MVP (Sprint 2) — original uploaded image/PDF audit trail.
+
+    Stored in R2 (key) for auditability, support, dispute handling and OCR/
+    learning. sha256 enables per-user dedup. Linked from CashEntry.ocr_document_id.
+    """
+    __tablename__ = "kasse_documents"
+    __table_args__ = (
+        UniqueConstraint("user_id", "sha256", name="uq_kassedoc_user_sha"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    r2_key = Column(String(255), nullable=True)        # object key (or local rel-path fallback)
+    content_type = Column(String(40), nullable=True)   # image/jpeg | application/pdf
+    sha256 = Column(String(64), nullable=True, index=True)
+    doc_kind = Column(String(16), nullable=True)       # expense | pos
+    business_type = Column(String(24), nullable=True)  # doener/restaurant/... (pos)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CashReport(Base):
+    """Kasa MVP (Sprint 2) — generated PDF report metadata (PDF bytes in R2)."""
+    __tablename__ = "cash_reports"
+    __table_args__ = (
+        Index("ix_cashreport_user_created", "user_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    report_type = Column(String(16), nullable=False)   # daily | weekly | monthly
+    period_start = Column(Date, nullable=True)
+    period_end = Column(Date, nullable=True)
+    r2_key = Column(String(255), nullable=True)
+    total_income = Column(Float, nullable=True)
+    total_expense = Column(Float, nullable=True)
+    profit = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class LlmUsage(Base):
     __tablename__ = "llm_usage"
 
