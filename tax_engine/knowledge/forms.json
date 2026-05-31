@@ -7,7 +7,16 @@
     "generatedBy": "AutoTax-Cloud lead architect (direct authoring after multi-agent workflow hit session limit)",
     "lastUpdate": "2026-05-31",
     "coverageNote": "Core forms below carry production-grade field sets covering all validation-suite personas. Forms marked confidence='mittel' carry their principal lines; remaining edge-case Zeilen must be completed and every Zeile/ELSTER-Kennzahl verified against the official ELSTER ERiC schema before submission. ELSTER Kennzahlen left as '—' are not yet mapped.",
-    "formCount": 16
+    "formCount": 21,
+    "multiInstanceForms": ["anlage_n", "anlage_s", "anlage_g", "anlage_euer", "anlage_v", "anlage_kind", "anlage_aus", "anlage_r_aus", "anlage_kap_bet"],
+    "instancing": {
+      "convention": "Forms listed in multiInstanceForms may appear multiple times in one declaration. Each occurrence gets an instanceId (1..n) and an instanceLabel. Storage: declaration_value rows key on (form_key, instance_id, field_key). The questionnaire creates one instance per detected entity.",
+      "examples": {"anlage_n": "one per employer", "anlage_kind": "one per child", "anlage_v": "one per rental property", "anlage_g": "one per trade business", "anlage_s": "one per freelance activity", "anlage_aus": "one per source country", "anlage_kap_bet": "one per Beteiligung"}
+    },
+    "gastronomyVat": {
+      "note": "Speisen (food): 7% bei Außerhausverkauf/Takeaway (§ 12 Abs. 2 Nr. 1 UStG i.V.m. Anlage 2), 19% bei Verzehr an Ort und Stelle/Dine-in (sonstige Leistung, § 3 Abs. 9 UStG). Getränke i.d.R. 19% (Ausnahmen: Milch, bestimmte Wässer 7%). Mischbelege/Kombi-Verkäufe sind je Position dem korrekten Satz zuzuordnen; ein DSFinV-K-konformes Kassensystem liefert die Aufteilung. Detaillierte Regeln: optimization_rules.json, category 'Gastronomie'.",
+      "appliesTo": ["doener_shop", "imbiss", "cafe", "restaurant", "baeckerei"]
+    }
   },
   "forms": [
     {
@@ -429,7 +438,10 @@
           "title": "Steuerpflichtige Umsätze",
           "fields": [
             {"fieldKey": "umsatz_19", "zeile": "—", "label": "Umsätze zu 19%", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "Kz 81", "helpTextDe": "Netto-Umsätze, die dem Regelsteuersatz 19% unterliegen.", "dependsOn": "—", "prefillSource": "invoices_aggregate", "optimizationRefs": []},
-            {"fieldKey": "umsatz_7", "zeile": "—", "label": "Umsätze zu 7%", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "Kz 86", "helpTextDe": "Ermäßigter Satz 7% (z.B. Lebensmittel-Außerhausverkauf, bestimmte Leistungen).", "dependsOn": "—", "prefillSource": "invoices_aggregate", "optimizationRefs": []},
+            {"fieldKey": "umsatz_7", "zeile": "—", "label": "Umsätze zu 7%", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "Kz 86", "helpTextDe": "Ermäßigter Satz 7% (z.B. Lebensmittel-Außerhausverkauf, bestimmte Leistungen).", "dependsOn": "—", "prefillSource": "invoices_aggregate", "optimizationRefs": ["gastro_takeaway_7"]},
+            {"fieldKey": "gastro_speisen_takeaway_7", "zeile": "—", "label": "Speisen außer Haus / Takeaway (7%)", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "Kz 86", "helpTextDe": "Speisen zum Mitnehmen werden mit 7% besteuert (Lieferung). Aus den DSFinV-K-Kassendaten getrennt erfasst.", "dependsOn": "business in [doener_shop, imbiss, cafe, restaurant, baeckerei]", "prefillSource": "kasse_dsfinvk", "optimizationRefs": ["gastro_vat_split", "gastro_takeaway_7"]},
+            {"fieldKey": "gastro_speisen_dinein_19", "zeile": "—", "label": "Speisen Verzehr vor Ort / Dine-in (19%)", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "Kz 81", "helpTextDe": "Verzehr an Ort und Stelle gilt als sonstige Leistung und wird mit 19% besteuert (Sitzgelegenheit, Geschirr, Bedienung).", "dependsOn": "business in [doener_shop, imbiss, cafe, restaurant, baeckerei]", "prefillSource": "kasse_dsfinvk", "optimizationRefs": ["gastro_vat_split", "gastro_dinein_19", "doener_scenario"]},
+            {"fieldKey": "gastro_getraenke_19", "zeile": "—", "label": "Getränke (19%)", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "Kz 81", "helpTextDe": "Getränke unterliegen in der Regel 19% (Ausnahmen: Milch, bestimmte Wässer 7%). Bei Kombi-Angeboten (Menü) ist der Getränkeanteil aufzuteilen.", "dependsOn": "business in [doener_shop, imbiss, cafe, restaurant, baeckerei]", "prefillSource": "kasse_dsfinvk", "optimizationRefs": ["gastro_mixed_receipt"]},
             {"fieldKey": "vorsteuer", "zeile": "—", "label": "Abziehbare Vorsteuerbeträge", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "Kz 66", "helpTextDe": "Aus Eingangsrechnungen gezahlte USt, die Sie geltend machen.", "dependsOn": "—", "prefillSource": "invoices_aggregate", "optimizationRefs": []}
           ]
         }
@@ -518,6 +530,185 @@
       "taxYearDifferences": [],
       "confidence": "mittel",
       "notes": "Voraussetzung: Fachunternehmerbescheinigung nach amtlichem Muster. Vollständige Felder ergänzen."
+    },
+    {
+      "formKey": "anlage_av",
+      "formCode": "Anlage AV",
+      "officialName": "Anlage AV — Altersvorsorgebeiträge (Riester-Rente)",
+      "purpose": "Declares Riester contributions to obtain the Altersvorsorgezulage and/or the special-expense deduction (§ 10a EStG); the Finanzamt runs a Günstigerprüfung between zulage and deduction.",
+      "legalBasis": ["§ 10a EStG", "§§ 79-99 EStG"],
+      "taxYears": ["2024", "2025"],
+      "appliesToProfiles": ["employee", "parent", "all"],
+      "triggerCondition": "has_riester == true",
+      "multiInstance": false,
+      "sections": [
+        {
+          "sectionKey": "vertrag",
+          "title": "Riester-Vertrag und Beiträge",
+          "fields": [
+            {"fieldKey": "zulagenummer", "zeile": "Zeile 5", "label": "Zulagenummer / Sozialversicherungsnummer", "dataType": "Text", "required": true, "validation": {"type": "required", "constraint": "len>=8", "message": "Zulage-/Sozialversicherungsnummer erforderlich."}, "elsterKennzahl": "—", "helpTextDe": "Ihre Zulagenummer (oder Sozialversicherungsnummer) ist Voraussetzung für die Zulage. Steht auf der Bescheinigung Ihres Anbieters.", "dependsOn": "—", "prefillSource": "user_insurers", "optimizationRefs": ["riester"]},
+            {"fieldKey": "anbieter", "zeile": "Zeile 6", "label": "Anbieter / Vertragsnummer", "dataType": "Text", "required": true, "validation": {"type": "required", "constraint": "len>=2", "message": "Anbieter erforderlich."}, "elsterKennzahl": "—", "helpTextDe": "Name des Anbieters und Vertragsnummer laut Bescheinigung nach § 10a/§ 92 EStG.", "dependsOn": "—", "prefillSource": "user_insurers", "optimizationRefs": []},
+            {"fieldKey": "beitraege", "zeile": "Zeile 7-8", "label": "Geleistete Altersvorsorgebeiträge", "dataType": "Betrag_EUR", "required": true, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "Ihre eigenen Beiträge im Jahr. Für die volle Förderung sind i.d.R. 4% des Vorjahres-Bruttos (max. 2.100 €) nötig.", "dependsOn": "—", "prefillSource": "versicherungsbescheinigung_ocr", "optimizationRefs": ["riester"]},
+            {"fieldKey": "kinder_zulageberechtigt", "zeile": "Zeile 9-10", "label": "Anzahl zulageberechtigter Kinder", "dataType": "Ganzzahl", "required": false, "validation": {"type": "range", "constraint": "0..15", "message": "Bitte plausible Anzahl."}, "elsterKennzahl": "—", "helpTextDe": "Je Kind gibt es eine Kinderzulage (300 € für ab 2008 geborene Kinder, sonst 185 €).", "dependsOn": "—", "prefillSource": "dependent", "optimizationRefs": ["riester"]},
+            {"fieldKey": "mittelbar_unmittelbar", "zeile": "Zeile 4", "label": "Unmittelbar oder mittelbar zulageberechtigt", "dataType": "Auswahl", "required": true, "validation": {"type": "enum", "constraint": "unmittelbar|mittelbar", "message": "Bitte Zulageberechtigung wählen."}, "elsterKennzahl": "—", "helpTextDe": "Unmittelbar: z.B. rentenversicherungspflichtige Arbeitnehmer. Mittelbar: z.B. Ehepartner eines unmittelbar Berechtigten.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": ["riester"]}
+          ]
+        }
+      ],
+      "dependencies": ["hauptvordruck"],
+      "crossFormRefs": ["Günstigerprüfung: Sonderausgabenabzug (max. 2.100 €) vs. Zulage — das Finanzamt setzt automatisch das Günstigere an."],
+      "taxYearDifferences": [],
+      "confidence": "hoch",
+      "notes": "Kernfelder vollständig. Förderung setzt Bescheinigung nach § 10a/§ 92 EStG des Anbieters voraus."
+    },
+    {
+      "formKey": "anlage_aus",
+      "formCode": "Anlage AUS",
+      "officialName": "Anlage AUS — Ausländische Einkünfte und Steuern",
+      "purpose": "Declares foreign income and foreign tax paid; controls credit (Anrechnung) or exemption with Progressionsvorbehalt under the applicable DBA.",
+      "legalBasis": ["§ 34c EStG", "§ 34d EStG", "§ 32b EStG"],
+      "taxYears": ["2024", "2025"],
+      "appliesToProfiles": ["all"],
+      "triggerCondition": "has_foreign_income == true",
+      "multiInstance": true,
+      "sections": [
+        {
+          "sectionKey": "auslandseinkuenfte",
+          "title": "Ausländische Einkünfte (je Staat eine Instanz)",
+          "fields": [
+            {"fieldKey": "staat", "zeile": "Zeile 4", "label": "Staat (Herkunftsland)", "dataType": "Text", "required": true, "validation": {"type": "required", "constraint": "len>=2", "message": "Herkunftsstaat erforderlich."}, "elsterKennzahl": "—", "helpTextDe": "Land, aus dem die Einkünfte stammen. Maßgeblich für das Doppelbesteuerungsabkommen (DBA).", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "art_einkuenfte", "zeile": "Zeile 5-7", "label": "Art der ausländischen Einkünfte", "dataType": "Auswahl", "required": true, "validation": {"type": "enum", "constraint": "arbeitslohn|kapital|vermietung|gewerbe|sonstige", "message": "Bitte Art wählen."}, "elsterKennzahl": "—", "helpTextDe": "z.B. Arbeitslohn, Kapitalerträge, Mieteinkünfte aus dem Ausland.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "betrag_auslaendisch", "zeile": "Zeile 8-11", "label": "Höhe der ausländischen Einkünfte", "dataType": "Betrag_EUR", "required": true, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "Nach deutschem Steuerrecht ermittelte Einkünfte (in Euro umgerechnet).", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "anrechenbare_steuer", "zeile": "Zeile 12-16", "label": "Anrechenbare ausländische Steuer", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "Im Ausland gezahlte Steuer, die auf die deutsche Steuer angerechnet werden kann (§ 34c EStG).", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "methode", "zeile": "—", "label": "DBA-Methode (Anrechnung/Freistellung)", "dataType": "Auswahl", "required": false, "validation": {"type": "enum", "constraint": "anrechnung|freistellung_mit_progression", "message": "Bitte Methode wählen."}, "elsterKennzahl": "—", "helpTextDe": "Bei Freistellung greift der Progressionsvorbehalt: die Einkünfte erhöhen Ihren Steuersatz, werden aber nicht direkt besteuert.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []}
+          ]
+        }
+      ],
+      "dependencies": ["hauptvordruck"],
+      "crossFormRefs": ["Freigestellte Einkünfte fließen in den Progressionsvorbehalt (§ 32b, ggf. Anlage N Zeile für ausländischen Arbeitslohn / Anlage N-AUS)."],
+      "taxYearDifferences": [],
+      "confidence": "mittel",
+      "notes": "Kernfelder je Staat abgedeckt. DBA-spezifische Sonderfälle (Schachtelprivileg, Quellensteuer-Höchstsätze, Anrechnungshöchstbetrag pro Staat) als Erweiterung. Multi-Instance: eine Anlage AUS-Zeilengruppe je Staat."
+    },
+    {
+      "formKey": "anlage_so",
+      "formCode": "Anlage SO",
+      "officialName": "Anlage SO — Sonstige Einkünfte",
+      "purpose": "Declares miscellaneous income: received maintenance (Realsplitting), recurring payments, and private disposal transactions (§ 23).",
+      "legalBasis": ["§ 22 EStG", "§ 23 EStG"],
+      "taxYears": ["2024", "2025"],
+      "appliesToProfiles": ["all"],
+      "triggerCondition": "has_unterhalt_received == true || has_private_veraeusserung == true || has_recurring_income == true",
+      "multiInstance": false,
+      "sections": [
+        {
+          "sectionKey": "unterhalt_empfangen",
+          "title": "Erhaltene Unterhaltsleistungen (Realsplitting)",
+          "fields": [
+            {"fieldKey": "unterhalt_erhalten", "zeile": "Zeile 5-6", "label": "Erhaltene Unterhaltsleistungen", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "Zu versteuern, wenn der/die Zahlende sie als Sonderausgaben (Anlage U) abgezogen hat (Korrespondenzprinzip).", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []}
+          ]
+        },
+        {
+          "sectionKey": "private_veraeusserung",
+          "title": "Private Veräußerungsgeschäfte (§ 23)",
+          "fields": [
+            {"fieldKey": "veraeusserung_art", "zeile": "Zeile 31-40", "label": "Art des Wirtschaftsguts", "dataType": "Auswahl", "required": false, "validation": {"type": "enum", "constraint": "immobilie|krypto|edelmetall|sonstige", "message": "Bitte Art wählen."}, "elsterKennzahl": "—", "helpTextDe": "Spekulationsgeschäfte: Immobilien (Frist 10 Jahre), andere Wirtschaftsgüter inkl. Kryptowährungen (Frist 1 Jahr).", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "anschaffungsdatum", "zeile": "Zeile 32", "label": "Anschaffungsdatum", "dataType": "Datum", "required": false, "validation": {"type": "format", "constraint": "TT.MM.JJJJ", "message": "Gültiges Datum erforderlich."}, "elsterKennzahl": "—", "helpTextDe": "Maßgeblich für die Haltefrist.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "veraeusserungsgewinn", "zeile": "Zeile 41-46", "label": "Gewinn / Verlust aus Veräußerung", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": "Freigrenze 1.000 € (2024) p.a.", "message": "Gewinne unter 1.000 € (2024) sind steuerfrei (Freigrenze, nicht Freibetrag)."}, "elsterKennzahl": "—", "helpTextDe": "Veräußerungspreis minus Anschaffungskosten. Bis 1.000 € (2024) Freigrenze — wird sie überschritten, ist der gesamte Gewinn steuerpflichtig.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []}
+          ]
+        }
+      ],
+      "dependencies": ["hauptvordruck"],
+      "crossFormRefs": ["Erhaltener Unterhalt korrespondiert mit Anlage U des Zahlenden.", "Immobilienverkauf innerhalb 10 J. → §23; selbstgenutzt ausgenommen."],
+      "taxYearDifferences": [
+        {"year": "2024", "change": "Freigrenze private Veräußerungsgeschäfte von 600 € auf 1.000 € angehoben."}
+      ],
+      "confidence": "mittel",
+      "notes": "Hauptfälle (Unterhalt, §23 inkl. Krypto) abgedeckt. Wiederkehrende Bezüge/Leistungen (Zeile 7ff.), Abgeordnetenbezüge als Erweiterung."
+    },
+    {
+      "formKey": "anlage_r_aus",
+      "formCode": "Anlage R-AUS",
+      "officialName": "Anlage R-AUS — Renten und andere Leistungen aus ausländischen Quellen",
+      "purpose": "Declares pensions from foreign sources with their taxable share and DBA treatment.",
+      "legalBasis": ["§ 22 EStG", "§ 34c EStG", "DBA"],
+      "taxYears": ["2024", "2025"],
+      "appliesToProfiles": ["pensioner"],
+      "triggerCondition": "has_foreign_pension == true",
+      "multiInstance": true,
+      "sections": [
+        {
+          "sectionKey": "auslandsrente",
+          "title": "Ausländische Rente (je Quelle eine Instanz)",
+          "fields": [
+            {"fieldKey": "staat", "zeile": "Zeile 4", "label": "Staat / Träger", "dataType": "Text", "required": true, "validation": {"type": "required", "constraint": "len>=2", "message": "Herkunftsstaat erforderlich."}, "elsterKennzahl": "—", "helpTextDe": "Land und Versicherungsträger der ausländischen Rente.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "art_rente", "zeile": "Zeile 5", "label": "Art der Rente", "dataType": "Auswahl", "required": true, "validation": {"type": "enum", "constraint": "gesetzlich|betrieblich|privat", "message": "Bitte Art wählen."}, "elsterKennzahl": "—", "helpTextDe": "Bestimmt zusammen mit dem Rentenbeginn den steuerpflichtigen Anteil.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "jahresbetrag", "zeile": "Zeile 6-8", "label": "Jahresbetrag der ausländischen Rente", "dataType": "Betrag_EUR", "required": true, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "In Euro umgerechneter Jahresbruttobetrag.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "rentenbeginn", "zeile": "Zeile 7", "label": "Jahr des Rentenbeginns", "dataType": "Ganzzahl", "required": true, "validation": {"type": "range", "constraint": "1960..2025", "message": "Gültiges Jahr erforderlich."}, "elsterKennzahl": "—", "helpTextDe": "Kohortenprinzip wie bei der inländischen Rente.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "anrechenbare_steuer", "zeile": "—", "label": "Anrechenbare ausländische Steuer", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "Im Ausland gezahlte Steuer (Anrechnung/Freistellung je DBA).", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []}
+          ]
+        }
+      ],
+      "dependencies": ["hauptvordruck", "anlage_r"],
+      "crossFormRefs": ["Bei Freistellung Progressionsvorbehalt (§ 32b). Anrechnung wie Anlage AUS."],
+      "taxYearDifferences": [],
+      "confidence": "mittel",
+      "notes": "Multi-Instance je ausländischer Rentenquelle. DBA-Sonderfälle (Kassenstaatsprinzip) als Erweiterung."
+    },
+    {
+      "formKey": "anlage_kap_bet",
+      "formCode": "Anlage KAP-BET",
+      "officialName": "Anlage KAP-BET — Erträge aus Beteiligungen (gesonderte und einheitliche Feststellung)",
+      "purpose": "Declares capital income attributed from partnerships/holdings via a separate determination (Feststellungsbescheid).",
+      "legalBasis": ["§ 20 EStG", "§ 32d EStG", "§ 180 AO"],
+      "taxYears": ["2024", "2025"],
+      "appliesToProfiles": ["investor"],
+      "triggerCondition": "has_beteiligung_kapital == true",
+      "multiInstance": true,
+      "sections": [
+        {
+          "sectionKey": "beteiligung",
+          "title": "Beteiligung (je Beteiligung eine Instanz)",
+          "fields": [
+            {"fieldKey": "bezeichnung", "zeile": "Zeile 4", "label": "Bezeichnung der Beteiligung / Gesellschaft", "dataType": "Text", "required": true, "validation": {"type": "required", "constraint": "len>=2", "message": "Bezeichnung erforderlich."}, "elsterKennzahl": "—", "helpTextDe": "Name der Gesellschaft/Gemeinschaft laut Feststellungsbescheid.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "finanzamt_feststellung", "zeile": "Zeile 5", "label": "Feststellungsfinanzamt + Aktenzeichen", "dataType": "Text", "required": false, "validation": {"type": "none", "constraint": "—", "message": ""}, "elsterKennzahl": "—", "helpTextDe": "Das Finanzamt, das die Einkünfte gesondert festgestellt hat, samt Aktenzeichen.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []},
+            {"fieldKey": "anteilige_kapitalertraege", "zeile": "Zeile 7-10", "label": "Anteilige Kapitalerträge", "dataType": "Betrag_EUR", "required": true, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "Der auf Sie entfallende Anteil laut Feststellungsbescheid.", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": ["guenstigerpruefung_kap"]},
+            {"fieldKey": "anrechenbare_kest", "zeile": "Zeile 11-14", "label": "Anteilige anrechenbare Kapitalertragsteuer", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "Bereits einbehaltene Steuer (anteilig).", "dependsOn": "—", "prefillSource": "—", "optimizationRefs": []}
+          ]
+        }
+      ],
+      "dependencies": ["hauptvordruck", "anlage_kap"],
+      "crossFormRefs": ["Ergänzt Anlage KAP; Werte stammen aus dem Feststellungsbescheid (§ 180 AO)."],
+      "taxYearDifferences": [],
+      "confidence": "mittel",
+      "notes": "Multi-Instance je Beteiligung. Voraussetzung ist ein Feststellungsbescheid."
+    },
+    {
+      "formKey": "anlage_kap_inv",
+      "formCode": "Anlage KAP-INV",
+      "officialName": "Anlage KAP-INV — Investmenterträge, die nicht dem Steuerabzug unterlegen haben",
+      "purpose": "Declares investment-fund income (incl. Vorabpauschale and distributions) not subject to domestic withholding, applying Teilfreistellung under the InvStG.",
+      "legalBasis": ["§ 16 InvStG", "§ 18 InvStG", "§ 20 InvStG"],
+      "taxYears": ["2024", "2025"],
+      "appliesToProfiles": ["investor"],
+      "triggerCondition": "has_investmenterträge_ohne_abzug == true",
+      "multiInstance": false,
+      "sections": [
+        {
+          "sectionKey": "investmentertraege",
+          "title": "Investmenterträge",
+          "fields": [
+            {"fieldKey": "fondstyp", "zeile": "Zeile 4-8", "label": "Fondstyp (Teilfreistellung)", "dataType": "Auswahl", "required": true, "validation": {"type": "enum", "constraint": "aktienfonds|mischfonds|immobilienfonds|sonstige", "message": "Bitte Fondstyp wählen."}, "elsterKennzahl": "—", "helpTextDe": "Der Fondstyp bestimmt die Teilfreistellung: Aktienfonds 30%, Mischfonds 15%, Immobilienfonds 60/80%.", "dependsOn": "—", "prefillSource": "bank_steuerbescheinigung_ocr", "optimizationRefs": []},
+            {"fieldKey": "ausschuettungen", "zeile": "Zeile 9-14", "label": "Ausschüttungen", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "Laufende Ausschüttungen des Fonds.", "dependsOn": "—", "prefillSource": "bank_steuerbescheinigung_ocr", "optimizationRefs": []},
+            {"fieldKey": "vorabpauschale", "zeile": "Zeile 9-17", "label": "Vorabpauschale", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": ">=0", "message": "Betrag darf nicht negativ sein."}, "elsterKennzahl": "—", "helpTextDe": "Bei thesaurierenden Fonds wird jährlich eine fiktive Mindestbesteuerung (Vorabpauschale) angesetzt. Sie wurde ggf. nicht automatisch besteuert und ist hier zu erklären.", "dependsOn": "—", "prefillSource": "bank_steuerbescheinigung_ocr", "optimizationRefs": ["vorabpauschale"]},
+            {"fieldKey": "veraeusserungsgewinn_fonds", "zeile": "Zeile 18-26", "label": "Gewinn aus Veräußerung von Investmentanteilen", "dataType": "Betrag_EUR", "required": false, "validation": {"type": "range", "constraint": "—", "message": ""}, "elsterKennzahl": "—", "helpTextDe": "Veräußerungsgewinn unter Anrechnung bereits versteuerter Vorabpauschalen.", "dependsOn": "—", "prefillSource": "bank_steuerbescheinigung_ocr", "optimizationRefs": []}
+          ]
+        }
+      ],
+      "dependencies": ["hauptvordruck", "anlage_kap"],
+      "crossFormRefs": ["Ergänzt Anlage KAP; Teilfreistellung nach InvStG wird auf die Erträge angewandt."],
+      "taxYearDifferences": [],
+      "confidence": "mittel",
+      "notes": "Vorabpauschale + Teilfreistellung abgedeckt (schließt coverage-Lücke p12). Detaillierte Zeilenaufteilung je Ertragsart vor Produktion verifizieren."
     }
   ]
 }
