@@ -31,7 +31,7 @@ from autotax import kasse_extract, kasse_r2, kasse_service
 from autotax.auth import get_current_user
 from autotax.config import kasse_v2_enabled
 from autotax.db import SessionLocal
-from autotax.models import BackgroundJob, CashCategory, KasseDocument
+from autotax.models import BackgroundJob, CashCategory, CashEntry, KasseDocument
 
 router = APIRouter(prefix="/kasse", tags=["kasse-v2 (flag-gated, default OFF)"])
 
@@ -276,6 +276,147 @@ async def kasse_upload(
                 "review_required": entry.status != "confirmed"}
     finally:
         db.close()
+
+
+class KasseEntryUpdate(BaseModel):
+    description: Optional[str] = None
+    vendor: Optional[str] = None
+    gross_amount: Optional[float] = None
+    vat_amount: Optional[float] = None
+    vat_rate: Optional[str] = None
+    category: Optional[str] = None
+    category_id: Optional[int] = None
+    entry_type: Optional[str] = None
+
+
+def _full_entry(e) -> dict:
+    return {
+        "id": e.id, "entry_type": e.entry_type, "description": e.description, "vendor": e.vendor,
+        "gross_amount": e.gross_amount, "vat_amount": e.vat_amount, "net_amount": e.net_amount,
+        "vat_rate": e.vat_rate, "category": e.category, "category_id": e.category_id,
+        "status": e.status, "source": e.source, "date": e.date.isoformat() if e.date else None,
+    }
+
+
+def _learn(uid: int, entry, original: dict) -> None:
+    """Phase-1 learning: vendor_aliases via LearningRule (best-effort)."""
+    try:
+        from autotax.learning import save_learning_rule
+        edited = {"vendor": entry.vendor, "vat_rate": entry.vat_rate, "category": entry.category}
+        keyword = (entry.vendor or entry.description or "").strip()
+        if keyword:
+            save_learning_rule(uid, keyword, original, edited)
+    except Exception:
+        pass  # learning must never break the user action
+
+
+@router.patch("/entry/{entry_id}", summary="Edit a Kasa entry (records learning)")
+def kasse_edit_entry(entry_id: int, body: KasseEntryUpdate, user: dict = Depends(get_current_user)) -> dict:
+    _require_flag()
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        e = db.query(CashEntry).filter(CashEntry.id == entry_id, CashEntry.user_id == uid,
+                                       (CashEntry.is_deleted == False) | (CashEntry.is_deleted.is_(None))).first()  # noqa: E712
+        if not e:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        original = {"vendor": e.vendor, "vat_rate": e.vat_rate, "category": e.category}
+        if body.entry_type is not None and body.entry_type not in ("income", "expense"):
+            raise HTTPException(status_code=422, detail="entry_type must be income|expense")
+        for f in ("description", "vendor", "gross_amount", "vat_amount", "vat_rate", "category", "category_id", "entry_type"):
+            v = getattr(body, f)
+            if v is not None:
+                setattr(e, f, v)
+        if e.gross_amount is not None and e.vat_amount is not None:
+            e.net_amount = e.gross_amount - e.vat_amount
+        db.commit(); db.refresh(e)
+        if e.source == "ocr":
+            _learn(uid, e, original)
+        return _full_entry(e)
+    finally:
+        db.close()
+
+
+@router.post("/entry/{entry_id}/confirm", summary="Confirm a pending Kasa entry (books it)")
+def kasse_confirm_entry(entry_id: int, user: dict = Depends(get_current_user)) -> dict:
+    _require_flag()
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        e = db.query(CashEntry).filter(CashEntry.id == entry_id, CashEntry.user_id == uid,
+                                       (CashEntry.is_deleted == False) | (CashEntry.is_deleted.is_(None))).first()  # noqa: E712
+        if not e:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        # learning from AI-extracted original vs confirmed values
+        original = {}
+        if e.source == "ocr" and e.extraction_meta:
+            try:
+                raw = (json.loads(e.extraction_meta) or {}).get("raw") or {}
+                original = {"vendor": raw.get("vendor"), "vat_rate": raw.get("vat_rate"), "category": raw.get("category")}
+            except Exception:
+                original = {}
+        e.status = "confirmed"
+        db.commit(); db.refresh(e)
+        if e.source == "ocr":
+            _learn(uid, e, original)
+        return _full_entry(e)
+    finally:
+        db.close()
+
+
+async def _process_batch(uid: int, items: list[tuple], job_id: int) -> None:
+    db = SessionLocal()
+    processed, entry_ids = 0, []
+    try:
+        for content, content_type, doc_kind, business_type in items:
+            try:
+                extract = await _extract_for(content, content_type, doc_kind, business_type)
+                doc = _store_document(db, uid, content, content_type, doc_kind, business_type)
+                entry = kasse_service.create_entry_from_extraction(db, uid, extract, document_id=doc.id)
+                processed += 1; entry_ids.append(entry.id)
+            except Exception:
+                pass
+        job = db.query(BackgroundJob).filter(BackgroundJob.id == job_id).first()
+        if job:
+            job.status = "success"; job.finished_at = datetime.now(timezone.utc)
+            job.payload = json.dumps({"processed": processed, "entry_ids": entry_ids})
+            db.commit()
+    except Exception:
+        job = db.query(BackgroundJob).filter(BackgroundJob.id == job_id).first()
+        if job:
+            job.status = "failed"; job.finished_at = datetime.now(timezone.utc); db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/upload-batch", summary="Upload multiple documents → background processing", status_code=202)
+async def kasse_upload_batch(
+    files: list[UploadFile] = File(...),
+    doc_kind: str = Form("expense"),
+    business_type: str = Form(""),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    _require_flag()
+    if doc_kind not in ("expense", "pos"):
+        raise HTTPException(status_code=422, detail="doc_kind must be expense|pos")
+    uid = _uid(user)
+    items = []
+    for f in files:
+        content = await f.read()
+        if content and len(content) <= _MAX_UPLOAD:
+            items.append((content, f.content_type or "image/jpeg", doc_kind, business_type))
+    if not items:
+        raise HTTPException(status_code=422, detail="no valid files")
+    db = SessionLocal()
+    try:
+        job = BackgroundJob(job_type="kasse_ocr", user_id=uid, status="running",
+                            started_at=datetime.now(timezone.utc), payload=json.dumps({"count": len(items)}))
+        db.add(job); db.commit(); db.refresh(job)
+        job_id = job.id
+    finally:
+        db.close()
+    asyncio.create_task(_process_batch(uid, items, job_id))
+    return {"job_id": job_id, "queued": len(items), "status": "running"}
 
 
 @router.get("/jobs/{job_id}", summary="Batch upload job status")
