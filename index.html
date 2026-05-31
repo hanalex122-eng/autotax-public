@@ -5653,6 +5653,20 @@ function App(){
     window.addEventListener("hashchange",checkHash);
     return()=>window.removeEventListener("hashchange",checkHash);
   },[]);
+  // Zaten girisliyken /app?next=/admin ile gelinirse (login ekrani hic
+  // gorunmedigi icin onLogin handler calismaz) -> mount'ta next'i kontrol et
+  // ve same-origin path'e yonlendir. Aksi halde dashboard acilir, admin degil.
+  useEffect(()=>{
+    if(!authed)return;
+    try{
+      const params=new URLSearchParams(window.location.search);
+      const nextUrl=params.get("next");
+      // Sadece slash ile baslayan same-origin path (hostname/protokol yok) — open-redirect korumasi
+      if(nextUrl && nextUrl.startsWith("/") && !nextUrl.startsWith("//")){
+        window.location.href=nextUrl;
+      }
+    }catch(e){}
+  },[]);
   if(!authed)return<Fragment><AuthScreen onLogin={()=>{
     setAuthed(true);
     // Login sonrasi ?next=URL varsa oraya yonlendir (admin sayfasindan
@@ -5660,8 +5674,8 @@ function App(){
     try{
       const params=new URLSearchParams(window.location.search);
       const nextUrl=params.get("next");
-      if(nextUrl && nextUrl.startsWith("/")){
-        // Same-origin safety check (slash ile baslamali, hostname yok)
+      if(nextUrl && nextUrl.startsWith("/") && !nextUrl.startsWith("//")){
+        // Same-origin safety check (slash ile baslamali, hostname yok, // open-redirect degil)
         setTimeout(()=>{window.location.href=nextUrl;},100);
       }
     }catch(e){}
