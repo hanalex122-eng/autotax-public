@@ -40,6 +40,14 @@ FEATURES: dict[str, bool | str] = {
 }
 
 
+def kasse_v2_enabled() -> bool:
+    """Backend feature flag for Kasa MVP v2 endpoints (kasse_api router:
+    /kasse/dashboard, /kasse/summary/*, /kasse/categories). Default OFF —
+    when off the new endpoints return 404. Backend-only (NOT in window.FEATURES
+    yet; dashboard UI is Sprint 3). Flip with FEAT_KASSE_V2=1 for pilot."""
+    return _flag("FEAT_KASSE_V2", "0")
+
+
 def tax_engine_v2_enabled() -> bool:
     """Backend-only feature flag for the knowledge-driven tax engine v2 API
     (tax_engine package + /tax/* read-only routers). Default OFF — when off,
