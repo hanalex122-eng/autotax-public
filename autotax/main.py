@@ -15,7 +15,7 @@ import io
 from autotax.ocr import extract_text, extract_text_and_qr
 from autotax.parser import parse_invoice
 from autotax.db import init_db, save_invoice, SessionLocal
-from autotax.models import Invoice, User, CashEntry, UserCompany, LlmUsage, RecurringExpense
+from autotax.models import Invoice, User, CashEntry, UserCompany, LlmUsage, RecurringExpense, CashCategory
 from autotax.duplicate_service import generate_file_hash, find_hard_duplicate, check_soft_duplicate
 from autotax.auth import hash_password, verify_password, create_token, create_access_token, create_refresh_token, decode_token, get_current_user, get_acting_context, require_owner_or_export
 from autotax.audit import audit
@@ -146,6 +146,14 @@ try:
     logger.info("tax_engine_v2 router registered (flag-gated, default OFF)")
 except Exception as _e:  # pragma: no cover - defensive
     logger.warning("tax_engine_v2 router not registered: %s", _e)
+
+# Additive, flag-gated Kasa MVP router (FEAT_KASSE_V2, default OFF -> 404).
+try:
+    from autotax.kasse_api import router as _kasse_v2_router
+    app.include_router(_kasse_v2_router)
+    logger.info("kasse_v2 router registered (flag-gated, default OFF)")
+except Exception as _e:  # pragma: no cover - defensive
+    logger.warning("kasse_v2 router not registered: %s", _e)
 
 
 _CSP_POLICY = (
@@ -2121,6 +2129,7 @@ def admin_delete_user(user_id: int, user: dict = Depends(get_current_user)):
         email = u.email
         db.query(Invoice).filter(Invoice.user_id == user_id).delete()
         db.query(CashEntry).filter(CashEntry.user_id == user_id).delete()
+        db.query(CashCategory).filter(CashCategory.user_id == user_id).delete()
         db.query(UserCompany).filter(UserCompany.user_id == user_id).delete()
         db.delete(u)
         db.commit()
@@ -10944,6 +10953,7 @@ def delete_account(body: dict = Body(...), user: dict = Depends(get_current_user
         uid = user["sub"]
         # Delete all user data across all tables
         db.query(CashEntry).filter(CashEntry.user_id == uid).delete()
+        db.query(CashCategory).filter(CashCategory.user_id == uid).delete()
         db.query(Invoice).filter(Invoice.user_id == uid).delete()
         db.query(UserCompany).filter(UserCompany.user_id == uid).delete()
         db.query(LlmUsage).filter(LlmUsage.user_id == str(uid)).delete()
