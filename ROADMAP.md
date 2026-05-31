@@ -1,29 +1,29 @@
 # AutoTax-Cloud — Master Roadmap
 
 **Kaynak:** AUTOTAX – UÇTAN UCA OTOMASYON ŞEMASI (2026-05-26)
-**Son güncelleme:** 2026-05-26
-**Durum:** Soft launch hafta 1 — sonra Steuererklärung modülü (Phase 9) önceliği.
+**Son güncelleme:** 2026-05-31 (prod v5.5.5)
+**Durum:** Soft launch CANLI (Stripe LIVE, ilk €15 gerçek ödeme alındı 2026-05-30). Aktif öncelik: **Phase 9 Steuererklärung Form Engine** — tam spec yazıldı (`.claude/steuererklaerung_form_engine_complete.md`, 8 haftalık plan), MVP %45 hazır.
 
 Bu doküman, kullanıcının hazırladığı end-to-end şemayı kaynak alır ve **delivery sırası** belirler. Her phase'in hedefi, süresi, bağımlılığı, çıktı kriteri tanımlıdır.
 
 ---
 
-## 📊 Sistem ilerleme yüzdesi (2026-05-26 itibarıyla)
+## 📊 Sistem ilerleme yüzdesi (2026-05-31 itibarıyla)
 
 ```
-Phase 1  Veri Kaynakları (Input)            ████████░░  85%   (Kasa + Bank gelecek)
+Phase 1  Veri Kaynakları (Input)            █████████░  90%   (Kasse MVP canlı, Bank API gelecek)
 Phase 2  Veri İşleme Pipeline               █████████░  95%   (OCR + Parsing + AI ✓)
 Phase 3  Veritabanı (PostgreSQL)            ██████████ 100%   (Tüm tablolar mevcut)
 Phase 4  Çıktı & Entegrasyonlar             ███████░░░  75%   (DATEV ✓, Berater portal gelecek)
 Phase 5  Arka Plan Servisleri                █████████░  95%   (Hepsi çalışıyor)
 Phase 6  Dış Servisler                       █████████░  90%   (Bank API gelecek)
 Phase 7  Cron Jobs                           ████████░░  80%   (Aylık raporlar kısmen)
-Phase 8  Güvenlik & Operasyon                ████████░░  85%   (Sentry + Audit log)
-Phase 9  VERGİ BEYANI SÜRECİ                 █░░░░░░░░░  10%   ★ Büyük boşluk
-Phase 10 Kullanıcı Arayüzü                   ███░░░░░░░  33%   (Mobil + Berater gelecek)
+Phase 8  Güvenlik & Operasyon                █████████░  92%   (CAPTCHA/Email-verify/Sentry/Stripe LIVE ✓; Audit-log tablosu gelecek)
+Phase 9  VERGİ BEYANI SÜRECİ                 ████░░░░░░  45%   ★ MVP canlı (75 field/11 section), Form Engine tam spec yazıldı
+Phase 10 Kullanıcı Arayüzü                   ████░░░░░░  40%   (Web ✓ + Steuer/Kasse view; Mobil + Berater gelecek)
 
 ─────────────────────────────────────────────────────────────
-TOPLAM SİSTEM:                               ██████░░░░  65%
+TOPLAM SİSTEM:                               ███████░░░  72%
 ```
 
 ---
@@ -180,9 +180,10 @@ TOPLAM SİSTEM:                               ██████░░░░  65
 | Default plan = free (anti-abuse) | ✅ | DONE 2026-05-26 |
 | Input length caps | ✅ | DONE 2026-05-26 |
 | CSV/XLSX formula injection prevention | ✅ | DONE 2026-05-26 |
-| **CAPTCHA (Cloudflare Turnstile)** | 🟡 CODE READY | **S1** — env eklenince aktif |
-| **Email Verification** | ⏳ TODO | **S1** — Resend ile (2-3 saat) |
-| **Sentry DSN** | ⏳ TODO | **S1** — env ekle (5 dk) |
+| **CAPTCHA (Cloudflare Turnstile)** | ✅ DONE | Canlı + test edildi (2026-05-30) |
+| **Email Verification** | ✅ DONE | Resend token akışı canlı |
+| **Sentry DSN** | ✅ DONE | `/health` → `sentry_configured: true` |
+| **Stripe LIVE (kill switch)** | ✅ DONE | İlk €15 gerçek ödeme alındı (2026-05-30) |
 | **Audit Logs (structured table)** | ⚪ FUTURE | S2 |
 | **pip-audit (CI)** | ⏳ TODO | S1 (30 dk) |
 | Postgres password rotation | ⏳ TODO | S1 hijyen (2 dk Railway dashboard) |
@@ -195,9 +196,10 @@ TOPLAM SİSTEM:                               ██████░░░░  65
 
 **Bu Phase: AI Steuer planının (€89/ay) gerçek değer önermesi.**
 
-### Mevcut durum: %10
-- Sadece EÜR raporu var (manuel rapor)
-- Anlage form yapısı yok
+### Mevcut durum: ~%45 (2026-05-30/31 sprint sonrası)
+- **MVP canlı:** Steuererklärung 2025, 75 field / 11 section, Zeile numaralı, live tax estimator, LSB OCR (Claude Vision), Behindertenpauschbetrag, Anlage Kind dinamik liste, ELSTER XML skeleton, ESt 1 A formuna yakın PDF (`autotax/declaration.py`)
+- **Tam Form Engine spec yazıldı:** `.claude/steuererklaerung_form_engine_complete.md` — 29 form × field-level (Zeile/ELSTER-Kennzahl/validation/Hilfetext), 10-adım engine (Finanzamt lookup, Form detection, Dynamic questionnaire, Validation 60+, Optimization 50+, Document AI, QC, Output, Self-learning), DB şema + API katalog + 8-haftalık plan + Definition of Done. **Phase 9'un otoritatif kaynağı budur.**
+- **Eksik kritik 5:** Finanzamt lookup, Form detection engine, Dynamic questionnaire, 12 eksik form (Anlage G/EÜR/AUS/SO/AV/Haushaltsnahe/Energetisch/KAP-BET/KAP-INV/R-AUS/USt/GewSt), Validation/Optimization motoru
 
 ### S2 — Hafta 3-4: Anlage N + Anlage V (core)
 - **Anlage N (Maaş)**
@@ -281,9 +283,9 @@ satış argümanı.
 
 ---
 
-# 🎯 Sprint S0 — LIVE (BUGÜN/YARIN, 4-6 saat kalan)
+# 🎯 Sprint S0 — LIVE ✅ TAMAMLANDI (2026-05-30)
 
-Bu sprint **soft launch** için gerekli minimum. Şu an %85 bitik.
+Bu sprint **soft launch** için gerekli minimumdu. **Bitti:** CAPTCHA + email verify + Sentry + Stripe LIVE + ilk €15 gerçek ödeme alındı. Aşağıdaki liste geçmiş referans olarak tutuluyor.
 
 ### S0 kalan iş listesi (sıralı)
 
@@ -545,6 +547,6 @@ Bu doküman her sprint'te güncellenir, schema ile fark varsa schema-ROADMAP eş
 
 İmza:
 - Hüseyin Hancer (vizyon + ürün)
-- Claude Opus 4.7 (engineering plan + delivery)
+- Claude Opus 4.8 (engineering plan + delivery), 2026-05-31 güncelleme
 
 2026-05-26
