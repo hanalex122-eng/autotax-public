@@ -366,6 +366,45 @@ class CashEntry(Base):
     # --- ADDED: soft delete ---
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
+    # --- Kasa MVP (Sprint 1) — additive, all nullable (safe migration) ---
+    category_id = Column(Integer, ForeignKey("cash_categories.id"), nullable=True, index=True)
+    net_amount = Column(Float, nullable=True)                # gross - vat (denormalized for report speed)
+    source = Column(String(16), nullable=True, default="manual")      # manual | ocr | import
+    status = Column(String(16), nullable=True, default="confirmed")   # confirmed | pending_review
+    ocr_document_id = Column(Integer, nullable=True)         # logical link to tax_document (no hard FK; additive)
+    extraction_meta = Column(Text, nullable=True)            # JSON-as-text: {confidence, model, template_id, raw_fields}
+    __table_args__ = (
+        Index("ix_cash_user_date", "user_id", "date"),
+        Index("ix_cash_user_type_date", "user_id", "entry_type", "date"),
+        Index("ix_cash_user_status", "user_id", "status"),
+    )
+
+
+class CashCategory(Base):
+    """Kasa MVP — structured income/expense categories (Sprint 1).
+
+    user_id NULL = system/global seed category (visible to everyone).
+    Legacy free-form CashEntry.category string is kept for back-compat.
+    """
+    __tablename__ = "cash_categories"
+    __table_args__ = (
+        Index("ix_cashcat_user_kind", "user_id", "kind"),
+        UniqueConstraint("user_id", "name", name="uq_cashcat_user_name"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # NULL = system
+    name = Column(String(80), nullable=False)
+    kind = Column(String(16), nullable=False)            # income | expense | both
+    datev_konto = Column(String(10), nullable=True)      # SKR03/04 (Tax mapping, S3)
+    euer_line = Column(String(40), nullable=True)        # forms.json anlage_euer key (S3)
+    default_vat_rate = Column(String(4), nullable=True)  # "19" | "7" | "0"
+    color = Column(String(16), nullable=True)
+    icon = Column(String(40), nullable=True)
+    sort_order = Column(Integer, default=0)
+    is_system = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class LlmUsage(Base):
