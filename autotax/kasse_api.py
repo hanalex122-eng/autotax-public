@@ -299,7 +299,8 @@ def _full_entry(e) -> dict:
         "id": e.id, "entry_type": e.entry_type, "description": e.description, "vendor": e.vendor,
         "gross_amount": e.gross_amount, "vat_amount": e.vat_amount, "net_amount": e.net_amount,
         "vat_rate": e.vat_rate, "category": e.category, "category_id": e.category_id,
-        "status": e.status, "source": e.source, "date": e.date.isoformat() if e.date else None,
+        "status": e.status, "source": e.source, "ocr_document_id": e.ocr_document_id,
+        "date": e.date.isoformat() if e.date else None,
     }
 
 
@@ -485,6 +486,91 @@ def kasse_download_report(report_id: int, user: dict = Depends(get_current_user)
         pdf = kasse_r2.get_image(rep.r2_key)
         return Response(content=pdf, media_type="application/pdf",
                         headers={"Content-Disposition": f'inline; filename="kasse_{rep.report_type}_{rep.id}.pdf"'})
+    finally:
+        db.close()
+
+
+@router.get("/entries", summary="List Kasa entries (filter/search) — W4")
+def kasse_entries(
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = Query(None),
+    type: Optional[str] = Query(None, description="income|expense"),
+    status: Optional[str] = Query(None, description="confirmed|pending_review"),
+    q: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    _require_flag()
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        qry = db.query(CashEntry).filter(
+            CashEntry.user_id == uid,
+            (CashEntry.is_deleted == False) | (CashEntry.is_deleted.is_(None)),  # noqa: E712
+        )
+        if type in ("income", "expense"):
+            qry = qry.filter(CashEntry.entry_type == type)
+        if status in ("confirmed", "pending_review"):
+            qry = qry.filter(CashEntry.status == status)
+        for bound, op in ((from_, ">="), (to, "<=")):
+            if bound:
+                try:
+                    dt = datetime.strptime(bound[:10], "%Y-%m-%d")
+                    qry = qry.filter(CashEntry.date >= dt) if op == ">=" else qry.filter(CashEntry.date < dt.replace(hour=23, minute=59, second=59))
+                except Exception:
+                    pass
+        if q:
+            like = f"%{q}%"
+            qry = qry.filter((CashEntry.description.ilike(like)) | (CashEntry.vendor.ilike(like)))
+        rows = qry.order_by(CashEntry.date.desc(), CashEntry.id.desc()).limit(limit).all()
+        return {"entries": [_full_entry(e) for e in rows], "count": len(rows)}
+    finally:
+        db.close()
+
+
+@router.get("/entry/{entry_id}", summary="Entry detail + audit trail (Herkunft/Verlauf) — W4")
+def kasse_entry_detail(entry_id: int, user: dict = Depends(get_current_user)) -> dict:
+    _require_flag()
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        e = db.query(CashEntry).filter(CashEntry.id == entry_id, CashEntry.user_id == uid).first()
+        if not e:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        ai, changes = {}, []
+        if e.source == "ocr" and e.extraction_meta:
+            try:
+                meta = json.loads(e.extraction_meta) or {}
+                raw = meta.get("raw") or {}
+                ai = {"model": meta.get("model"), "confidence": meta.get("confidence"), "band": meta.get("band"), "raw": raw}
+                # diff AI-extracted vs final saved (the "Woher kommt diese Zahl?" chain)
+                pairs = [
+                    ("description", raw.get("vendor") if e.entry_type == "expense" else raw.get("business_name"), e.description),
+                    ("amount", raw.get("total_amount") if e.entry_type == "expense" else raw.get("gross_revenue"), e.gross_amount),
+                    ("vat_rate", raw.get("vat_rate"), e.vat_rate),
+                    ("category", raw.get("category"), e.category),
+                ]
+                for field, frm, to in pairs:
+                    if frm is not None and str(frm) != str(to):
+                        changes.append({"field": field, "from": frm, "to": to})
+            except Exception:
+                pass
+        return {"entry": _full_entry(e), "ai": ai, "changes": changes, "document_id": e.ocr_document_id}
+    finally:
+        db.close()
+
+
+@router.get("/documents", summary="Meine Dokumente — list own original documents — W4")
+def kasse_documents_list(user: dict = Depends(get_current_user)) -> dict:
+    _require_flag()
+    db = SessionLocal()
+    try:
+        rows = db.query(KasseDocument).filter(KasseDocument.user_id == _uid(user)).order_by(KasseDocument.created_at.desc()).limit(200).all()
+        return {"documents": [{
+            "id": doc.id, "content_type": doc.content_type, "doc_kind": doc.doc_kind,
+            "business_type": doc.business_type, "sha256": (doc.sha256 or "")[:12],
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+        } for doc in rows], "count": len(rows)}
     finally:
         db.close()
 
