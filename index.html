@@ -5664,6 +5664,7 @@ function KasseDashboardView({onUpload}){
 function KasseUploadView({onDone,onCancel}){
   const [phase,setPhase]=React.useState("pick"); // pick | processing | preview | error
   const [res,setRes]=React.useState(null);
+  const [ed,setEd]=React.useState(null);
   const [busy,setBusy]=React.useState(false);
   const lang=getLang();
   const t3=(de,tr,en)=>lang==="tr"?tr:(lang==="en"?en:de);
@@ -5677,13 +5678,24 @@ function KasseUploadView({onDone,onCancel}){
       const fd=new FormData(); fd.append("file",f); fd.append("doc_kind","auto");
       const r=await fetch(API+"/kasse/upload",{method:"POST",headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")},body:fd});
       if(!r.ok)throw new Error("upload");
-      setRes(await r.json()); setPhase("preview");
+      const data=await r.json(); const en=data.entry||{};
+      setRes(data); setEd({description:en.description||"",gross:String(en.gross_amount||0),entry_type:en.entry_type||"expense"});
+      setPhase("preview");
     }catch(err){ setPhase("error"); }
   }
   async function confirm(){
     if(!res||busy)return; setBusy(true);
-    try{ await api("/kasse/entry/"+res.entry.id+"/confirm",{method:"POST"}); onDone&&onDone(); }
-    catch(e){ setBusy(false); }
+    try{
+      const o=res.entry, body={};
+      if(ed){
+        if(ed.description!==o.description)body.description=ed.description;
+        if(parseFloat(ed.gross)!==o.gross_amount)body.gross_amount=parseFloat(ed.gross);
+        if(ed.entry_type!==o.entry_type)body.entry_type=ed.entry_type;
+      }
+      if(Object.keys(body).length)await api("/kasse/entry/"+o.id,{method:"PATCH",body:JSON.stringify(body)});
+      await api("/kasse/entry/"+o.id+"/confirm",{method:"POST"});
+      onDone&&onDone();
+    }catch(e){ setBusy(false); }
   }
   async function discard(){
     if(!res||busy)return; setBusy(true);
@@ -5707,24 +5719,31 @@ function KasseUploadView({onDone,onCancel}){
     <div style={{color:"#ef4444",fontWeight:700,marginBottom:12}}>{t3("Hochladen fehlgeschlagen","Yükleme başarısız","Upload failed")}</div>
     <button onClick={()=>setPhase("pick")} style={{padding:"12px 20px",background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,cursor:"pointer"}}>{t3("Erneut versuchen","Tekrar dene","Try again")}</button>
   </div>);
-  // preview
+  // preview — editable review (W3)
   const e=(res&&res.entry)||{};
-  const li=lights[e.band||(res&&res.entry&&res.entry.band)||"review"]||lights.review;
   const band=e.band||"review";
   const liShow=lights[band]||lights.review;
+  const cur=ed||{description:e.description||"",gross:String(e.gross_amount||0),entry_type:e.entry_type||"expense"};
+  const changed=ed&&(ed.description!==e.description||parseFloat(ed.gross)!==e.gross_amount||ed.entry_type!==e.entry_type);
+  const inp={width:"100%",padding:"10px",fontSize:16,border:"1px solid var(--border)",borderRadius:8,background:"var(--card)",color:"var(--text)",boxSizing:"border-box"};
   return (<div style={wrap}>
     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
       <span style={{display:"inline-block",width:12,height:12,borderRadius:"50%",background:liShow.c}}></span>
       <span style={{fontWeight:700}}>{liShow.t}</span>
     </div>
-    <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:16,marginBottom:14}}>
-      <div style={{fontSize:12,color:"var(--text-muted)",marginBottom:8}}>{t3("KI hat erkannt","Yapay zeka okudu","AI detected")}</div>
-      <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0"}}><span>{t3("Beschreibung","Açıklama","Description")}</span><b>{e.description||"—"}</b></div>
-      <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0"}}><span>{t3("Datum","Tarih","Date")}</span><b>{e.date||"—"}</b></div>
-      <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0"}}><span>{t3("Betrag","Tutar","Amount")}</span><b>{eur(e.gross_amount)}</b></div>
+    <div style={{fontSize:12,color:"var(--text-muted)",marginBottom:8}}>{t3("KI hat erkannt — prüfen & ggf. ändern","Yapay zeka okudu — kontrol et","AI detected — review & edit")}{changed?" · "+t3("geändert","değişti","changed"):""}</div>
+    <label style={{fontSize:12,color:"var(--text-muted)"}}>{t3("Beschreibung","Açıklama","Description")}</label>
+    <input style={inp} value={cur.description} onChange={ev=>setEd({...cur,description:ev.target.value})}/>
+    <label style={{fontSize:12,color:"var(--text-muted)",marginTop:10,display:"block"}}>{t3("Betrag (€)","Tutar (€)","Amount (€)")}</label>
+    <input style={inp} type="number" inputMode="decimal" value={cur.gross} onChange={ev=>setEd({...cur,gross:ev.target.value})}/>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"10px 0"}}>
+      <span style={{fontSize:13}}>{cur.entry_type==="income"?t3("Einnahme","Gelir","Income"):t3("Ausgabe","Gider","Expense")}</span>
+      <button onClick={()=>setEd({...cur,entry_type:cur.entry_type==="income"?"expense":"income"})} style={{fontSize:12,padding:"6px 10px",background:"transparent",color:"var(--accent)",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer"}}>{t3("Falscher Typ? wechseln","Yanlış tip? değiştir","Wrong type? switch")}</button>
     </div>
-    <div style={{fontSize:13,color:"var(--text-muted)",marginBottom:6}}>{t3("Wird gespeichert:","Kaydedilecek:","Will be saved:")}</div>
-    <div style={{fontWeight:700,marginBottom:16}}>{(e.entry_type==="income"?t3("Einnahme","Gelir","Income"):t3("Ausgabe","Gider","Expense"))+" · "+eur(e.gross_amount)}</div>
+    <div style={{fontSize:13,color:"var(--text-muted)"}}>{t3("Datum","Tarih","Date")}: {e.date||"—"}</div>
+    {res&&res.document_id?<div onClick={async()=>{try{const r=await fetch(API+"/kasse/document/"+res.document_id,{headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")}});if(r.ok){const b=await r.blob();window.open(URL.createObjectURL(b),"_blank");}}catch(x){}}} style={{fontSize:13,color:"var(--accent)",cursor:"pointer",marginTop:8}}>📄 {t3("Beleg ansehen","Belgeyi gör","View document")}</div>:null}
+    <div style={{fontSize:13,color:"var(--text-muted)",marginTop:14}}>{t3("Wird gespeichert:","Kaydedilecek:","Will be saved:")}</div>
+    <div style={{fontWeight:700,marginBottom:16}}>{(cur.entry_type==="income"?t3("Einnahme","Gelir","Income"):t3("Ausgabe","Gider","Expense"))+" · "+eur(parseFloat(cur.gross)||0)}</div>
     <div style={{display:"flex",gap:10}}>
       <button disabled={busy} onClick={confirm} style={{flex:1,padding:"14px",fontWeight:700,background:"#10b981",color:"#fff",border:"none",borderRadius:12,cursor:"pointer"}}>✓ {t3("Bestätigen","Onayla","Confirm")}</button>
       <button disabled={busy} onClick={discard} style={{flex:1,padding:"14px",fontWeight:700,background:"transparent",color:"#ef4444",border:"1px solid #ef4444",borderRadius:12,cursor:"pointer"}}>✕ {t3("Verwerfen","Sil","Discard")}</button>

@@ -489,6 +489,24 @@ def kasse_download_report(report_id: int, user: dict = Depends(get_current_user)
         db.close()
 
 
+@router.get("/document/{document_id}", summary="View/download an original document (own only)")
+def kasse_document_view(document_id: int, user: dict = Depends(get_current_user)):
+    _require_flag()
+    db = SessionLocal()
+    try:
+        doc = db.query(KasseDocument).filter(KasseDocument.id == document_id, KasseDocument.user_id == _uid(user)).first()
+        if not doc or not doc.r2_key:
+            raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+        url = kasse_r2.presign(doc.r2_key)
+        if url:
+            return RedirectResponse(url)
+        data = kasse_r2.get_image(doc.r2_key)
+        return Response(content=data, media_type=doc.content_type or "application/octet-stream",
+                        headers={"Content-Disposition": f'inline; filename="beleg_{doc.id}"'})
+    finally:
+        db.close()
+
+
 @router.get("/jobs/{job_id}", summary="Batch upload job status")
 def kasse_job_status(job_id: int, user: dict = Depends(get_current_user)) -> dict:
     _require_flag()
