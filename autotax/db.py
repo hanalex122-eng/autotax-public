@@ -135,6 +135,34 @@ def init_db():
                 conn.execute(text("ALTER TABLE cash_entries ADD COLUMN deleted_at TIMESTAMP"))
                 logger.info("Added 'deleted_at' column to cash_entries")
         # --- ADDED END ---
+        # --- Kasa MVP (Sprint 1/2) columns — Alembic 002/003 don't auto-run on
+        #     Railway (Dockerfile CMD, Procfile release ignored). create_all makes
+        #     the new TABLES but cannot ALTER the existing cash_entries table, so
+        #     these columns are added here idempotently (proven startup pattern).
+        ce_cols = [c["name"] for c in inspect(engine).get_columns("cash_entries")]
+        with engine.begin() as conn:
+            if "category_id" not in ce_cols:
+                conn.execute(text("ALTER TABLE cash_entries ADD COLUMN category_id INTEGER"))
+                logger.info("Added 'category_id' column to cash_entries")
+            if "net_amount" not in ce_cols:
+                conn.execute(text("ALTER TABLE cash_entries ADD COLUMN net_amount DOUBLE PRECISION"))
+                logger.info("Added 'net_amount' column to cash_entries")
+            if "source" not in ce_cols:
+                conn.execute(text("ALTER TABLE cash_entries ADD COLUMN source VARCHAR(16) DEFAULT 'manual'"))
+                logger.info("Added 'source' column to cash_entries")
+            if "status" not in ce_cols:
+                conn.execute(text("ALTER TABLE cash_entries ADD COLUMN status VARCHAR(16) DEFAULT 'confirmed'"))
+                logger.info("Added 'status' column to cash_entries")
+            if "ocr_document_id" not in ce_cols:
+                conn.execute(text("ALTER TABLE cash_entries ADD COLUMN ocr_document_id INTEGER"))
+                logger.info("Added 'ocr_document_id' column to cash_entries")
+            if "extraction_meta" not in ce_cols:
+                conn.execute(text("ALTER TABLE cash_entries ADD COLUMN extraction_meta TEXT"))
+                logger.info("Added 'extraction_meta' column to cash_entries")
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cash_entries_category_id ON cash_entries(category_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cash_user_date ON cash_entries(user_id, date)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cash_user_type_date ON cash_entries(user_id, entry_type, date)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cash_user_status ON cash_entries(user_id, status)"))
         # --- ADDED START: company detail columns ---
         uc_cols = [c["name"] for c in insp.get_columns("user_companies")]
         with engine.begin() as conn:
