@@ -5671,22 +5671,31 @@ function KasseUploadView({onDone,onCancel}){
   const [res,setRes]=React.useState(null);
   const [ed,setEd]=React.useState(null);
   const [busy,setBusy]=React.useState(false);
+  const [errMsg,setErrMsg]=React.useState("");
   const lang=getLang();
   const t3=(de,tr,en)=>lang==="tr"?tr:(lang==="en"?en:de);
   const eur=(n)=>((n||0).toLocaleString(lang==="en"?"en-US":"de-DE",{minimumFractionDigits:2,maximumFractionDigits:2}))+" €";
   const fileRef=React.useRef(null);
   const lights={auto:{c:"#10b981",t:t3("Bereit","Hazır","Ready")},review:{c:"#f59e0b",t:t3("Bitte prüfen","Lütfen kontrol et","Please review")},manual:{c:"#ef4444",t:t3("Achtung","Dikkat","Needs attention")}};
   async function handleFile(e){
-    const f=e.target.files&&e.target.files[0]; if(!f)return;
-    setPhase("processing");
+    const f=e.target.files&&e.target.files[0];
+    if(f&&e.target)e.target.value="";  // allow re-selecting the same file after retry
+    if(!f)return;
+    if(f.size>10*1024*1024){ setErrMsg(t3("Datei zu groß (max. 10 MB). Bitte näher/kleiner fotografieren.","Dosya çok büyük (maks. 10 MB). Daha yakın/küçük çek.","File too large (max 10 MB).")); setPhase("error"); return; }
+    setErrMsg(""); setPhase("processing");
     try{
       const fd=new FormData(); fd.append("file",f); fd.append("doc_kind","auto");
       const r=await fetch(API+"/kasse/upload",{method:"POST",headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")},body:fd});
-      if(!r.ok)throw new Error("upload");
+      if(!r.ok){
+        if(r.status===413)setErrMsg(t3("Datei zu groß (max. 10 MB).","Dosya çok büyük (maks. 10 MB).","File too large (max 10 MB)."));
+        else if(r.status===401)setErrMsg(t3("Sitzung abgelaufen — bitte neu anmelden.","Oturum doldu — tekrar giriş yap.","Session expired — please log in again."));
+        else setErrMsg(t3("Hochladen fehlgeschlagen. Bitte erneut versuchen.","Yükleme başarısız. Tekrar dene.","Upload failed. Please try again."));
+        setPhase("error"); return;
+      }
       const data=await r.json(); const en=data.entry||{};
       setRes(data); setEd({description:en.description||"",gross:String(en.gross_amount||0),entry_type:en.entry_type||"expense"});
       setPhase("preview");
-    }catch(err){ setPhase("error"); }
+    }catch(err){ setErrMsg(t3("Keine Verbindung. Bitte Internet prüfen.","Bağlantı yok. İnterneti kontrol et.","No connection. Check your internet.")); setPhase("error"); }
   }
   async function confirm(){
     if(!res||busy)return; setBusy(true);
@@ -5721,8 +5730,11 @@ function KasseUploadView({onDone,onCancel}){
     <div style={{fontSize:13,color:"var(--text-muted)",marginTop:8}}>{t3("Kann ein paar Sekunden dauern.","Birkaç saniye sürebilir.","May take a few seconds.")}</div>
   </div>);
   if(phase==="error")return (<div style={{...wrap,textAlign:"center"}}>
-    <div style={{color:"#ef4444",fontWeight:700,marginBottom:12}}>{t3("Hochladen fehlgeschlagen","Yükleme başarısız","Upload failed")}</div>
-    <button onClick={()=>setPhase("pick")} style={{padding:"12px 20px",background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,cursor:"pointer"}}>{t3("Erneut versuchen","Tekrar dene","Try again")}</button>
+    <div style={{fontSize:28,marginBottom:8}}>⚠️</div>
+    <div style={{color:"#ef4444",fontWeight:700,marginBottom:8}}>{errMsg||t3("Hochladen fehlgeschlagen","Yükleme başarısız","Upload failed")}</div>
+    <div style={{fontSize:12,color:"var(--text-muted)",marginBottom:16}}>{t3("Es wurde nichts gespeichert.","Hiçbir şey kaydedilmedi.","Nothing was saved.")}</div>
+    <button onClick={()=>{setErrMsg("");setPhase("pick");}} style={{padding:"12px 20px",fontWeight:700,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,cursor:"pointer"}}>{t3("Erneut versuchen","Tekrar dene","Try again")}</button>
+    <button onClick={()=>onCancel&&onCancel()} style={{marginLeft:10,padding:"12px 20px",background:"transparent",color:"var(--text-muted)",border:"1px solid var(--border)",borderRadius:10,cursor:"pointer"}}>{t3("Abbrechen","Vazgeç","Cancel")}</button>
   </div>);
   // preview — editable review (W3)
   const e=(res&&res.entry)||{};
