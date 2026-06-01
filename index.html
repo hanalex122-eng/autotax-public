@@ -699,6 +699,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     {id:"vault",icon:I.invoice,label:_t("vault")},
     {id:"steuer_uebersicht",icon:I.tax,label:getLang()==="de"?"Steuer-Übersicht":"Tax Overview"},
     {id:"declaration",icon:I.invoice,label:getLang()==="de"?"Steuererklärung 2025":getLang()==="tr"?"Vergi Beyannamesi 2025":"Tax Return 2025",badge:"BETA"},
+    ...(F.kasse_v2===true?[{id:"kasse_v2",icon:I.upload,label:getLang()==="de"?"Kasse":getLang()==="tr"?"Kasa":"Cash",badge:"NEU"}]:[]),
     // Kassensystem — sidebar'dan gizlendi (user 2026-05-31: MVP yetersiz,
     // site+programda göstermek acemilik). View kayıtlı kalıyor (admin /app#kasse
     // ile erişebilir), Phase 2'de Pos Parser v2 production-ready olunca açılacak.
@@ -5613,6 +5614,50 @@ function DeclarationView(){
   </div>);
 }
 
+// Kasa MVP (Sprint 3 W1) — profit-first dashboard, camera-first empty state.
+// Renders only when window.FEATURES.kasse_v2 === true (gated in views map + sidebar).
+function KasseDashboardView(){
+  const [d,setD]=React.useState(null);
+  const [loading,setLoading]=React.useState(true);
+  const [err,setErr]=React.useState(false);
+  const [soon,setSoon]=React.useState(false);
+  const lang=getLang();
+  const t3=(de,tr,en)=>lang==="tr"?tr:(lang==="en"?en:de);
+  const eur=(n)=>((n||0).toLocaleString(lang==="en"?"en-US":"de-DE",{minimumFractionDigits:2,maximumFractionDigits:2}))+" €";
+  React.useEffect(()=>{
+    let alive=true;
+    api("/kasse/dashboard").then(r=>{if(alive){setD(r);setLoading(false);}}).catch(()=>{if(alive){setErr(true);setLoading(false);}});
+    return ()=>{alive=false;};
+  },[]);
+  if(loading)return <div style={{padding:24,color:"var(--text-muted)"}}>{t3("Lädt…","Yükleniyor…","Loading…")}</div>;
+  if(err||!d)return <div style={{padding:24,color:"var(--text-muted)"}}>{t3("Konnte nicht geladen werden.","Yüklenemedi.","Could not load.")}</div>;
+  const today=d.today||{income:0,expense:0};
+  const month=d.month||{income:0,expense:0,profit:0};
+  const todayProfit=(today.income||0)-(today.expense||0);
+  const empty=((today.income||0)+(today.expense||0)+(month.income||0)+(month.expense||0))===0;
+  const card=(label,value,opts)=>(<div style={{flex:1,minWidth:130,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"14px 16px",...(opts||{})}}>
+    <div style={{fontSize:13,color:"var(--text-muted)",marginBottom:6}}>{label}</div>
+    <div style={{fontSize:(opts&&opts.hero)?30:20,fontWeight:700,color:(opts&&opts.color)||"var(--text)"}}>{value}</div>
+  </div>);
+  if(empty)return (<div style={{maxWidth:520,margin:"0 auto",padding:"32px 20px",textAlign:"center"}}>
+    <div style={{fontSize:22,fontWeight:700,marginBottom:8}}>{t3("Willkommen! 👋","Hoş geldin! 👋","Welcome! 👋")}</div>
+    <div style={{color:"var(--text-muted)",marginBottom:24}}>{t3("Noch keine Einträge.","Henüz kayıt yok.","No entries yet.")}</div>
+    <button onClick={()=>setSoon(true)} style={{fontSize:18,fontWeight:700,padding:"18px 24px",width:"100%",maxWidth:320,background:"linear-gradient(135deg,#10b981,#059669)",color:"#fff",border:"none",borderRadius:14,cursor:"pointer"}}>📷 {t3("Ersten Beleg fotografieren","İlk fişini çek","Photograph first receipt")}</button>
+    <div style={{fontSize:12,color:"var(--text-muted)",marginTop:12}}>{t3("Foto → Prüfen → Fertig in ~15 Sekunden","Foto → Kontrol → Bitti ~15 saniye","Photo → Review → Done in ~15s")}</div>
+    {soon&&<div style={{fontSize:13,color:"var(--text-muted)",marginTop:16}}>{t3("Foto-Upload kommt im nächsten Schritt.","Foto yükleme bir sonraki adımda.","Photo upload comes in the next step.")}</div>}
+  </div>);
+  return (<div style={{padding:"16px 12px",maxWidth:760,margin:"0 auto"}}>
+    <div style={{fontSize:18,fontWeight:700,marginBottom:12}}>{t3("Kasse — Übersicht","Kasa — Genel","Kasse — Overview")}</div>
+    {card(t3("Heutiger Gewinn","Bugünkü Kâr","Today's Profit"),eur(todayProfit),{hero:true,color:todayProfit>=0?"#10b981":"#ef4444",marginBottom:12})}
+    <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+      {card(t3("Einnahmen heute","Bugün gelir","Income today"),eur(today.income))}
+      {card(t3("Ausgaben heute","Bugün gider","Expenses today"),eur(today.expense))}
+    </div>
+    {card(t3("Monatsgewinn","Aylık Kâr","Monthly Profit"),eur(month.profit),{color:(month.profit||0)>=0?"#10b981":"#ef4444",marginBottom:12})}
+    <div style={{fontSize:13,color:"var(--text-muted)"}}>▸ {t3("Steuer & USt (Details)","Vergi & KDV (Detay)","Tax & VAT (details)")}</div>
+  </div>);
+}
+
 function App(){
   const[authed,setAuthed]=useState(!!localStorage.getItem("atx_token"));
   // Acting mode'a girince hangi sayfaya gidilecegi sessionStorage'da tutulur
@@ -5682,7 +5727,7 @@ function App(){
   }}/><CookieConsent/></Fragment>;
   // SendInvoicesView: InvoicesView'in sendOnly=true ile kopyasi — sadece email gonder buton'u
   const SendInvoicesView=(props)=><InvoicesView {...props} sendOnly={true}/>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView};
+  const views={dashboard:DashboardView,invoices:InvoicesView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView,kasse_v2:KasseDashboardView};
   const _t=typeof t==="function"?t:k=>k;
   const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),send_invoices:(getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.
