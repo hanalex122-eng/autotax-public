@@ -5701,13 +5701,15 @@ function KasseUploadView({onDone,onCancel}){
     }catch(err){ setErrMsg(t3("Keine Verbindung. Bitte Internet prüfen.","Bağlantı yok. İnterneti kontrol et.","No connection. Check your internet.")); setPhase("error"); }
   }
   async function handleBatch(e){
-    const fs=e.target.files; if(e.target)e.target.value="";
-    if(!fs||!fs.length)return;
+    const inp=e.target;
+    const fs=(inp&&inp.files)?Array.from(inp.files):[];  // snapshot File objects BEFORE clearing
+    if(!fs.length){return;}
     setErrMsg(""); setBatchMsg(t3("Wird hochgeladen…","Yükleniyor…","Uploading…")); setPhase("batch");
     try{
       const fd=new FormData();
       for(let i=0;i<fs.length;i++)fd.append("files",fs[i]);
       fd.append("doc_kind","auto");
+      if(inp)inp.value="";  // allow re-selecting the same files later
       const r=await fetch(API+"/kasse/upload-batch",{method:"POST",headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")},body:fd});
       if(!r.ok){ setErrMsg(r.status===401?t3("Sitzung abgelaufen — bitte neu anmelden.","Oturum doldu — tekrar giriş yap.","Session expired."):t3("Hochladen fehlgeschlagen.","Yükleme başarısız.","Upload failed.")); setPhase("error"); return; }
       const data=await r.json(); const jobId=data.job_id; const total=data.queued||fs.length;
