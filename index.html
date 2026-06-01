@@ -16,6 +16,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script src="/lang.js"></script>
 <style>
@@ -5677,9 +5678,12 @@ function KasseUploadView({onDone,onCancel}){
   const eur=(n)=>((n||0).toLocaleString(lang==="en"?"en-US":"de-DE",{minimumFractionDigits:2,maximumFractionDigits:2}))+" €";
   const fileRef=React.useRef(null);
   const batchRef=React.useRef(null);
-  const [batchMsg,setBatchMsg]=React.useState("");
+  const batchEndRef=React.useRef(null);
+  const [batchItems,setBatchItems]=React.useState([]);
+  const [batchDone,setBatchDone]=React.useState(false);
   const fmtDate=(s)=>{if(!s)return "—";const p=String(s).slice(0,10).split("-");return p.length===3?p[2]+"."+p[1]+"."+p[0]:s;};
   const lights={auto:{c:"#10b981",t:t3("Bereit","Hazır","Ready")},review:{c:"#f59e0b",t:t3("Bitte prüfen","Lütfen kontrol et","Please review")},manual:{c:"#ef4444",t:t3("Achtung","Dikkat","Needs attention")}};
+  React.useEffect(()=>{ if(phase==="batch"&&batchEndRef.current){try{batchEndRef.current.scrollIntoView({behavior:"smooth",block:"end"});}catch(e){}} },[batchItems,phase]);
   async function handleFile(e){
     const f=e.target.files&&e.target.files[0];
     if(f&&e.target)e.target.value="";  // allow re-selecting the same file after retry
@@ -5702,31 +5706,45 @@ function KasseUploadView({onDone,onCancel}){
   }
   async function handleBatch(e){
     const inp=e.target;
-    const fs=(inp&&inp.files)?Array.from(inp.files):[];  // snapshot File objects BEFORE clearing
-    if(!fs.length){return;}
-    setErrMsg(""); setBatchMsg(t3("Wird hochgeladen…","Yükleniyor…","Uploading…")); setPhase("batch");
-    try{
-      const fd=new FormData();
-      for(let i=0;i<fs.length;i++)fd.append("files",fs[i]);
-      fd.append("doc_kind","auto");
-      if(inp)inp.value="";  // allow re-selecting the same files later
-      const r=await fetch(API+"/kasse/upload-batch",{method:"POST",headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")},body:fd});
-      if(!r.ok){ setErrMsg(r.status===401?t3("Sitzung abgelaufen — bitte neu anmelden.","Oturum doldu — tekrar giriş yap.","Session expired."):t3("Hochladen fehlgeschlagen.","Yükleme başarısız.","Upload failed.")); setPhase("error"); return; }
-      const data=await r.json(); const jobId=data.job_id; const total=data.queued||fs.length;
-      setBatchMsg(total+" "+t3("Belege werden verarbeitet…","fiş işleniyor…","receipts processing…"));
-      let tries=0;
-      const poll=async()=>{
-        tries++;
+    let files=(inp&&inp.files)?Array.from(inp.files):[];  // snapshot BEFORE clearing
+    if(inp)inp.value="";
+    if(!files.length)return;
+    // Expand any .zip in the browser (JSZip) so EACH receipt shows live progress
+    const expanded=[];
+    for(const f of files){
+      const isZip=/\.zip$/i.test(f.name||"")||/zip/i.test(f.type||"");
+      if(isZip&&window.JSZip){
         try{
-          const j=await api("/kasse/jobs/"+jobId);
-          if(j.status==="success"){ onDone&&onDone(); return; }
-          if(j.status==="failed"){ setErrMsg(t3("Verarbeitung fehlgeschlagen.","İşleme başarısız.","Processing failed.")); setPhase("error"); return; }
-        }catch(x){}
-        if(tries>90){ onDone&&onDone(); return; }
-        setTimeout(poll,2000);
-      };
-      poll();
-    }catch(err){ setErrMsg(t3("Keine Verbindung.","Bağlantı yok.","No connection.")); setPhase("error"); }
+          const zip=await window.JSZip.loadAsync(f);
+          const names=Object.keys(zip.files).filter(n=>!zip.files[n].dir&&/\.(jpe?g|png|webp|gif|pdf)$/i.test(n)&&!/^__macosx/i.test(n));
+          for(const n of names){
+            const blob=await zip.files[n].async("blob");
+            const ct=/\.pdf$/i.test(n)?"application/pdf":"image/jpeg";
+            expanded.push(new File([blob],(n.split("/").pop()||"beleg"),{type:ct}));
+          }
+        }catch(x){ /* bad/encrypted zip — skip */ }
+      }else{ expanded.push(f); }
+    }
+    if(!expanded.length){ setErrMsg(t3("Keine gültigen Dateien (Bilder/PDF/ZIP).","Geçerli dosya yok (resim/PDF/ZIP).","No valid files (images/PDF/ZIP).")); setPhase("error"); return; }
+    setBatchItems(expanded.map(f=>({name:f.name||"Beleg",status:"pending",label:""})));
+    setBatchDone(false); setErrMsg(""); setPhase("batch");
+    for(let i=0;i<expanded.length;i++){
+      setBatchItems(prev=>prev.map((it,idx)=>idx===i?{...it,status:"processing"}:it));
+      try{
+        const fd=new FormData(); fd.append("file",expanded[i]); fd.append("doc_kind","auto");
+        const r=await fetch(API+"/kasse/upload",{method:"POST",headers:{"Authorization":"Bearer "+localStorage.getItem("atx_token")},body:fd});
+        if(r.ok){
+          const d=await r.json(); const en=d.entry||{};
+          const lbl=(en.description||"—")+" · "+eur(en.gross_amount||0);
+          setBatchItems(prev=>prev.map((it,idx)=>idx===i?{...it,status:"done",label:lbl}:it));
+        }else{
+          setBatchItems(prev=>prev.map((it,idx)=>idx===i?{...it,status:"error",label:(r.status===401?t3("Sitzung abgelaufen","Oturum doldu","Session expired"):t3("Fehler","Hata","Error"))}:it));
+        }
+      }catch(x){
+        setBatchItems(prev=>prev.map((it,idx)=>idx===i?{...it,status:"error",label:t3("Keine Verbindung","Bağlantı yok","No connection")}:it));
+      }
+    }
+    setBatchDone(true);
   }
   async function confirm(){
     if(!res||busy)return; setBusy(true);
@@ -5762,11 +5780,28 @@ function KasseUploadView({onDone,onCancel}){
     <div style={{fontWeight:700}}>{t3("Wird analysiert…","Analiz ediliyor…","Analyzing…")}</div>
     <div style={{fontSize:13,color:"var(--text-muted)",marginTop:8}}>{t3("Kann ein paar Sekunden dauern.","Birkaç saniye sürebilir.","May take a few seconds.")}</div>
   </div>);
-  if(phase==="batch")return (<div style={{...wrap,textAlign:"center",paddingTop:60}}>
-    <div style={{fontSize:32,marginBottom:12}}>⟳</div>
-    <div style={{fontWeight:700}}>{batchMsg||t3("Wird verarbeitet…","İşleniyor…","Processing…")}</div>
-    <div style={{fontSize:13,color:"var(--text-muted)",marginTop:8}}>{t3("Mehrere Belege — bitte warten.","Birden çok fiş — lütfen bekle.","Multiple receipts — please wait.")}</div>
-  </div>);
+  if(phase==="batch"){
+    const _done=batchItems.filter(x=>x.status==="done").length;
+    const _err=batchItems.filter(x=>x.status==="error").length;
+    return (<div style={wrap}>
+      <div style={{fontSize:18,fontWeight:700,marginBottom:4}}>{t3("Belege werden erfasst","Fişler işleniyor","Processing receipts")}</div>
+      <div style={{fontSize:13,color:"var(--text-muted)",marginBottom:12}}>{_done}/{batchItems.length} {t3("fertig","tamam","done")}{_err?(" · "+_err+" "+t3("Fehler","hata","errors")):""}</div>
+      <div style={{maxHeight:380,overflowY:"auto",border:"1px solid var(--border)",borderRadius:10,padding:"4px 4px"}}>
+        {batchItems.map((it,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 8px",borderBottom:i<batchItems.length-1?"1px solid var(--border)":"none"}}>
+            <span style={{fontSize:16,width:22,textAlign:"center"}}>{it.status==="done"?"✅":it.status==="processing"?"⏳":it.status==="error"?"⚠️":"•"}</span>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{fontSize:13,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{it.name}</div>
+              <div style={{fontSize:12,color:it.status==="error"?"#ef4444":"var(--text-muted)"}}>{it.status==="processing"?t3("wird gelesen…","okunuyor…","reading…"):(it.status==="pending"?t3("wartet","sırada","waiting"):it.label)}</div>
+            </div>
+          </div>
+        ))}
+        <div ref={batchEndRef}></div>
+      </div>
+      {batchDone?<button onClick={()=>onDone&&onDone()} style={{marginTop:16,padding:"14px",width:"100%",fontWeight:700,background:"#10b981",color:"#fff",border:"none",borderRadius:12,cursor:"pointer"}}>✓ {t3("Fertig — zu den Einträgen","Bitti — kayıtlara git","Done — to entries")}</button>:
+        <div style={{marginTop:14,fontSize:13,color:"var(--text-muted)",textAlign:"center"}}>⟳ {t3("Bitte warten…","Lütfen bekle…","Please wait…")}</div>}
+    </div>);
+  }
   if(phase==="error")return (<div style={{...wrap,textAlign:"center"}}>
     <div style={{fontSize:28,marginBottom:8}}>⚠️</div>
     <div style={{color:"#ef4444",fontWeight:700,marginBottom:8}}>{errMsg||t3("Hochladen fehlgeschlagen","Yükleme başarısız","Upload failed")}</div>
