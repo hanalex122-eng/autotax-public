@@ -47,6 +47,11 @@ class TestRouting(unittest.TestCase):
         self.assertEqual((ke.band(95), ke.band(80), ke.band(50)), ("auto", "review", "manual"))
         self.assertNotIn("haiku", (ke.DEFAULT_MODEL + ke.FALLBACK_MODEL).lower())
 
+    def test_classify_doc_kind(self):
+        self.assertEqual(ke.classify_doc_kind("Tagesabschluss Z-Bon Nr 42 Gesamtumsatz 980,00 Bediener Ali"), "pos")
+        self.assertEqual(ke.classify_doc_kind("LIDL GmbH Summe 23,80 EUR MwSt 7%"), "expense")
+        self.assertEqual(ke.classify_doc_kind(""), "expense")  # conservative default
+
     def test_needs_fallback(self):
         self.assertTrue(ke.needs_fallback("pos", None))
         self.assertTrue(ke.needs_fallback("expense", {"vat_amount": 5}))  # missing total+date

@@ -21,6 +21,28 @@ FALLBACK_MODEL = (os.getenv("KASSE_MODEL_FALLBACK") or "claude-opus-4-8").strip(
 CONF_THRESHOLD = 70
 
 
+# POS / daily-closing (Z-Bon, Tagesabschluss) signal words → income document.
+# If none present we default to "expense" (the common single-receipt case).
+_POS_SIGNALS = (
+    "z-bon", "z bon", "z-abschluss", "zabschluss", "z-nr", "tagesabschluss",
+    "tagesbericht", "tagesumsatz", "tagessumme", "kassenbericht", "kassenschnitt",
+    "x-bon", "bediener", "kassier", "gesamtumsatz", "umsatz gesamt", "tse-signatur",
+    "trinkgeld", "bar gesamt", "ec gesamt", "kartenzahlung gesamt",
+)
+
+
+def classify_doc_kind(ocr_text: str) -> str:
+    """Heuristic doc-kind detection so the USER is never asked 'Beleg or Z-Report?'.
+    Returns 'pos' for a daily-closing/Z-Bon (income), else 'expense'. Conservative:
+    needs an explicit POS signal, otherwise defaults to expense.
+    """
+    t = (ocr_text or "").lower()
+    if not t:
+        return "expense"
+    hits = sum(1 for kw in _POS_SIGNALS if kw in t)
+    return "pos" if hits >= 1 else "expense"
+
+
 def route_model(attempt: int) -> str:
     """attempt 1 → Sonnet (default); attempt 2 → Opus 4.8 (fallback). No Haiku."""
     return DEFAULT_MODEL if attempt <= 1 else FALLBACK_MODEL

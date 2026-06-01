@@ -235,30 +235,34 @@ def _store_document(db, uid: int, content: bytes, content_type: str, doc_kind: s
 
 
 async def _extract_for(content: bytes, content_type: str, doc_kind: str, business_type: str) -> dict:
-    if doc_kind == "pos":
-        return await kasse_extract.extract_pos(content, business_type=business_type, content_type=content_type)
-    # expense: OCR text for images, raw bytes for PDF
-    pdf_bytes = content if (content_type or "").lower() == "application/pdf" else None
+    """doc_kind 'auto' (default) → OCR once, then heuristically classify
+    pos vs expense (user is never asked). 'expense'/'pos' force the type."""
+    is_pdf = (content_type or "").lower() == "application/pdf"
+    pdf_bytes = content if is_pdf else None
     ocr_text = ""
-    if pdf_bytes is None:
+    if not is_pdf:
         try:
             from autotax.ocr import extract_image_text
-            ocr_text = await extract_image_text(content, "expense") or ""
+            ocr_text = await extract_image_text(content, "kasse") or ""
         except Exception:
             ocr_text = ""
+    if doc_kind not in ("expense", "pos"):  # 'auto' or unknown → detect
+        doc_kind = kasse_extract.classify_doc_kind(ocr_text)
+    if doc_kind == "pos":
+        return await kasse_extract.extract_pos(content, business_type=business_type, content_type=content_type)
     return await kasse_extract.extract_expense(pdf_bytes=pdf_bytes, ocr_text=ocr_text)
 
 
 @router.post("/upload", summary="Upload one document → extract → reviewable Kasa entry (sync)")
 async def kasse_upload(
     file: UploadFile = File(...),
-    doc_kind: str = Form("expense"),
+    doc_kind: str = Form("auto"),
     business_type: str = Form(""),
     user: dict = Depends(get_current_user),
 ) -> dict:
     _require_flag()
-    if doc_kind not in ("expense", "pos"):
-        raise HTTPException(status_code=422, detail="doc_kind must be expense|pos")
+    if doc_kind not in ("expense", "pos", "auto"):
+        raise HTTPException(status_code=422, detail="doc_kind must be expense|pos|auto")
     content = await file.read()
     if not content:
         raise HTTPException(status_code=422, detail="empty file")
@@ -393,13 +397,13 @@ async def _process_batch(uid: int, items: list[tuple], job_id: int) -> None:
 @router.post("/upload-batch", summary="Upload multiple documents → background processing", status_code=202)
 async def kasse_upload_batch(
     files: list[UploadFile] = File(...),
-    doc_kind: str = Form("expense"),
+    doc_kind: str = Form("auto"),
     business_type: str = Form(""),
     user: dict = Depends(get_current_user),
 ) -> dict:
     _require_flag()
-    if doc_kind not in ("expense", "pos"):
-        raise HTTPException(status_code=422, detail="doc_kind must be expense|pos")
+    if doc_kind not in ("expense", "pos", "auto"):
+        raise HTTPException(status_code=422, detail="doc_kind must be expense|pos|auto")
     uid = _uid(user)
     items = []
     for f in files:
