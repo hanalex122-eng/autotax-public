@@ -212,6 +212,8 @@ def _entry_preview(entry, extract: dict) -> dict:
         "id": entry.id, "entry_type": entry.entry_type, "description": entry.description,
         "gross_amount": entry.gross_amount, "vat_amount": entry.vat_amount,
         "net_amount": entry.net_amount, "date": entry.date.isoformat() if entry.date else None,
+        "vat_rate": getattr(entry, "vat_rate", None), "category": getattr(entry, "category", None),
+        "vendor": getattr(entry, "vendor", None),
         "status": entry.status, "source": entry.source,
         "confidence": extract.get("confidence"), "band": extract.get("band"),
         "model": extract.get("model"), "fallback_used": extract.get("fallback_used"),
@@ -250,7 +252,8 @@ async def _extract_for(content: bytes, content_type: str, doc_kind: str, busines
         doc_kind = kasse_extract.classify_doc_kind(ocr_text)
     if doc_kind == "pos":
         return await kasse_extract.extract_pos(content, business_type=business_type, content_type=content_type)
-    return await kasse_extract.extract_expense(pdf_bytes=pdf_bytes, ocr_text=ocr_text)
+    return await kasse_extract.extract_expense(pdf_bytes=pdf_bytes, ocr_text=ocr_text,
+                                               image_bytes=(None if is_pdf else content), content_type=content_type)
 
 
 @router.post("/upload", summary="Upload one document → extract → reviewable Kasa entry (sync)")
@@ -407,12 +410,40 @@ async def kasse_upload_batch(
         raise HTTPException(status_code=422, detail="doc_kind must be expense|pos|auto")
     uid = _uid(user)
     items = []
+    _ALLOWED_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf")
+    _MAX_BATCH = 30
     for f in files:
+        if len(items) >= _MAX_BATCH:
+            break
         content = await f.read()
-        if content and len(content) <= _MAX_UPLOAD:
+        if not content:
+            continue
+        fname = (f.filename or "").lower()
+        is_zip = fname.endswith(".zip") or (f.content_type or "").lower() in ("application/zip", "application/x-zip-compressed", "multipart/x-zip")
+        if is_zip:
+            import zipfile as _zip, io as _io
+            try:
+                with _zip.ZipFile(_io.BytesIO(content)) as zf:
+                    for name in zf.namelist():
+                        if len(items) >= _MAX_BATCH:
+                            break
+                        low = name.lower()
+                        if name.endswith("/") or low.startswith("__macosx") or not low.endswith(_ALLOWED_EXT):
+                            continue
+                        try:
+                            data = zf.read(name)
+                        except Exception:
+                            continue
+                        if not data or len(data) > _MAX_UPLOAD:
+                            continue
+                        ct = "application/pdf" if low.endswith(".pdf") else "image/jpeg"
+                        items.append((data, ct, doc_kind, business_type))
+            except _zip.BadZipFile:
+                raise HTTPException(status_code=422, detail="invalid zip file")
+        elif len(content) <= _MAX_UPLOAD:
             items.append((content, f.content_type or "image/jpeg", doc_kind, business_type))
     if not items:
-        raise HTTPException(status_code=422, detail="no valid files")
+        raise HTTPException(status_code=422, detail="no valid files (zip must contain images/PDF)")
     db = SessionLocal()
     try:
         job = BackgroundJob(job_type="kasse_ocr", user_id=uid, status="running",
@@ -583,10 +614,15 @@ def kasse_document_view(document_id: int, user: dict = Depends(get_current_user)
         doc = db.query(KasseDocument).filter(KasseDocument.id == document_id, KasseDocument.user_id == _uid(user)).first()
         if not doc or not doc.r2_key:
             raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
-        url = kasse_r2.presign(doc.r2_key)
-        if url:
-            return RedirectResponse(url)
-        data = kasse_r2.get_image(doc.r2_key)
+        # Stream bytes THROUGH the app (not a presigned R2 redirect): the SPA fetches
+        # this with a Bearer header, and a cross-origin redirect to R2 would fail CORS.
+        # Receipts are small, so proxying is fine.
+        try:
+            data = kasse_r2.get_image(doc.r2_key)
+        except Exception:
+            raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+        if not data:
+            raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
         return Response(content=data, media_type=doc.content_type or "application/octet-stream",
                         headers={"Content-Disposition": f'inline; filename="beleg_{doc.id}"'})
     finally:

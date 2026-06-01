@@ -134,11 +134,14 @@ def _wrap(kind: str, result: Optional[dict], model: str, fallback_used: bool) ->
     }
 
 
-async def extract_expense(pdf_bytes: Optional[bytes] = None, ocr_text: str = "", filename: str = "expense") -> dict:
-    r1 = await ai_ocr.ai_extract_invoice(pdf_bytes=pdf_bytes, ocr_text=ocr_text, filename=filename, model=route_model(1))
+async def extract_expense(pdf_bytes: Optional[bytes] = None, ocr_text: str = "", filename: str = "expense",
+                          image_bytes: Optional[bytes] = None, content_type: Optional[str] = None) -> dict:
+    r1 = await ai_ocr.ai_extract_invoice(pdf_bytes=pdf_bytes, ocr_text=ocr_text, filename=filename, model=route_model(1),
+                                         image_bytes=image_bytes, content_type=content_type)
     if not needs_fallback("expense", r1):
         return _wrap("expense", r1, route_model(1), False)
-    r2 = await ai_ocr.ai_extract_invoice(pdf_bytes=pdf_bytes, ocr_text=ocr_text, filename=filename, model=route_model(2))
+    r2 = await ai_ocr.ai_extract_invoice(pdf_bytes=pdf_bytes, ocr_text=ocr_text, filename=filename, model=route_model(2),
+                                         image_bytes=image_bytes, content_type=content_type)
     # Keep the better of the two (fallback unless it failed and first was usable)
     chosen = r2 if r2 is not None else r1
     return _wrap("expense", chosen, route_model(2 if r2 is not None else 1), r2 is not None)

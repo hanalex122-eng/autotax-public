@@ -82,11 +82,43 @@ def _strip_json_fences(text: str) -> str:
     return text.strip()
 
 
+def _prep_image_for_vision(image_bytes: bytes, content_type: Optional[str]) -> tuple:
+    """Resize/normalize a receipt PHOTO for Claude vision — keep COLOR, cap to
+    ~2200 px / <4.5 MB. (Grayscale OCR-preprocessing would HURT vision, so this
+    is a light color resize only.) On any failure, return the original bytes."""
+    try:
+        import io as _io
+        from PIL import Image, ImageOps
+        img = Image.open(_io.BytesIO(image_bytes))
+        try:
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        longest = max(img.size)
+        if longest > 2200:
+            sc = 2200.0 / longest
+            img = img.resize((int(img.width * sc), int(img.height * sc)), Image.LANCZOS)
+        buf = _io.BytesIO(); img.save(buf, format="JPEG", quality=85)
+        out = buf.getvalue()
+        if len(out) > 4_500_000:
+            img.thumbnail((1600, 1600), Image.LANCZOS)
+            buf = _io.BytesIO(); img.save(buf, format="JPEG", quality=80)
+            out = buf.getvalue()
+        return out, "image/jpeg"
+    except Exception as e:
+        logger.warning("AI OCR: image prep failed (%s), sending original", e)
+        return image_bytes, (content_type or "image/jpeg")
+
+
 async def ai_extract_invoice(
     pdf_bytes: Optional[bytes] = None,
     ocr_text: str = "",
     filename: str = "",
     model: Optional[str] = None,
+    image_bytes: Optional[bytes] = None,
+    content_type: Optional[str] = None,
 ) -> Optional[dict]:
     """Anthropic API'sine PDF + OCR text gondererek invoice data extract et.
 
@@ -138,6 +170,22 @@ async def ai_extract_invoice(
             logger.warning("AI OCR: PDF attach failed: %s", e)
     elif pdf_bytes:
         logger.info("AI OCR: PDF too large (%d bytes), using OCR text only", len(pdf_bytes))
+    elif image_bytes:
+        # Receipt PHOTO — send the pixels to Claude vision. Local OCR is weak on
+        # receipts (logo/vendor + date area), so the image is primary and the
+        # OCR text below is only a supplement.
+        try:
+            _img, _mt = _prep_image_for_vision(image_bytes, content_type)
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": _mt,
+                    "data": base64.b64encode(_img).decode(),
+                },
+            })
+        except Exception as e:
+            logger.warning("AI OCR: image attach failed: %s", e)
 
     content.append({
         "type": "text",
