@@ -68,6 +68,9 @@ def features_js_literal() -> str:
         or os.getenv("CLOUDFLARE_TURNSTILE_SITE_KEY")
         or ""
     ).strip()
+    # Kasa MVP v2 SPA gate — the new "kasse" view renders only when true.
+    # Mirrors the backend FEAT_KASSE_V2 flag (default OFF → view hidden).
+    payload["kasse_v2"] = kasse_v2_enabled()
     return json.dumps(payload, ensure_ascii=False)
 
 
