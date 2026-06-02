@@ -788,10 +788,12 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
   const[reminders,setReminders]=useState({overdue:null,upcoming:null});
   const[steuer,setSteuer]=useState([]);
   const[mahnungQueue,setMahnungQueue]=useState({count:0,items:[]});
+  const[period,setPeriod]=useState("year");      // PHASE 1: today|week|month|quarter|year|custom
+  const[cFrom,setCFrom]=useState("");const[cTo,setCTo]=useState("");
   const load=()=>{
     setLoading(true);
     api("/invoices/dashboard?country=DE").then(setData).catch(()=>{}).finally(()=>setLoading(false));
-    api("/invoices?limit=100").then(d=>{setAllInv(d.items||[]);}).catch(()=>{});
+    api("/invoices?limit=500").then(d=>{setAllInv(d.items||[]);}).catch(()=>{});
     api("/account/me").then(setMe).catch(()=>{});
     Promise.all([
       api("/reminders/overdue").catch(()=>({count:0,total_amount:0,items:[]})),
@@ -850,6 +852,27 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
   const si=(data.monthly_breakdown||[]).map(m=>m.income||0);const se=(data.monthly_breakdown||[]).map(m=>m.expenses||0);
   const readCount=allInv.filter(i=>i.total_amount>0).length;const unreadCount=allInv.filter(i=>!i.total_amount||i.total_amount===0).length;
   const totalPct=allInv.length>0?Math.round((readCount/allInv.length)*100):0;
+  // PHASE 1: client-side period analytics from the invoice list (no backend change; cap 500)
+  const _pad2=n=>String(n).padStart(2,"0");
+  const _isoD=d=>d.getFullYear()+"-"+_pad2(d.getMonth()+1)+"-"+_pad2(d.getDate());
+  const _lang=getLang();
+  const _pl=(de,tr,en)=>_lang==="tr"?tr:(_lang==="en"?en:de);
+  const _eur=n=>"€"+(n||0).toLocaleString(_lang==="en"?"en-US":"de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const _periodRange=()=>{const n=new Date();const to=_isoD(n);let from;
+    if(period==="today")from=to;
+    else if(period==="week"){const d=new Date(n);const dow=(d.getDay()+6)%7;d.setDate(d.getDate()-dow);from=_isoD(d);}
+    else if(period==="month")from=_isoD(new Date(n.getFullYear(),n.getMonth(),1));
+    else if(period==="quarter")from=_isoD(new Date(n.getFullYear(),Math.floor(n.getMonth()/3)*3,1));
+    else if(period==="custom")return [cFrom||"2020-01-01",cTo||to];
+    else from=_isoD(new Date(n.getFullYear(),0,1));
+    return [from,to];};
+  const [_pFrom,_pTo]=_periodRange();
+  const _pInv=allInv.filter(i=>{const d=(i.date||"").slice(0,10);return d&&d>=_pFrom&&d<=_pTo;});
+  const _pIncome=_pInv.filter(i=>i.invoice_type==="income").reduce((s,i)=>s+(i.total_amount||0),0);
+  const _pExpense=_pInv.filter(i=>i.invoice_type!=="income").reduce((s,i)=>s+(i.total_amount||0),0);
+  const _pVatCol=_pInv.filter(i=>i.invoice_type==="income").reduce((s,i)=>s+(i.vat_amount||0),0);
+  const _pVatPaid=_pInv.filter(i=>i.invoice_type!=="income").reduce((s,i)=>s+(i.vat_amount||0),0);
+  const _periods=[["today",_pl("Heute","Bugün","Today")],["week",_pl("Diese Woche","Bu Hafta","This Week")],["month",_pl("Dieser Monat","Bu Ay","This Month")],["quarter",_pl("Dieses Quartal","Bu Çeyrek","This Quarter")],["year",_pl("Dieses Jahr","Bu Yıl","This Year")],["custom",_pl("Benutzerdefiniert","Özel","Custom")]];
   return(<div style={{display:"flex",flexDirection:"column",gap:28}}>
     {me?.is_trial && me.trial_days_left !== null && me.trial_days_left <= 14 && <div onClick={()=>onNav&&onNav("pricing")} style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px",background:me.trial_days_left<=3?"rgba(239,68,68,0.08)":"rgba(168,85,247,0.08)",borderRadius:12,border:`1px solid ${me.trial_days_left<=3?"rgba(239,68,68,0.4)":"rgba(168,85,247,0.4)"}`,flexWrap:"wrap",gap:10,boxShadow:me.trial_days_left<=3?"0 0 12px rgba(239,68,68,0.15)":"0 0 12px rgba(168,85,247,0.15)"}}>
       <div style={{display:"flex",alignItems:"center",gap:14}}>
@@ -1034,11 +1057,24 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
         <div style={{flex:1}}><div style={{fontSize:12,color:theme.textMuted,marginBottom:3,fontWeight:500}}>{_t("total_receipts_count")}</div><div style={{fontSize:26,fontWeight:700,color:theme.blue,fontFamily:mono,lineHeight:1}}>{allInv.length}</div></div>
       </div>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(240px, 1fr))",gap:14}}>
-      <StatCard label={_t("income")} value={"€"+data.total_income?.toLocaleString("de-DE",{minimumFractionDigits:2})} icon={I.trend} color={theme.accent} bgColor={theme.accentSoft} sparkData={si} sub={data.income_count+" "+_t("invoices")}/>
-      <StatCard label={_t("expense")} value={"€"+data.total_expenses?.toLocaleString("de-DE",{minimumFractionDigits:2})} icon={I.down} color={theme.danger} bgColor={theme.dangerSoft} sparkData={se} sub={data.expense_count+" "+_t("invoices")}/>
-      <StatCard label={_t("profit")} value={"€"+data.net_profit?.toLocaleString("de-DE",{minimumFractionDigits:2})} icon={I.dashboard} color={data.net_profit>=0?theme.accent:theme.danger} bgColor={data.net_profit>=0?theme.accentSoft:theme.dangerSoft}/>
-      <StatCard label={_t("tax_estimate")} value={"€"+data.tax_estimate?.toLocaleString("de-DE",{minimumFractionDigits:2})} icon={I.tax} color={theme.purple} bgColor={theme.purpleSoft} sub={data.tax_rate_applied===0?"Tax-free allowance (€11,604)":data.tax_rate_applied+"% "+_t("eff_tax_rate")}/>
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:12}}>
+        <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:0}}>{_pl("Finanzübersicht","Finansal Özet","Financial overview")}</h3>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          {_periods.map(([k,lbl])=><button key={k} onClick={()=>setPeriod(k)} style={period===k?{...css.btn(theme.accent),padding:"7px 12px",fontSize:12,boxShadow:"none"}:{...css.btnOutline,padding:"7px 12px",fontSize:12}}>{lbl}</button>)}
+        </div>
+      </div>
+      {period==="custom"&&<div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
+        <span style={{fontSize:12,color:theme.textDim}}>{_pl("Von","Başl.","From")}</span><input type="date" value={cFrom} max={cTo||_pTo} onChange={e=>setCFrom(e.target.value)} style={{...css.input,width:150,cursor:"pointer"}}/>
+        <span style={{fontSize:12,color:theme.textDim}}>{_pl("Bis","Bit.","To")}</span><input type="date" value={cTo} min={cFrom||undefined} max={_pTo} onChange={e=>setCTo(e.target.value)} style={{...css.input,width:150,cursor:"pointer"}}/>
+      </div>}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))",gap:14}}>
+        <StatCard label={_pl("Einnahmen","Gelir","Income")} value={_eur(_pIncome)} icon={I.trend} color={theme.accent} bgColor={theme.accentSoft}/>
+        <StatCard label={_pl("Ausgaben","Gider","Expenses")} value={_eur(_pExpense)} icon={I.down} color={theme.danger} bgColor={theme.dangerSoft}/>
+        <StatCard label={_pl("Gewinn","Kâr","Profit")} value={_eur(_pIncome-_pExpense)} icon={I.dashboard} color={(_pIncome-_pExpense)>=0?theme.accent:theme.danger} bgColor={(_pIncome-_pExpense)>=0?theme.accentSoft:theme.dangerSoft}/>
+        <StatCard label={_pl("MwSt-Saldo","KDV Bakiye","VAT balance")} value={_eur(_pVatCol-_pVatPaid)} icon={I.tax} color={theme.blue} bgColor={theme.blueSoft}/>
+        <StatCard label={_pl("Belege","Belge","Receipts")} value={String(_pInv.length)} icon={I.invoice} color={theme.purple} bgColor={theme.purpleSoft}/>
+      </div>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"5fr 3fr",gap:14}}>
       <div style={css.card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:0}}>{_t("monthly_overview")}</h3><span style={{fontSize:11,color:theme.textDim,fontFamily:mono}}>{new Date().getFullYear()}</span></div>{data.monthly_breakdown?.length>0?<BarChart data={data.monthly_breakdown}/>:<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40,color:theme.textDim}}><Icon d={I.trend} size={32} color={theme.textDim}/><p style={{fontSize:13,marginTop:10}}>{_t("no_data")}</p></div>}</div>
