@@ -245,6 +245,25 @@ def parse_generic_qr(text: str) -> dict:
     return data
 
 
+def parse_tse_qr(text: str) -> dict:
+    """Parse a German KassenSichV / DSFinV-K receipt (TSE) QR.
+    Format: V0;<Kasse-Seriennummer>;<processType>;<processData>;<transNr>;
+            <sigCounter>;<startTime>;<logTime>;<sigAlg>;...
+    startTime/logTime are ISO-8601 timestamps → gives us the Belegdatum.
+    """
+    if not text or not text.startswith("V0;"):
+        return {}
+    parts = text.split(";")
+    data = {}
+    for idx in (7, 6):  # logTime, then startTime
+        if len(parts) > idx:
+            m = re.match(r"(\d{4}-\d{2}-\d{2})", parts[idx].strip())
+            if m:
+                data["date"] = m.group(1)
+                break
+    return data
+
+
 def extract_qr_data(content: bytes, content_type: str = "") -> dict:
     """Main function: extract QR code data from file content.
     Returns dict with: company, amount, date, tax_id, iban, invoice_number, qr_raw
@@ -261,30 +280,29 @@ def extract_qr_data(content: bytes, content_type: str = "") -> dict:
 
     logger.info("QR codes found: %d", len(qr_texts))
 
-    # Try parsing each QR code
+    # Parse each QR and MERGE fields across parsers (TSE / EPC / Swiss / generic)
+    # so a payment QR (IBAN/amount) and the receipt date can BOTH be captured —
+    # first non-empty value per field wins. (Previously EPC/Swiss returned early
+    # and swallowed the date.)
     for qr_text in qr_texts:
         logger.info("QR content: len=%d", len(qr_text))
-
-        # Try EPC/SEPA QR
-        result = parse_epc_qr(qr_text)
-        if result:
-            result["qr_raw"] = qr_text
-            result["qr_type"] = "EPC/SEPA"
-            return ensure_vat_fields(result)
-
-        # Try Swiss QR
-        result = parse_swiss_qr(qr_text)
-        if result:
-            result["qr_raw"] = qr_text
-            result["qr_type"] = "Swiss QR"
-            return ensure_vat_fields(result)
-
-        # Try generic parsing
-        result = parse_generic_qr(qr_text)
-        if result:
-            result["qr_raw"] = qr_text
-            result["qr_type"] = "generic"
-            return ensure_vat_fields(result)
+        merged = {}
+        types = []
+        for label, fn in (("TSE", parse_tse_qr), ("EPC/SEPA", parse_epc_qr),
+                          ("Swiss QR", parse_swiss_qr), ("generic", parse_generic_qr)):
+            try:
+                r = fn(qr_text)
+            except Exception:
+                r = {}
+            if r:
+                types.append(label)
+                for k, v in r.items():
+                    if v and not merged.get(k):
+                        merged[k] = v
+        if merged:
+            merged["qr_raw"] = qr_text
+            merged["qr_type"] = "+".join(types)
+            return ensure_vat_fields(merged)
 
     # Return raw QR text if nothing parsed
     return {"qr_raw": qr_texts[0], "qr_type": "unknown"}

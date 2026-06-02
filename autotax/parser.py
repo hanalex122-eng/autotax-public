@@ -1533,7 +1533,7 @@ def extract_date(raw_text: str) -> str:
         if result:
             return result
 
-    return datetime.now().strftime("%Y-%m-%d")
+    return ""  # no receipt date found → leave Belegdatum empty (created_at keeps the entry date); never stamp "today"
 
 
 def extract_due_date(raw_text: str) -> str:
@@ -2312,7 +2312,7 @@ def parse_invoice(raw_text: str) -> dict:
             "vat_amount": 0.0,
             "vat_rate": "0%",
             "vendor": "Unbekannt",
-            "date": datetime.now().strftime("%Y-%m-%d"),
+            "date": "",
             "category": "other",
             "invoice_number": "",
             "payment_method": "",
