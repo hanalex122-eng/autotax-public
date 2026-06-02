@@ -881,6 +881,14 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
   const _vendors=Object.entries(_byVen).map(([vendor,total])=>({vendor,total})).sort((a,b)=>b.total-a.total).slice(0,6);
   const _venMax=_vendors.length?_vendors[0].total:0;
   const _siP=_monthly.map(m=>m.income); const _seP=_monthly.map(m=>m.expenses); const _gpP=_monthly.map(m=>(m.income||0)-(m.expenses||0));
+  // previous equal-length window → ▲/▼ % comparison on the KPIs
+  const _prevWin=()=>{const f=new Date(_pFrom),t=new Date(_pTo);const len=Math.round((t-f)/86400000)+1;const pt=new Date(f);pt.setDate(pt.getDate()-1);const pf=new Date(pt);pf.setDate(pf.getDate()-(len-1));return [_isoD(pf),_isoD(pt)];};
+  const [_qFrom,_qTo]=_prevWin();
+  const _qInv=allInv.filter(i=>{const d=(i.date||"").slice(0,10);return d&&d>=_qFrom&&d<=_qTo;});
+  const _qIncome=_qInv.filter(i=>i.invoice_type==="income").reduce((s,i)=>s+(i.total_amount||0),0);
+  const _qExpense=_qInv.filter(i=>i.invoice_type!=="income").reduce((s,i)=>s+(i.total_amount||0),0);
+  const _vp=_pl("vs. Vorperiode","önceki döneme göre","vs. previous");
+  const _delta=(cur,prev)=>{if(prev===0||prev==null)return null;const d=Math.round(((cur-prev)/Math.abs(prev))*100);return (d>=0?"▲ ":"▼ ")+Math.abs(d)+"% "+_vp;};
   const _periods=[["today",_pl("Heute","Bugün","Today")],["week",_pl("Diese Woche","Bu Hafta","This Week")],["month",_pl("Dieser Monat","Bu Ay","This Month")],["quarter",_pl("Dieses Quartal","Bu Çeyrek","This Quarter")],["year",_pl("Dieses Jahr","Bu Yıl","This Year")],["custom",_pl("Benutzerdefiniert","Özel","Custom")]];
   return(<div style={{display:"flex",flexDirection:"column",gap:28}}>
     {me?.is_trial && me.trial_days_left !== null && me.trial_days_left <= 14 && <div onClick={()=>onNav&&onNav("pricing")} style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px",background:me.trial_days_left<=3?"rgba(239,68,68,0.08)":"rgba(168,85,247,0.08)",borderRadius:12,border:`1px solid ${me.trial_days_left<=3?"rgba(239,68,68,0.4)":"rgba(168,85,247,0.4)"}`,flexWrap:"wrap",gap:10,boxShadow:me.trial_days_left<=3?"0 0 12px rgba(239,68,68,0.15)":"0 0 12px rgba(168,85,247,0.15)"}}>
@@ -1078,9 +1086,9 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
         <span style={{fontSize:12,color:theme.textDim}}>{_pl("Bis","Bit.","To")}</span><input type="date" value={cTo} min={cFrom||undefined} max={_pTo} onChange={e=>setCTo(e.target.value)} style={{...css.input,width:150,cursor:"pointer"}}/>
       </div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))",gap:14}}>
-        <StatCard label={_pl("Einnahmen","Gelir","Income")} value={_eur(_pIncome)} icon={I.trend} color={theme.accent} bgColor={theme.accentSoft} sparkData={_siP}/>
-        <StatCard label={_pl("Ausgaben","Gider","Expenses")} value={_eur(_pExpense)} icon={I.down} color={theme.danger} bgColor={theme.dangerSoft} sparkData={_seP}/>
-        <StatCard label={_pl("Gewinn","Kâr","Profit")} value={_eur(_pIncome-_pExpense)} icon={I.dashboard} color={(_pIncome-_pExpense)>=0?theme.accent:theme.danger} bgColor={(_pIncome-_pExpense)>=0?theme.accentSoft:theme.dangerSoft} sparkData={_gpP}/>
+        <StatCard label={_pl("Einnahmen","Gelir","Income")} value={_eur(_pIncome)} icon={I.trend} color={theme.accent} bgColor={theme.accentSoft} sparkData={_siP} sub={_delta(_pIncome,_qIncome)}/>
+        <StatCard label={_pl("Ausgaben","Gider","Expenses")} value={_eur(_pExpense)} icon={I.down} color={theme.danger} bgColor={theme.dangerSoft} sparkData={_seP} sub={_delta(_pExpense,_qExpense)}/>
+        <StatCard label={_pl("Gewinn","Kâr","Profit")} value={_eur(_pIncome-_pExpense)} icon={I.dashboard} color={(_pIncome-_pExpense)>=0?theme.accent:theme.danger} bgColor={(_pIncome-_pExpense)>=0?theme.accentSoft:theme.dangerSoft} sparkData={_gpP} sub={_delta(_pIncome-_pExpense,_qIncome-_qExpense)}/>
         <StatCard label={_pl("MwSt-Saldo","KDV Bakiye","VAT balance")} value={_eur(_pVatCol-_pVatPaid)} icon={I.tax} color={theme.blue} bgColor={theme.blueSoft}/>
         <StatCard label={_pl("Belege","Belge","Receipts")} value={String(_pInv.length)} icon={I.invoice} color={theme.purple} bgColor={theme.purpleSoft}/>
       </div>
