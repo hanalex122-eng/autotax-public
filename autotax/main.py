@@ -7512,8 +7512,27 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
         logger.warning("Tesseract pre-check failed: %s", e)
     # --- ADDED END ---
 
+    # PDF text-layer FIRST (source priority: PDF Text > QR > OCR). Digital PDFs
+    # carry clean text — use it directly and skip OCR.space.
+    _pdf_used = False
+    if not _tess_used and ((file.content_type or "").lower() == "application/pdf" or (file.filename or "").lower().endswith(".pdf")):
+        try:
+            from autotax.ocr import extract_pdf_text
+            _pdf_text = (extract_pdf_text(content) or "").strip()
+            _pdf_kw = _re_global.search(r"\b(gesamt|summe|total|betrag|brutto|zu\s*zahlen|rechnungsbetrag|zahlbetrag|endbetrag|rechnung|invoice|beleg|mwst|ust)\b", _pdf_text, _re_global.IGNORECASE)
+            if len(_pdf_text) >= 200 and _pdf_kw:
+                raw_text = _pdf_text; _pdf_used = True
+                logger.info("Using PDF text-layer (pdfplumber) sync: %s (%d chars)", file.filename, len(_pdf_text))
+                try:
+                    from autotax.qr_reader import extract_qr_data
+                    qr_data = extract_qr_data(content, file.content_type or "")
+                except Exception:
+                    pass
+        except Exception as _pe:
+            logger.warning("PDF text-layer sync failed: %s", _pe)
+
     try:
-        if not _tess_used:
+        if not _tess_used and not _pdf_used:
             raw_text, qr_data = await asyncio.wait_for(extract_text_and_qr(file, handwriting=handwriting, file_bytes=content), timeout=45)
     except asyncio.TimeoutError:
         logger.warning("OCR timeout — saving with empty text")
@@ -8601,14 +8620,23 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                         pass
                     return {"status": "done", "id": inv_id, "total_amount": safe_float(parsed.get("total_amount")), "vendor": parsed.get("vendor", "")}
                 else:
-                    logger.info("pdfplumber got text but no total — falling through to OCR path")
+                    _pdf_parsed = parsed  # keep pdfplumber vendor/date; OCR/QR only fills the missing total (PDF Text > OCR)
+                    logger.info("pdfplumber text but no total — keeping vendor/date, OCR will fill total: %s", file.filename)
             else:
                 logger.info("PDF native text sparse (%d chars, kw=%s) — using OCR path", len(stripped), bool(_inv_kw))
         except Exception as e:
             logger.warning("pdfplumber sync failed: %s", e)
 
-    # Fast path missed (scanned PDF, Tesseract invalid) → placeholder + OCR.space async
-    placeholder = {"vendor": "Processing...", "total_amount": 0.0, "date": "", "raw_text": "", "invoice_type": invoice_type, "vat_amount": 0.0, "vat_rate": "0%", "category": "other", "invoice_number": "", "payment_method": ""}
+    # Fast path missed (scanned PDF, Tesseract invalid) → placeholder + OCR.space async.
+    # If the PDF text-layer already found fields (but lacked a total), KEEP them as
+    # the base so OCR/QR only fills the missing total (source priority: PDF Text > OCR).
+    _pdf_base = locals().get("_pdf_parsed")
+    if _pdf_base:
+        placeholder = dict(_pdf_base); placeholder["raw_text"] = ""
+        if invoice_type in ("income", "expense"):
+            placeholder["invoice_type"] = invoice_type
+    else:
+        placeholder = {"vendor": "Processing...", "total_amount": 0.0, "date": "", "raw_text": "", "invoice_type": invoice_type, "vat_amount": 0.0, "vat_rate": "0%", "category": "other", "invoice_number": "", "payment_method": ""}
     inv_id = save_invoice(placeholder, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "")
     logger.info("Async OCR started: invoice %d (%s)", inv_id, file.filename)
 
@@ -8642,16 +8670,36 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             try:
                 inv = db_bg.query(Invoice).filter(Invoice.id == inv_id, Invoice.user_id == user_sub).first()
                 if inv:
-                    inv.vendor = parsed.get("vendor") or "Unbekannt"
-                    inv.total_amount = safe_float(parsed.get("total_amount"))
-                    inv.vat_amount = safe_float(parsed.get("vat_amount"))
-                    inv.vat_rate = parsed.get("vat_rate") or "0%"
-                    inv.date = parsed.get("date") or ""
-                    inv.category = parsed.get("category") or "other"
-                    inv.invoice_number = parsed.get("invoice_number") or ""
-                    inv.payment_method = parsed.get("payment_method") or ""
+                    # SOURCE PRIORITY (PDF Text > QR > OCR): a value already on the
+                    # record (PDF text-layer base) wins; OCR/QR only fills gaps.
+                    _bv = (inv.vendor or "").strip(); _base_has_v = bool(_bv) and _bv not in ("Unbekannt", "Processing...")
+                    _base_has_t = bool(inv.total_amount) and inv.total_amount != 0
+                    _base_has_d = bool((inv.date or "").strip())
+                    _qr_amt = safe_float(qr_data.get("amount")) if qr_data else 0
+                    if _base_has_v:
+                        _vsrc = "pdf"
+                    else:
+                        inv.vendor = parsed.get("vendor") or "Unbekannt"
+                        _vsrc = ("qr" if (qr_data and qr_data.get("company") and parsed.get("vendor") == qr_data.get("company")) else ("ocr" if inv.vendor and inv.vendor != "Unbekannt" else "none"))
+                    if _base_has_t:
+                        _tsrc = "pdf"
+                    else:
+                        inv.total_amount = safe_float(parsed.get("total_amount"))
+                        _tsrc = ("qr" if (_qr_amt and safe_float(inv.total_amount) == _qr_amt) else ("ocr" if inv.total_amount else "none"))
+                    if _base_has_d:
+                        _dsrc = "pdf"
+                    else:
+                        inv.date = parsed.get("date") or ""
+                        _dsrc = ("qr" if (qr_data and qr_data.get("date") and parsed.get("date") == qr_data.get("date")) else ("ocr" if inv.date else "none"))
+                    if not (inv.vat_amount or 0): inv.vat_amount = safe_float(parsed.get("vat_amount"))
+                    if (inv.vat_rate or "0%") == "0%": inv.vat_rate = parsed.get("vat_rate") or "0%"
+                    if (inv.category or "other") == "other": inv.category = parsed.get("category") or "other"
+                    if not (inv.invoice_number or ""): inv.invoice_number = parsed.get("invoice_number") or ""
+                    if not (inv.payment_method or ""): inv.payment_method = parsed.get("payment_method") or ""
                     inv.raw_text = raw_text[:2000]
                     inv.processed = True
+                    logger.info("SOURCE REPORT inv=%s file=%s | vendor=%s(%s) date=%s(%s) total=%.2f(%s)",
+                                inv_id, filename, (inv.vendor or "-"), _vsrc, (inv.date or "-"), _dsrc, safe_float(inv.total_amount), _tsrc)
                     # Vendor identity fields — A4 fatura icin printout'ta gerekli.
                     # Sync upload path bunlari save_invoice() icinden zaten yaziyor;
                     # bg OCR path'i de ayni alanlari yazsin diye buraya eklendi.
