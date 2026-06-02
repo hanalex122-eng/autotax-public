@@ -370,6 +370,28 @@ def _is_admin_uid(user_id: int) -> bool:
         db.close()
 
 
+_nr_alerted: set = set()  # in-memory dedupe: one needs-review alert per invoice
+
+
+async def _alert_needs_review(inv_id, reason: str, vendor: str = "", src_summary: str = "") -> None:
+    """Telegram admin alert when a document lands in needs_review. One per invoice
+    (in-memory dedupe). Fire-and-forget; silent if Telegram isn't configured."""
+    try:
+        if not inv_id or inv_id in _nr_alerted:
+            return
+        _nr_alerted.add(inv_id)
+        if len(_nr_alerted) > 5000:
+            _nr_alerted.clear()  # bound memory
+        from autotax.reminders import send_telegram
+        msg = (f"⚠️ Beleg #{inv_id} — Prüfung nötig\n"
+               f"Grund: {reason}\n"
+               f"Vendor: {vendor or '—'}\n"
+               f"Quellen: {src_summary or '—'}")
+        await send_telegram(msg, kind="needs_review", ref_type="invoice", ref_id=inv_id)
+    except Exception as _ae:
+        logger.warning("needs_review alert failed for %s: %s", inv_id, _ae)
+
+
 def _enforce_upload_quota(user_id: int, chat: bool = False) -> None:
     """Raise HTTPException 429 when the user hits either their per-minute
     burst limit or their per-day cap for the current plan.
@@ -7919,6 +7941,13 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
         logger.exception("[AUTO_VISION] schedule failed (continuing)")
 
     auto_create_cash_entry(invoice_id, user["sub"], result)
+    # needs_review admin alert (one per invoice, fire-and-forget; silent if no Telegram)
+    try:
+        if not float(result.get("total_amount") or 0):
+            _txt_src = "pdf" if _pdf_used else ("tesseract" if _tess_used else "ocr")
+            await _alert_needs_review(invoice_id, "kein Betrag erkannt", result.get("vendor") or "", "text=%s qr=%s" % (_txt_src, "yes" if qr_data else "no"))
+    except Exception:
+        pass
 
     # Auto-detect income: if vendor/IBAN/email matches user's registered company
     try:
@@ -8700,6 +8729,9 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                     inv.processed = True
                     logger.info("SOURCE REPORT inv=%s file=%s | vendor=%s(%s) date=%s(%s) total=%.2f(%s)",
                                 inv_id, filename, (inv.vendor or "-"), _vsrc, (inv.date or "-"), _dsrc, safe_float(inv.total_amount), _tsrc)
+                    if not safe_float(inv.total_amount):
+                        await _alert_needs_review(inv_id, "kein Betrag erkannt", inv.vendor or "",
+                                                  "vendor(%s) date(%s) total(%s)" % (_vsrc, _dsrc, _tsrc))
                     # Vendor identity fields — A4 fatura icin printout'ta gerekli.
                     # Sync upload path bunlari save_invoice() icinden zaten yaziyor;
                     # bg OCR path'i de ayni alanlari yazsin diye buraya eklendi.

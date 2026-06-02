@@ -11,6 +11,12 @@ OCR_API_KEY = os.getenv("OCR_API_KEY", "")
 OCR_API_URL = "https://api.ocr.space/parse/image"
 
 
+def _src_enabled(name: str) -> bool:
+    """Kill-flag: a source can be disabled via env (default ON) WITHOUT a deploy,
+    e.g. QR_ENABLED=0 / OCR_SPACE_ENABLED=0 — if a source starts polluting results."""
+    return (os.getenv(name, "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
 def _header_garbage_score(text: str, sample_chars: int = 250) -> tuple[float, int]:
     """Score the OCR header (first ~250 chars — where logo lives).
 
@@ -246,6 +252,9 @@ async def extract_image_text(content: bytes, filename: str) -> str:
         return local_text
     logger.info("[OCR] fallback to API")
     # --- MODIFIED END ---
+    if not _src_enabled("OCR_SPACE_ENABLED"):
+        logger.info("[OCR] OCR.space disabled (OCR_SPACE_ENABLED=0) — keeping Tesseract result")
+        return local_text or ""
     if not OCR_API_KEY:
         logger.warning("OCR skipped — no API key configured")
         return ""
@@ -340,11 +349,14 @@ async def extract_text_and_qr(file: UploadFile, handwriting: bool = False, file_
 
     # QR code extraction (use original image — binarization can break QR)
     qr_data = {}
-    try:
-        from autotax.qr_reader import extract_qr_data
-        qr_data = extract_qr_data(content, content_type)
-    except Exception:
-        pass  # QR reading is optional, don't break upload if it fails
+    if _src_enabled("QR_ENABLED"):
+        try:
+            from autotax.qr_reader import extract_qr_data
+            qr_data = extract_qr_data(content, content_type)
+        except Exception:
+            pass  # QR reading is optional, don't break upload if it fails
+    else:
+        logger.info("QR disabled (QR_ENABLED=0) — skipping QR extraction")
 
     # Convert HEIC/HEIF to JPEG (iPhone camera format — not supported by OCR API)
     if "heic" in content_type or "heif" in content_type or filename.endswith((".heic", ".heif")):
