@@ -113,26 +113,32 @@ def parse_epc_qr(text: str) -> dict:
     """Parse EPC/SEPA QR code (GiroCode).
     Format: BCD\\n002\\n1\\nSCT\\nBIC\\nName\\nIBAN\\nEURAmount\\n\\n\\nReference\\nText
     """
+    # Correct GiroCode line order (0-indexed):
+    # 0 BCD | 1 version | 2 charset | 3 SCT | 4 BIC | 5 Name | 6 IBAN |
+    # 7 Amount("EUR12.90") | 8 purpose | 9 reference | 10 remittance
     lines = text.strip().split("\n")
-    if len(lines) < 7 or lines[0] != "BCD":
+    if len(lines) < 7 or lines[0].strip() != "BCD":
         return {}
 
     data = {}
     try:
-        if len(lines) > 3:
-            data["bic"] = lines[3].strip()
-        if len(lines) > 4:
-            data["company"] = lines[4].strip()
-        if len(lines) > 5:
-            data["iban"] = lines[5].strip()
+        if len(lines) > 4 and lines[4].strip():
+            data["bic"] = lines[4].strip()
+        if len(lines) > 5 and lines[5].strip():
+            data["company"] = lines[5].strip()
         if len(lines) > 6:
-            amt = lines[6].strip()
-            m = re.search(r"(\d+[.,]?\d*)", amt)
+            iban = lines[6].strip().replace(" ", "")
+            if re.match(r"^[A-Z]{2}\d{2}[A-Z0-9]{8,30}$", iban):  # sanity: must look like an IBAN
+                data["iban"] = iban
+        if len(lines) > 7:
+            m = re.search(r"(\d+[.,]?\d*)", lines[7].strip())  # "EUR12.90" -> 12.90
             if m:
-                data["amount"] = float(m.group(1).replace(",", "."))
-        if len(lines) > 9:
+                amt = float(m.group(1).replace(",", "."))
+                if 0 < amt < 1_000_000:  # sanity: reject garbage (e.g. IBAN digits -> 8.9e19)
+                    data["amount"] = amt
+        if len(lines) > 9 and lines[9].strip():
             data["reference"] = lines[9].strip()
-        if len(lines) > 10:
+        if len(lines) > 10 and lines[10].strip():
             data["description"] = lines[10].strip()
     except Exception:
         pass
