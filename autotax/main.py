@@ -357,10 +357,25 @@ def _user_plan(user_id: int) -> str:
         db.close()
 
 
+def _is_admin_uid(user_id: int) -> bool:
+    """True if the user's email is in ADMIN_EMAILS (owner / test accounts)."""
+    admins = {e.strip().lower() for e in (os.getenv("ADMIN_EMAILS") or "").split(",") if e.strip()}
+    if not admins:
+        return False
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user_id).first()
+        return bool(u and u.email and u.email.strip().lower() in admins)
+    finally:
+        db.close()
+
+
 def _enforce_upload_quota(user_id: int, chat: bool = False) -> None:
     """Raise HTTPException 429 when the user hits either their per-minute
     burst limit or their per-day cap for the current plan.
     Includes Retry-After header so the client can wait the right amount."""
+    if _is_admin_uid(user_id):
+        return  # owner/admin test accounts are exempt from upload/chat quotas
     plan = _user_plan(user_id)
     if chat:
         cap = _CHAT_DAILY_CAP.get(plan, _CHAT_DAILY_CAP["free"])
