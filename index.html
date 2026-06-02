@@ -872,6 +872,15 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
   const _pExpense=_pInv.filter(i=>i.invoice_type!=="income").reduce((s,i)=>s+(i.total_amount||0),0);
   const _pVatCol=_pInv.filter(i=>i.invoice_type==="income").reduce((s,i)=>s+(i.vat_amount||0),0);
   const _pVatPaid=_pInv.filter(i=>i.invoice_type!=="income").reduce((s,i)=>s+(i.vat_amount||0),0);
+  // PHASE 2: period-derived aggregations (monthly / categories / vendors / trends)
+  const _byMonth={}; _pInv.forEach(i=>{const m=(i.date||"").slice(0,7);if(!m)return;(_byMonth[m]=_byMonth[m]||{month:m,income:0,expenses:0});if(i.invoice_type==="income")_byMonth[m].income+=(i.total_amount||0);else _byMonth[m].expenses+=(i.total_amount||0);});
+  const _monthly=Object.values(_byMonth).sort((a,b)=>a.month.localeCompare(b.month));
+  const _byCat={}; _pInv.filter(i=>i.invoice_type!=="income").forEach(i=>{const c=i.category||"other";_byCat[c]=(_byCat[c]||0)+(i.total_amount||0);});
+  const _cats=Object.entries(_byCat).map(([category,total])=>({category,total})).sort((a,b)=>b.total-a.total);
+  const _byVen={}; _pInv.forEach(i=>{const v=(i.vendor||"").trim()||"—";_byVen[v]=(_byVen[v]||0)+(i.total_amount||0);});
+  const _vendors=Object.entries(_byVen).map(([vendor,total])=>({vendor,total})).sort((a,b)=>b.total-a.total).slice(0,6);
+  const _venMax=_vendors.length?_vendors[0].total:0;
+  const _siP=_monthly.map(m=>m.income); const _seP=_monthly.map(m=>m.expenses); const _gpP=_monthly.map(m=>(m.income||0)-(m.expenses||0));
   const _periods=[["today",_pl("Heute","Bugün","Today")],["week",_pl("Diese Woche","Bu Hafta","This Week")],["month",_pl("Dieser Monat","Bu Ay","This Month")],["quarter",_pl("Dieses Quartal","Bu Çeyrek","This Quarter")],["year",_pl("Dieses Jahr","Bu Yıl","This Year")],["custom",_pl("Benutzerdefiniert","Özel","Custom")]];
   return(<div style={{display:"flex",flexDirection:"column",gap:28}}>
     {me?.is_trial && me.trial_days_left !== null && me.trial_days_left <= 14 && <div onClick={()=>onNav&&onNav("pricing")} style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px",background:me.trial_days_left<=3?"rgba(239,68,68,0.08)":"rgba(168,85,247,0.08)",borderRadius:12,border:`1px solid ${me.trial_days_left<=3?"rgba(239,68,68,0.4)":"rgba(168,85,247,0.4)"}`,flexWrap:"wrap",gap:10,boxShadow:me.trial_days_left<=3?"0 0 12px rgba(239,68,68,0.15)":"0 0 12px rgba(168,85,247,0.15)"}}>
@@ -1069,16 +1078,23 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
         <span style={{fontSize:12,color:theme.textDim}}>{_pl("Bis","Bit.","To")}</span><input type="date" value={cTo} min={cFrom||undefined} max={_pTo} onChange={e=>setCTo(e.target.value)} style={{...css.input,width:150,cursor:"pointer"}}/>
       </div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))",gap:14}}>
-        <StatCard label={_pl("Einnahmen","Gelir","Income")} value={_eur(_pIncome)} icon={I.trend} color={theme.accent} bgColor={theme.accentSoft}/>
-        <StatCard label={_pl("Ausgaben","Gider","Expenses")} value={_eur(_pExpense)} icon={I.down} color={theme.danger} bgColor={theme.dangerSoft}/>
-        <StatCard label={_pl("Gewinn","Kâr","Profit")} value={_eur(_pIncome-_pExpense)} icon={I.dashboard} color={(_pIncome-_pExpense)>=0?theme.accent:theme.danger} bgColor={(_pIncome-_pExpense)>=0?theme.accentSoft:theme.dangerSoft}/>
+        <StatCard label={_pl("Einnahmen","Gelir","Income")} value={_eur(_pIncome)} icon={I.trend} color={theme.accent} bgColor={theme.accentSoft} sparkData={_siP}/>
+        <StatCard label={_pl("Ausgaben","Gider","Expenses")} value={_eur(_pExpense)} icon={I.down} color={theme.danger} bgColor={theme.dangerSoft} sparkData={_seP}/>
+        <StatCard label={_pl("Gewinn","Kâr","Profit")} value={_eur(_pIncome-_pExpense)} icon={I.dashboard} color={(_pIncome-_pExpense)>=0?theme.accent:theme.danger} bgColor={(_pIncome-_pExpense)>=0?theme.accentSoft:theme.dangerSoft} sparkData={_gpP}/>
         <StatCard label={_pl("MwSt-Saldo","KDV Bakiye","VAT balance")} value={_eur(_pVatCol-_pVatPaid)} icon={I.tax} color={theme.blue} bgColor={theme.blueSoft}/>
         <StatCard label={_pl("Belege","Belge","Receipts")} value={String(_pInv.length)} icon={I.invoice} color={theme.purple} bgColor={theme.purpleSoft}/>
       </div>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"5fr 3fr",gap:14}}>
-      <div style={css.card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:0}}>{_t("monthly_overview")}</h3><span style={{fontSize:11,color:theme.textDim,fontFamily:mono}}>{new Date().getFullYear()}</span></div>{data.monthly_breakdown?.length>0?<BarChart data={data.monthly_breakdown}/>:<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40,color:theme.textDim}}><Icon d={I.trend} size={32} color={theme.textDim}/><p style={{fontSize:13,marginTop:10}}>{_t("no_data")}</p></div>}</div>
-      <div style={css.card}><h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 20px"}}>{_t("categories")}</h3>{data.by_category?.length>0?<DonutChart data={data.by_category}/>:<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40,color:theme.textDim}}><Icon d={I.tax} size={32} color={theme.textDim}/><p style={{fontSize:13,marginTop:10}}>{_t("no_data")}</p></div>}</div>
+      <div style={css.card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:0}}>{_t("monthly_overview")}</h3><span style={{fontSize:11,color:theme.textDim,fontFamily:mono}}>{(_periods.find(p=>p[0]===period)||[])[1]||""}</span></div>{_monthly.length>0?<BarChart data={_monthly}/>:<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40,color:theme.textDim}}><Icon d={I.trend} size={32} color={theme.textDim}/><p style={{fontSize:13,marginTop:10}}>{_t("no_data")}</p></div>}</div>
+      <div style={css.card}><h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 20px"}}>{_pl("Top Kategorien","Top Kategoriler","Top categories")}</h3>{_cats.length>0?<DonutChart data={_cats}/>:<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40,color:theme.textDim}}><Icon d={I.tax} size={32} color={theme.textDim}/><p style={{fontSize:13,marginTop:10}}>{_t("no_data")}</p></div>}</div>
+    </div>
+    <div style={css.card}>
+      <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 16px"}}>{_pl("Top Lieferanten","En çok harcanan","Top vendors")}</h3>
+      {_vendors.length>0?_vendors.map((v,i)=>(<div key={i} style={{marginBottom:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4,gap:10}}><span style={{color:theme.text,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{v.vendor}</span><span style={{color:theme.textMuted,fontFamily:mono,whiteSpace:"nowrap"}}>{_eur(v.total)}</span></div>
+        <div style={{height:6,background:theme.surfaceAlt,borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:(_venMax>0?Math.round((v.total/_venMax)*100):0)+"%",background:`linear-gradient(90deg,${theme.blue},${theme.blue}bb)`,borderRadius:3,transition:"width 0.4s ease"}}/></div>
+      </div>)):<div style={{color:theme.textDim,fontSize:13,padding:20,textAlign:"center"}}>{_t("no_data")}</div>}
     </div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
       <div style={css.card}><h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 16px",display:"flex",alignItems:"center",gap:8}}><div style={{width:6,height:6,borderRadius:"50%",background:theme.blue}}/>{_t("vat_overview")}</h3>
