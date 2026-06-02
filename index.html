@@ -1156,6 +1156,20 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
     api("/invoices?"+params.toString()).then(d=>{setInvoices(d.items);setTotal(d.total);setSelected(new Set());}).catch(()=>{}).finally(()=>setLoading(false));
   };
   const doSearch=()=>load(filter,filterCat,dateFrom,dateTo);
+  // PHASE 3: quick period range → reuses server-side date_from/date_to filtering
+  const _lng=getLang();
+  const _pl3=(de,tr,en)=>_lng==="tr"?tr:(_lng==="en"?en:de);
+  const _e3=n=>"€"+(n||0).toLocaleString(_lng==="en"?"en-US":"de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const _p2i=n=>String(n).padStart(2,"0");
+  const _isoI=d=>d.getFullYear()+"-"+_p2i(d.getMonth()+1)+"-"+_p2i(d.getDate());
+  const setRange=(p)=>{const n=new Date();const to=_isoI(n);let from;
+    if(p==="today")from=to;
+    else if(p==="week"){const d=new Date(n);const dow=(d.getDay()+6)%7;d.setDate(d.getDate()-dow);from=_isoI(d);}
+    else if(p==="month")from=_isoI(new Date(n.getFullYear(),n.getMonth(),1));
+    else if(p==="quarter")from=_isoI(new Date(n.getFullYear(),Math.floor(n.getMonth()/3)*3,1));
+    else if(p==="year")from=_isoI(new Date(n.getFullYear(),0,1));
+    else {from=_jan1;}
+    setDateFrom(from);setDateTo(to);load(filter,filterCat,from,to);};
   const[syncing,setSyncing]=useState(false);
   const syncAll=async()=>{setSyncing(true);try{const r=await api("/bookkeeping/sync-invoices",{method:"POST"});if(showToast)showToast((r.synced||0)+" sync, "+(r.reverse_synced||0)+" synced from cash book","success");doSearch();}catch(e){if(showToast)showToast(_t("sync_failed"),"error");}setSyncing(false);};
   useEffect(()=>{load(filter,filterCat,dateFrom,dateTo);},[refreshKey]);
@@ -1438,6 +1452,18 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
       <button style={{...css.btnOutline,padding:"8px 12px",fontSize:11,borderColor:"rgba(0,194,255,0.3)",color:"#00c2ff"}} onClick={()=>{const allIds=filtered.map(i=>i.id);if(!allIds.length){if(showToast)showToast("Keine Rechnungen vorhanden","info");return;}if(!confirm("Alle "+allIds.length+" PDFs herunterladen?"))return;downloadBulkPDF(allIds,showToast);}}>🖨️ Alle PDFs ({filtered.length})</button>
       {(filter||filterCat||filterStatus)&&<button style={{...css.btnOutline,padding:"8px 12px",fontSize:11}} onClick={()=>{setFilter("");setDateFrom(_jan1);setDateTo(_today);setFilterCat("");setFilterStatus("");load("","",_jan1,_today);}}>Reset</button>}
     </div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+      <span style={{fontSize:11,color:theme.textDim,marginRight:2}}>{_pl3("Zeitraum","Dönem","Period")}:</span>
+      {[["today",_pl3("Heute","Bugün","Today")],["week",_pl3("Woche","Hafta","Week")],["month",_pl3("Monat","Ay","Month")],["quarter",_pl3("Quartal","Çeyrek","Quarter")],["year",_pl3("Jahr","Yıl","Year")],["all",_pl3("Alle","Tümü","All")]].map(([k,lbl])=><button key={k} onClick={()=>setRange(k)} style={{...css.btnOutline,padding:"6px 11px",fontSize:11}}>{lbl}</button>)}
+    </div>
+    {filtered.length>0&&<div style={{...css.card,display:"flex",flexWrap:"wrap",gap:16,padding:"16px 20px"}}>
+      {[[_pl3("Einnahmen","Gelir","Income"),_e3(filtered.filter(i=>i.invoice_type==="income").reduce((s,i)=>s+(i.total_amount||0),0)),theme.accent],
+        [_pl3("Ausgaben","Gider","Expenses"),_e3(filtered.filter(i=>i.invoice_type!=="income").reduce((s,i)=>s+(i.total_amount||0),0)),theme.danger],
+        [_pl3("Gewinn","Kâr","Profit"),_e3(filtered.filter(i=>i.invoice_type==="income").reduce((s,i)=>s+(i.total_amount||0),0)-filtered.filter(i=>i.invoice_type!=="income").reduce((s,i)=>s+(i.total_amount||0),0)),theme.text],
+        ["MwSt-Saldo",_e3(filtered.filter(i=>i.invoice_type==="income").reduce((s,i)=>s+(i.vat_amount||0),0)-filtered.filter(i=>i.invoice_type!=="income").reduce((s,i)=>s+(i.vat_amount||0),0)),theme.blue],
+        [_pl3("Anzahl","Adet","Count"),String(filtered.length),theme.purple]
+      ].map(([lbl,val,col],i)=>(<div key={i} style={{flex:"1 1 130px"}}><div style={{fontSize:11,color:theme.textMuted,marginBottom:2}}>{lbl}</div><div style={{fontSize:18,fontWeight:700,fontFamily:mono,color:col}}>{val}</div></div>))}
+    </div>}
     {editId&&<div style={css.card}>
       <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 12px"}}>{_t("edit_invoice")}</h3>
       <div style={{display:"grid",gridTemplateColumns:editPreview?"1fr 1fr":"1fr",gap:16}}>
