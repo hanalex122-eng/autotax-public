@@ -510,6 +510,20 @@ def save_invoice(data: dict, user_id: int, filename: str = None, file_data: byte
 
     db = SessionLocal()
     try:
+        # SELF-PROTECTION GUARD: reject an IMPLAUSIBLE total so a bad OCR/QR/parser
+        # result can't pollute production (e.g. QR=8.9e19). Single choke-point for
+        # ALL upload paths. Rejected -> 0.0 -> status='needs_review' (below) and the
+        # dashboard already excludes total<=0, so it never reaches the figures.
+        try:
+            _t = data.get("total_amount")
+            _tv = float(_t) if _t not in (None, "") else 0.0
+            if _tv != _tv or _tv in (float("inf"), float("-inf")) or not (0 <= _tv < 1_000_000):
+                if _tv != 0:
+                    logger.warning("NEEDS_REVIEW reason=implausible_total value=%r vendor=%s", _t, data.get("vendor"))
+                data["total_amount"] = 0.0
+        except (TypeError, ValueError):
+            logger.warning("NEEDS_REVIEW reason=total_parse_error value=%r", data.get("total_amount"))
+            data["total_amount"] = 0.0
         # Status: total_amount varsa 'ready' (kullanici onaylayabilir),
         # yoksa 'needs_review' (zayif parse). 'confirmed' yalnizca kullanici PATCH'i ile gelir.
         _has_total = bool(data.get("total_amount"))
