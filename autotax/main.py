@@ -8608,7 +8608,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             logger.warning("pdfplumber sync failed: %s", e)
 
     # Fast path missed (scanned PDF, Tesseract invalid) → placeholder + OCR.space async
-    placeholder = {"vendor": "Processing...", "total_amount": 0.0, "date": datetime.now().strftime("%Y-%m-%d"), "raw_text": "", "invoice_type": invoice_type, "vat_amount": 0.0, "vat_rate": "0%", "category": "other", "invoice_number": "", "payment_method": ""}
+    placeholder = {"vendor": "Processing...", "total_amount": 0.0, "date": "", "raw_text": "", "invoice_type": invoice_type, "vat_amount": 0.0, "vat_rate": "0%", "category": "other", "invoice_number": "", "payment_method": ""}
     inv_id = save_invoice(placeholder, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "")
     logger.info("Async OCR started: invoice %d (%s)", inv_id, file.filename)
 
@@ -8620,6 +8620,20 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             fake = _UF(filename=filename, file=_io.BytesIO(content), headers=_Headers({"content-type": ct or "application/octet-stream"}))
             raw_text, qr_data = await _asyncio.wait_for(extract_text_and_qr(fake, handwriting=handwriting, file_bytes=content), timeout=60)
             parsed = parse_invoice(raw_text)
+            # QR fallback (TSE / EPC / Swiss / generic) — fill ONLY fields the OCR
+            # text missed; never overwrites a value the parser already found.
+            try:
+                if qr_data:
+                    if qr_data.get("amount") and (not parsed.get("total_amount") or parsed.get("total_amount") == 0):
+                        parsed["total_amount"] = qr_data["amount"]
+                    if qr_data.get("date") and not parsed.get("date"):
+                        parsed["date"] = qr_data["date"]
+                    if qr_data.get("company") and (not parsed.get("vendor") or parsed.get("vendor") in ("Unbekannt", "")):
+                        parsed["vendor"] = qr_data["company"]
+                    if qr_data.get("iban") and not parsed.get("vendor_iban"):
+                        parsed["vendor_iban"] = qr_data["iban"]
+            except Exception:
+                pass
             parsed = apply_filename_overrides(parsed, filename or "", raw_text=raw_text)
             if invoice_type in ("income", "expense"):
                 parsed["invoice_type"] = invoice_type
