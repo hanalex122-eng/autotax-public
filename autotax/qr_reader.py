@@ -284,6 +284,11 @@ def extract_qr_data(content: bytes, content_type: str = "") -> dict:
     # so a payment QR (IBAN/amount) and the receipt date can BOTH be captured —
     # first non-empty value per field wins. (Previously EPC/Swiss returned early
     # and swallowed the date.)
+    # Only structured payment QRs (EPC/SEPA GiroCode, Swiss QR-bill) carry a
+    # RELIABLE amount. TSE & generic QRs do NOT — taking an "amount" from them
+    # would corrupt the total ("karıştırıyor"), so their amount fields are
+    # ignored; from those we keep only date / company / iban / tax_id / invoice_number.
+    _AMOUNT_TRUSTED = {"EPC/SEPA", "Swiss QR"}
     for qr_text in qr_texts:
         logger.info("QR content: len=%d", len(qr_text))
         merged = {}
@@ -294,14 +299,18 @@ def extract_qr_data(content: bytes, content_type: str = "") -> dict:
                 r = fn(qr_text)
             except Exception:
                 r = {}
-            if r:
-                types.append(label)
-                for k, v in r.items():
-                    if v and not merged.get(k):
-                        merged[k] = v
+            if not r:
+                continue
+            types.append(label)
+            for k, v in r.items():
+                if not v or merged.get(k):
+                    continue
+                if k in ("amount", "total", "net", "tax") and label not in _AMOUNT_TRUSTED:
+                    continue  # don't trust amounts from TSE/generic QRs
+                merged[k] = v
         if merged:
             merged["qr_raw"] = qr_text
-            merged["qr_type"] = "+".join(types)
+            merged["qr_type"] = "+".join(types) or "unknown"
             return ensure_vat_fields(merged)
 
     # Return raw QR text if nothing parsed
