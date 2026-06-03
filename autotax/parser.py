@@ -708,8 +708,20 @@ def extract_vendor(raw_text: str) -> str:
     """Extract vendor/store name from the first meaningful lines of OCR text."""
     lines = raw_text.strip().split("\n")
     candidates = []
+    # Footer/greeting/payment lines are NOT vendor names — reject them so they
+    # don't get picked as a (wrong) vendor. Precision fix: avoids "Danke",
+    # "Kundenbeleg", "Rückgeld", "EC-Karte" being returned as the vendor.
+    _footer_noise = re.compile(
+        r"^(danke|vielen\s+dank|auf\s+wiedersehen|tsch[üu]ss|sch[öo]nen\s+(?:tag|abend)|"
+        r"bis\s+bald|ihr\s+team|wir\s+danken|besuchen\s+sie|[öo]ffnungszeit|r[üu]ckgeld|"
+        r"kundenbeleg|h[äa]ndlerbeleg|zwischensumme|kartenzahlung|ec[-\s]?karte)\b",
+        re.IGNORECASE,
+    )
 
-    for line in lines[:12]:
+    # Scan the first 20 lines (was 12): German receipts often push the store
+    # name to line 4-15 behind logo/header noise. Priority ordering below
+    # (suffix > known-vendor > non-address) still protects against footer lines.
+    for line in lines[:20]:
         cleaned = line.strip()
         if not cleaned or len(cleaned) < 2:
             continue
@@ -724,6 +736,9 @@ def extract_vendor(raw_text: str) -> str:
             continue
         # Skip total/payment lines
         if _TOTAL_LINE_RE.match(cleaned):
+            continue
+        # Skip footer/greeting/payment-method lines (not a vendor name)
+        if _footer_noise.match(cleaned):
             continue
         # Skip very long lines (likely description/address)
         if len(cleaned) > 60:
@@ -2420,12 +2435,29 @@ def parse_invoice(raw_text: str) -> dict:
                 vendor = _name.capitalize() if _name.islower() else _name
                 vendor_source = "email_domain"
 
+    # Vendor-specific confidence (0-100), reliability by source. Lets the UI/log
+    # flag UNCERTAIN vendors instead of trusting them. (vendor only — total/date untouched.)
+    _vc_map = {"fingerprint": 95, "deep": 78, "primary": 66, "email_domain": 50, "guess": 32}
+    if vendor in ("Unbekannt", "", None):
+        vendor_confidence = 0
+    else:
+        vendor_confidence = _vc_map.get(vendor_source, 50)
+        try:
+            _vl = " " + str(vendor).lower() + " "
+            if _VENDOR_SUFFIX_RE.search(str(vendor)) or any((" " + k + " ") in _vl for k in VENDOR_CATEGORY_MAP if len(k) >= 4):
+                vendor_confidence = max(vendor_confidence, 88)  # legal suffix or known brand in the name
+        except Exception:
+            pass
+        if merchant and merchant_confidence and str(vendor) == str(merchant):
+            vendor_confidence = max(vendor_confidence, int(merchant_confidence * 100))
+
     return {
         "total_amount": total,
         "vat_amount": vat_amount,
         "vat_rate": vat_rate_str,
         "vendor": vendor,
         "vendor_source": vendor_source,
+        "vendor_confidence": vendor_confidence,
         "date": date,
         "category": category,
         "invoice_number": invoice_number,

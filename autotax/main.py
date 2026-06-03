@@ -8727,8 +8727,10 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                     if not (inv.payment_method or ""): inv.payment_method = parsed.get("payment_method") or ""
                     inv.raw_text = raw_text[:2000]
                     inv.processed = True
-                    logger.info("SOURCE REPORT inv=%s file=%s | vendor=%s(%s) date=%s(%s) total=%.2f(%s)",
-                                inv_id, filename, (inv.vendor or "-"), _vsrc, (inv.date or "-"), _dsrc, safe_float(inv.total_amount), _tsrc)
+                    _vdetail = ("ocr:" + str(parsed.get("vendor_source") or "?")) if _vsrc == "ocr" else _vsrc
+                    logger.info("SOURCE REPORT inv=%s file=%s | vendor=%s(%s c%s) date=%s(%s) total=%.2f(%s)",
+                                inv_id, filename, (inv.vendor or "-"), _vdetail, parsed.get("vendor_confidence", "-"),
+                                (inv.date or "-"), _dsrc, safe_float(inv.total_amount), _tsrc)
                     if not safe_float(inv.total_amount):
                         await _alert_needs_review(inv_id, "kein Betrag erkannt", inv.vendor or "",
                                                   "vendor(%s) date(%s) total(%s)" % (_vsrc, _dsrc, _tsrc))
