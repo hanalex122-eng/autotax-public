@@ -8446,7 +8446,16 @@ async def invoice_ai_extract(
         ocr_text = inv.raw_text or ""
         filename = inv.filename or f"invoice-{invoice_id}.pdf"
 
-        ai_result = await ai_extract_invoice(pdf_bytes=pdf_bytes, ocr_text=ocr_text, filename=filename)
+        # Route by file type: IMAGES → image block (vision); PDFs → document block.
+        # Bug fix: a JPG sent as pdf_bytes makes Anthropic 400 "PDF not valid" → 502.
+        _ct = (inv.file_content_type or "").lower()
+        _fn = (filename or "").lower()
+        _is_img = _ct.startswith("image/") or _fn.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".tif", ".tiff", ".bmp"))
+        if _is_img:
+            ai_result = await ai_extract_invoice(ocr_text=ocr_text, filename=filename,
+                                                 image_bytes=pdf_bytes, content_type=(_ct or "image/jpeg"))
+        else:
+            ai_result = await ai_extract_invoice(pdf_bytes=pdf_bytes, ocr_text=ocr_text, filename=filename)
         if not ai_result:
             err(502, "AI-OCR konnte den Beleg nicht verarbeiten (siehe Server-Logs)")
 
