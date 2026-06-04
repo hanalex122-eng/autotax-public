@@ -320,6 +320,25 @@ def test_garbage():
     print(f"  ✓ Garbage: handled gracefully")
 
 
+def test_garbage_vendor_rejected():
+    """Logo OCR gibberish / footer fragments must NOT be accepted as a vendor.
+    They become 'Unbekannt' (confidence 0 -> needs_review) instead of a wrong
+    vendor with confidence 66. Total/date are untouched by this."""
+    from autotax.parser import _is_garbage_vendor, _clean_vendor_name
+    # garbage -> rejected
+    for g in ["er en DR ar | ae", "i AE 4 Een 4", "ti A | i", "x z q", "5 et Be"]:
+        assert _is_garbage_vendor(g), f"should be garbage: {g!r}"
+        assert _clean_vendor_name(g) == "Unbekannt", f"should clean to Unbekannt: {g!r}"
+    # real vendors / known short brands -> kept
+    for ok in ["DM", "H&M", "C&A", "BP", "KFC", "OBI", "Bereket", "Topaz", "REWE"]:
+        assert _clean_vendor_name(ok) != "Unbekannt", f"should be kept: {ok!r}"
+    # end-to-end: a receipt whose only header is garbage -> vendor Unbekannt, conf 0
+    r = parse_invoice("er en DR ar | ae\ni AE 4 Een 4\nSUMME 5,37\nVielen Dank")
+    assert r["vendor"] == "Unbekannt", f"got {r['vendor']!r}"
+    assert r["vendor_confidence"] == 0, f"got conf {r['vendor_confidence']}"
+    print("  ✓ Garbage vendor rejected -> Unbekannt c0; known brands kept")
+
+
 def test_country_default_vat():
     """Test that country default VAT is applied when no rate found."""
     text_de = "Firma XYZ GmbH\nBetrag: 119,00\nDatum: 01.01.2025"
@@ -354,6 +373,7 @@ if __name__ == "__main__":
         ("MediaMarkt", test_mediamarkt),
         ("Empty Text", test_empty),
         ("Garbage Text", test_garbage),
+        ("Garbage Vendor Rejected", test_garbage_vendor_rejected),
         ("Country Default VAT", test_country_default_vat),
         ("Amount Normalization", test_normalize_amounts),
     ]

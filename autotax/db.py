@@ -526,8 +526,15 @@ def save_invoice(data: dict, user_id: int, filename: str = None, file_data: byte
             data["total_amount"] = 0.0
         # Status: total_amount varsa 'ready' (kullanici onaylayabilir),
         # yoksa 'needs_review' (zayif parse). 'confirmed' yalnizca kullanici PATCH'i ile gelir.
+        # Vendor sanity: a nonsense/empty vendor (confidence 0 -> 'Unbekannt', e.g. a
+        # logo-OCR garble rejected by the parser) must NOT be silently 'ready' just
+        # because a total exists — flag it for review so noise isn't trusted as a
+        # valid vendor. (vendor-only gate; total/date logic unchanged.)
         _has_total = bool(data.get("total_amount"))
-        _initial_status = "ready" if _has_total else "needs_review"
+        _v = (data.get("vendor") or "").strip()
+        _vc = data.get("vendor_confidence")
+        _vendor_unknown = _v in ("", "Unbekannt", "Processing...") or _vc == 0
+        _initial_status = "ready" if (_has_total and not _vendor_unknown) else "needs_review"
         invoice = Invoice(
             user_id=user_id,
             filename=filename,

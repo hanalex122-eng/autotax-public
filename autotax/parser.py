@@ -1018,6 +1018,72 @@ _TAX_ID_VENDOR_MAP = {
 }
 
 
+# Footer / receipt-boilerplate fragments that are NEVER a vendor name.
+# Module-level so both extract_vendor and the garbage detector reuse it.
+_VENDOR_FOOTER_RE = re.compile(
+    r"^(danke|vielen\s+dank|auf\s+wiedersehen|tsch[üu]ss|sch[öo]nen\s+(?:tag|abend)|"
+    r"bis\s+bald|ihr\s+team|wir\s+danken|besuchen\s+sie|[öo]ffnungszeit|r[üu]ckgeld|"
+    r"kundenbeleg|h[äa]ndlerbeleg|zwischensumme|kartenzahlung|ec[-\s]?karte|"
+    r"gegeben|bar\s+gezahlt|zahlbetrag|trinkgeld|geg(?:eben)?\s+bar|"
+    r"betrag\s+erhalten|wechselgeld|terminal[- ]?id|beleg[- ]?nr|bon[- ]?nr)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_garbage_vendor(name: str) -> bool:
+    """Return True when `name` looks like OCR noise rather than a real vendor:
+    logo gibberish ("er, en DR ar | ae"), random character soup, or a footer
+    fragment. Callers MUST whitelist known brands BEFORE calling this — it only
+    judges unrecognized strings.
+
+    Conservative by design: when unsure, return False (keep the name). The goal
+    is to swap obvious garbage for 'Unbekannt' + needs_review, not to discard
+    legitimate small-shop names the user can still correct. vendor-only — it
+    never influences total/date/source-priority.
+    """
+    if not name:
+        return True
+    s = name.strip()
+    if not s:
+        return True
+    low = s.lower()
+
+    # 1) Footer / receipt boilerplate is never a vendor.
+    if _VENDOR_FOOTER_RE.match(low):
+        return True
+
+    letters = re.sub(r"[^a-zA-ZäöüÄÖÜß]", "", s)
+    # 2) Too few real letters, or symbol/number soup.
+    if len(letters) < 3:
+        return True
+    if len(letters) / len(s) < 0.5:
+        return True
+
+    # 3) No vowel at all across a multi-letter string -> consonant gibberish
+    #    ("brkzt", "xdfg"). German vowels incl. umlauts + y.
+    if len(letters) >= 4 and not re.search(r"[aeiouyäöü]", low):
+        return True
+
+    # 4) Logo gibberish: many tiny alphabetic tokens ("er en DR ar ae"),
+    #    or a couple of all-tiny tokens with junk ("5 et Be"). Real two-word
+    #    short names ("De Nico", "Le Coq") survive — not ALL their tokens <=2.
+    tokens = re.findall(r"[a-zA-ZäöüÄÖÜß]+", s)
+    if len(tokens) >= 3:
+        tiny = sum(1 for t in tokens if len(t) <= 2)
+        if tiny / len(tokens) >= 0.6:
+            return True
+        if sum(len(t) for t in tokens) / len(tokens) < 2.5:
+            return True
+    if len(tokens) >= 2 and all(len(t) <= 2 for t in tokens) and len(letters) <= 6:
+        return True
+
+    # 5) Implausibly long consonant run typical of OCR garble ("frtztghk").
+    if re.search(r"[bcdfghjklmnpqrstvwxzß]{7,}", low):
+        return True
+
+    return False
+
+
 def _clean_vendor_name(name: str) -> str:
     """Clean up vendor name: remove trailing punctuation, asterisks, OCR corrections.
     Also canonicalize: if a long legal name contains a known brand
@@ -1051,22 +1117,20 @@ def _clean_vendor_name(name: str) -> str:
         if re.search(r"\b" + re.escape(_brand) + r"\b", _check_lower):
             return _brand.upper() if len(_brand) <= 5 else _brand.title()
 
-    # Garbage detection — if too few real letters vs symbols, it's OCR noise
-    # BUT first check if it's a known short vendor name (H&M, DM, etc.)
-    letters_only = re.sub(r"[^a-zA-ZäöüÄÖÜß]", "", name)
-    name_check = name.lower().strip()
-    is_known_vendor = any(v in name_check for v in VENDOR_CATEGORY_MAP if len(v) >= 2)
-    if not is_known_vendor:
-        if len(letters_only) < 3:
-            return "Unbekannt"
-        if len(name) > 0 and len(letters_only) / len(name) < 0.5:
-            return "Unbekannt"
-
-    # OCR correction: check if cleaned name matches a known misread
+    # OCR correction FIRST: rescue known misreads (lödl, acti0n, ...) before
+    # the garbage detector could mistake them for noise.
     name_lower = re.sub(r"[^a-zäöüß0-9]", "", name.lower())
     for wrong, correct in _VENDOR_OCR_CORRECTIONS.items():
         if wrong in name_lower:
             return correct
+
+    # Garbage detection — logo gibberish / random soup / footer fragments.
+    # Whitelist known short vendors (H&M, DM, BP, ...) first so they survive.
+    name_check = name.lower().strip()
+    is_known_vendor = any(v in name_check for v in VENDOR_CATEGORY_MAP if len(v) >= 2)
+    if not is_known_vendor and _is_garbage_vendor(name):
+        return "Unbekannt"
+
     # Title-case if all upper
     if name == name.upper() and len(name) > 3:
         name = name.title()
@@ -2434,6 +2498,22 @@ def parse_invoice(raw_text: str) -> dict:
             if _name and len(_name) >= 2:
                 vendor = _name.capitalize() if _name.islower() else _name
                 vendor_source = "email_domain"
+
+    # Garbage choke-point (vendor only): the 'guess'/email paths bypass
+    # _clean_vendor_name, so a nonsense logo line could still reach here with a
+    # source-based confidence (e.g. 'er en DR ar | ae' as 'guess'). Reject it ->
+    # 'Unbekannt' -> confidence 0 -> needs_review, instead of trusting noise.
+    # Known brands / legal-suffix names are whitelisted. total/date untouched.
+    try:
+        _vchk = str(vendor or "").strip()
+        if _vchk and _vchk != "Unbekannt":
+            _known = any(k in _vchk.lower() for k in VENDOR_CATEGORY_MAP if len(k) >= 2) \
+                or bool(_VENDOR_SUFFIX_RE.search(_vchk))
+            if not _known and _is_garbage_vendor(_vchk):
+                vendor = "Unbekannt"
+                vendor_source = "garbage_rejected"
+    except Exception:
+        pass
 
     # Vendor-specific confidence (0-100), reliability by source. Lets the UI/log
     # flag UNCERTAIN vendors instead of trusting them. (vendor only — total/date untouched.)
