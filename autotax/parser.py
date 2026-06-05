@@ -276,7 +276,32 @@ def _normalize_for_merchant(text: str) -> str:
     return t
 
 
+def _netto_is_store_context(text: str) -> bool:
+    """True only when 'Netto' looks like the NETTO discounter, not a net-amount
+    keyword. 'Netto MwSt / Netto-Betrag / Netto 7%' appears on virtually EVERY
+    German receipt and must NOT be matched as the store."""
+    t = (text or "").lower()
+    if re.search(r"netto\s+marken[\s-]*discount|nettomarkt|ntt[-_]\d", t):
+        return True
+    for m in re.finditer(r"\bnetto\b", t):
+        tail = t[m.end():m.end() + 14]
+        if not re.match(r"[\s.:\-]*(?:mwst|brutto|betrag|summe|steuer|umsatz|"
+                        r"wert|preis|warenwert|%|\d|eur|€)", tail):
+            return True  # a 'netto' NOT followed by an amount keyword -> store
+    return False
+
+
 def detect_merchant(raw_text: str) -> tuple[str, float]:
+    """Public wrapper around _detect_merchant_inner with a NETTO net-amount
+    guard. Identical for every other merchant; only suppresses the
+    'Netto MwSt' -> NETTO false positive (a net-amount line on every receipt)."""
+    canon, conf = _detect_merchant_inner(raw_text)
+    if canon == "NETTO" and not _netto_is_store_context(raw_text):
+        return ("", 0.0)
+    return (canon, conf)
+
+
+def _detect_merchant_inner(raw_text: str) -> tuple[str, float]:
     """Detect merchant/brand from OCR text. Returns (merchant_name, confidence 0.0-1.0).
 
     Strategy:
@@ -1088,6 +1113,13 @@ def _is_garbage_vendor(name: str) -> bool:
 
     # 5) Implausibly long consonant run typical of OCR garble ("frtztghk").
     if re.search(r"[bcdfghjklmnpqrstvwxzß]{7,}", low):
+        return True
+
+    # 6) Math/compare/bracket glyphs never occur in real vendor names, but OCR
+    #    noise carries them ("mie = ee. LO a <<< quam can 7"). Legit name
+    #    punctuation (& . - ' , /) and stray '|' are NOT in this set, so
+    #    'H&M', 'C&A', "L'Oréal", 'bereket Metzgerei |' survive.
+    if re.search(r"[=<>~^\\{}]", s):
         return True
 
     return False
