@@ -641,6 +641,11 @@ _VENDOR_FINGERPRINTS = [
     (r"\bTEDi\s+GmbH\b|\bTEDi\.de\b|\bSteinstr\.?\s*2/4\s*66115", "TEDI"),
     # KiK
     (r"\bKiK\s+Textilien\b", "KIK"),
+    # dm-drogerie markt — 'dm-drogerie markt' her fisin footer'inda yazili.
+    # (2026-06-05: dm taninmiyordu; marka-metni fingerprint eklendi. Gercek
+    # dm fisi gelince barkod/USt-ID ile guclendirilecek.)
+    (r"\bdm[-\s]?drogerie\s*markt", "dm"),
+    (r"\bdm[-\s]?drogerie\b", "dm"),
     # Drugstores
     (r"\bdm[-\s]?drogerie\s+markt\b|\bdm\s+Drogeriemarkt\b", "DM"),
     (r"\bDirk\s+Rossmann\b|\bRossmann\s+GmbH\b|\bROSSMANN\s+\d", "ROSSMANN"),
