@@ -606,14 +606,18 @@ _TOTAL_LINE_RE = re.compile(
 # entry is (regex, canonical_vendor_name). First match wins, so order
 # matters — most specific patterns first.
 #
-# Why this works: the 22-digit Lidl barcode (e.g. 0888303235949102030326)
-# starts with 0888303 on every Lidl receipt regardless of branch. The
-# 'LDL-NNN-XXXX' kasa serial is printed as text on every receipt. Even
-# when the logo is mangled by OCR, these stable strings survive.
+# Why this works: the ~22-digit Lidl Kassenbon barcode (e.g.
+# 0888303235949102030326 / 0888413060839701290526) starts with '0888' on
+# every Lidl receipt regardless of branch. The 'LDL-NNN-XX' kasa serial is
+# printed as text on every receipt. Even when the logo is mangled by OCR,
+# these stable strings survive.
 _VENDOR_FINGERPRINTS = [
-    # Lidl — barcode prefix '0888303' + cash register 'LDL-NNN-NNNN'
-    (r"\b0888303\d{14,15}\b", "LIDL"),
-    (r"\bLDL[-_]\w{0,3}\d{2,3}[-_]\d{3,4}", "LIDL"),
+    # Lidl — Kassenbon barcode '0888' + ~18 hane (sube farketmez) + kasa
+    # serisi 'LDL-NNN-XX'. (2026-06-05: eski '0888303' sabit prefix ve
+    # 'LDL-NN-NNN' dar formati gercek fislerde — 0888413..., LDL-000-4T —
+    # eslesmiyordu; gercek ornekle kanitlanip genisletildi.)
+    (r"\b0888\d{16,19}\b", "LIDL"),
+    (r"\bLDL[-_]\d{2,4}[-_]\w{1,5}", "LIDL"),
     (r"\bLidl\s+Stiftung", "LIDL"),
     (r"\bLidl\s+Plus\b", "LIDL"),
     # Aldi
