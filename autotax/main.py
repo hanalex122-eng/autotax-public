@@ -2124,6 +2124,14 @@ def admin_vendor_audit(limit: int = Query(20, ge=1, le=50), user: dict = Depends
             return True
         if not _re_va.search(r"[A-Za-zÄÖÜäöüß]{3,}", v):  # gercek kelime yok
             return True
+        # Fix C: item-satiri / kod vendor da basarisizdir (yoksa verdict yanlis
+        # 'STALE' der). 'Ene Drirk Classic 0,29 x' fiyat icerir -> failed.
+        if _re_va.search(r"\d+[,.]\d{2}", v):  # fiyat formati -> item satiri
+            return True
+        if len(v.split()) > 4:                 # vendor genelde <=4 kelime
+            return True
+        if sum(c.isdigit() for c in v) > 4:    # cok rakam -> kod/tarih
+            return True
         return False
 
     def _known_brand_in(head_lines) -> str:
@@ -8024,6 +8032,38 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                     result["total_amount"] = _file_amount
     except Exception as e:
         logger.warning("[VENDOR_FILENAME] hata: %s", e)
+
+    # --- Fix A: Vendor durustluk kapisi (vendor-only) ---
+    # Dusuk guvenli (<70: fingerprint/identity/known-brand ile KILITLENMEMIS)
+    # bir vendor hala supheli ise — item satiri ('Ene Drirk Classic 0,29 x'),
+    # tarayici-default dosya adi ('Scan2026 06 05'), adres veya OCR garbage —
+    # sahte isim gostermek yerine 'Unbekannt' yap. Kullanici yanlis isme degil
+    # bos/kontrol alanina bakar. Yuksek guvenli vendor'a dokunmaz; learning/QR
+    # (asagida) Unbekannt'i yine doldurabilir. total/date/OCR'a dokunmaz.
+    try:
+        _fv = (result.get("vendor") or "").strip()
+        _fc = result.get("vendor_confidence") or 0
+        if _fv and _fv != "Unbekannt" and _fc < 70:
+            _alpha = sum(c.isalpha() for c in _fv)
+            _punct = sum(1 for c in _fv if c in ".'\"/\\|`~^*+={}[]()<>")
+            _scanner_pfx = ("scan", "img", "image", "photo", "doc", "page",
+                            "untitled", "kopie", "copy", "neu", "test", "fis")
+            _suspect = (
+                bool(_re_v_chk.search(r"\d+[,.]\d{2}", _fv))             # fiyat -> item satiri
+                or sum(c.isdigit() for c in _fv) > 4                     # cok rakam (tarih/kod)
+                or len(_fv.split()) > 4                                  # vendor genelde <=4 kelime
+                or (_alpha > 0 and _punct / max(_alpha, 1) > 0.2)        # OCR garbage
+                or any(_fv.lower().startswith(p) for p in _scanner_pfx)  # tarayici-default ad
+                or bool(_re_v_chk.search(r"\b\d{5}\b", _fv))             # PLZ -> adres satiri
+                or not _re_v_chk.search(r"[A-Za-zÄÖÜäöüß]{3,}", _fv)     # gercek kelime yok
+            )
+            if _suspect:
+                logger.info("[VENDOR_HONESTY] supheli vendor -> Unbekannt: %r (conf=%s, src=%s)",
+                            _fv, _fc, result.get("vendor_source"))
+                result["vendor"] = "Unbekannt"
+                result["vendor_confidence"] = 0
+    except Exception as _he:
+        logger.warning("[VENDOR_HONESTY] skip: %s", _he)
 
     # --- STEP 3: Merge learning over parser defaults ---
     # Learning wins ONLY for fields where parser returned defaults
