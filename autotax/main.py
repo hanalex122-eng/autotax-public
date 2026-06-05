@@ -1576,6 +1576,17 @@ def admin_page():
   <tbody id="usersBody"><tr><td colspan="9" style="text-align:center;color:#64748b">Yukleniyor...</td></tr></tbody>
 </table>
 
+<div style="margin-top:32px">
+  <h1 style="font-size:18px">🔎 Vendor Tani</h1>
+  <p class="sub" style="margin-bottom:14px">Yanlis/eksik okunan vendor'lar — problem OCR'da mi parser'da mi? (Sadece OKUMA — hicbir sey degismez, total/date/OCR'a dokunmaz.)</p>
+  <div class="toolbar">
+    <button onclick="loadVendorAudit()">🔎 Vendor Tani Calistir</button>
+    <button class="ghost" onclick="copyVendorAudit()">📋 Sonucu Kopyala (Claude'a gonder)</button>
+    <span id="vaStatus" class="small" style="align-self:center"></span>
+  </div>
+  <div id="vaResult"></div>
+</div>
+
 </div>
 
 <script>
@@ -1612,6 +1623,53 @@ async function api(path, opts) {
     throw new Error("HTTP "+r.status+(txt?": "+txt.slice(0,200):""));
   }
   return r.json();
+}
+
+// --- Vendor Tani (read-only diagnostics) ---
+let _vaData = null;
+async function loadVendorAudit() {
+  const st = document.getElementById("vaStatus");
+  const box = document.getElementById("vaResult");
+  st.textContent = "Yukleniyor...";
+  box.innerHTML = "";
+  try {
+    const d = await api("/admin/vendor-audit?limit=20");
+    _vaData = d;
+    st.textContent = d.count + " supheli vendor / " + d.scanned + " fis tarandi";
+    if (!d.items || !d.items.length) {
+      box.innerHTML = '<p class="small">Supheli vendor bulunamadi — hepsi temiz gorunuyor 🎉</p>';
+      return;
+    }
+    let h = '<table><thead><tr><th>ID</th><th>Kayitli Vendor</th><th>Yeniden Parse</th><th>Source / Conf</th><th>Teshis</th><th>OCR ilk satirlar</th></tr></thead><tbody>';
+    for (const it of d.items) {
+      const c = it.verdict.indexOf("PARSER") === 0 ? "#f59e0b" : (it.verdict.indexOf("STALE") === 0 ? "#10b981" : "#ef4444");
+      const brandLine = it.known_brand_in_ocr ? '<br><span class="small">OCR\\'da: ' + esc(it.known_brand_in_ocr) + '</span>' : '';
+      const ocrHead = esc((it.ocr_head || []).slice(0, 8).join("\\n"));
+      h += '<tr>'
+        + '<td>' + it.id + '</td>'
+        + '<td><strong>' + esc(it.stored_vendor || "-") + '</strong></td>'
+        + '<td>' + esc(it.reparsed_vendor || "-") + brandLine + '</td>'
+        + '<td><span class="small">' + esc(it.vendor_source || "-") + ' / ' + (it.vendor_confidence != null ? it.vendor_confidence : "-") + '</span></td>'
+        + '<td style="color:' + c + ';font-weight:600;font-size:11px">' + esc(it.verdict) + '</td>'
+        + '<td><span class="small" style="white-space:pre-wrap">' + ocrHead + '</span></td>'
+        + '</tr>';
+    }
+    h += '</tbody></table>';
+    box.innerHTML = h;
+  } catch (e) {
+    st.textContent = "";
+    box.innerHTML = '<div class="err">Hata: ' + esc(e.message) + '</div>';
+  }
+}
+function copyVendorAudit() {
+  if (!_vaData) { alert("Once '🔎 Vendor Tani Calistir' butonuna bas."); return; }
+  const txt = JSON.stringify(_vaData, null, 2);
+  const ok = () => { document.getElementById("vaStatus").textContent = "✓ Panoya kopyalandi — Claude'a yapistir"; };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(ok, () => alert("Kopyalanamadi; tabloyu elle sec-kopyala."));
+  } else {
+    alert("Tarayici kopyalamayi desteklemiyor; tabloyu elle sec-kopyala.");
+  }
 }
 
 if (!token) {
@@ -2028,6 +2086,101 @@ def admin_reparse(user: dict = Depends(get_current_user)):
         db.rollback()
         logger.exception("Reparse failed")
         err(500, "Reparse failed")
+    finally:
+        db.close()
+
+
+@app.get("/admin/vendor-audit")
+def admin_vendor_audit(limit: int = Query(20, ge=1, le=50), user: dict = Depends(get_current_user)):
+    """READ-ONLY vendor diagnostics. Re-parses each invoice's STORED raw_text
+    to surface vendor / vendor_source / vendor_confidence next to the OCR head,
+    so we can tell whether a wrong vendor is an OCR problem (real vendor not in
+    the OCR head) or a parser problem (vendor present but not selected).
+
+    Writes nothing. Does NOT touch total/date/category/OCR — vendor analysis only.
+    Scoped to the calling admin's own invoices (re-uses /admin/* middleware auth).
+    """
+    import re as _re_va
+    from autotax.parser import (
+        parse_invoice as _pi,
+        detect_vendor_from_fingerprint as _fp_detect,
+        VENDOR_CATEGORY_MAP as _VCM,
+    )
+    _SCANNER = ("scan", "img", "image", "photo", "doc", "page", "untitled",
+                "kopie", "copy", "neu", "test", "rechnung", "invoice", "fatura", "fis")
+
+    def _looks_failed(v: str) -> bool:
+        v = (v or "").strip()
+        if not v or v.lower() == "unbekannt":
+            return True
+        low = v.lower()
+        if any(low.startswith(p) for p in _SCANNER):
+            return True
+        if _re_va.search(r"\d{4}[ _-]?\d{2}", v):  # tarih-benzeri (Scan2026 06 05)
+            return True
+        letters = sum(c.isalpha() for c in v)
+        punct = sum(1 for c in v if c in ".,'\"/\\|`~^*+={}[]()<>")
+        if letters > 0 and punct / letters > 0.2:  # garbage logo parcasi
+            return True
+        if not _re_va.search(r"[A-Za-zÄÖÜäöüß]{3,}", v):  # gercek kelime yok
+            return True
+        return False
+
+    def _known_brand_in(head_lines) -> str:
+        joined = " ".join(head_lines).lower()
+        for k in _VCM:
+            if len(k) < 4:
+                continue
+            if _re_va.search(r"\b" + _re_va.escape(k) + r"\b", joined):
+                return k
+        return ""
+
+    db = SessionLocal()
+    try:
+        invoices = (
+            db.query(Invoice)
+            .filter(
+                Invoice.user_id == user["sub"],
+                (Invoice.is_deleted == False) | (Invoice.is_deleted == None),  # noqa: E712
+            )
+            .order_by(Invoice.id.desc())
+            .limit(400)
+            .all()
+        )
+        out = []
+        for inv in invoices:
+            if len(out) >= limit:
+                break
+            stored = inv.vendor or ""
+            if not _looks_failed(stored):
+                continue
+            raw = inv.raw_text or ""
+            head = [ln.strip() for ln in raw.split("\n") if ln.strip()][:20]
+            rp = _pi(raw) if raw.strip() else {}
+            fp = _fp_detect(raw) if raw.strip() else ""
+            brand = _known_brand_in(head)
+            rp_vendor = rp.get("vendor")
+            if not raw.strip():
+                verdict = "OCR (raw_text bos)"
+            elif fp or brand:
+                verdict = "PARSER (vendor OCR'da var, secilemedi)"
+            elif rp_vendor and not _looks_failed(rp_vendor):
+                verdict = "STALE (yeni parse duzeltiyor)"
+            else:
+                verdict = "OCR (ust kisim okunamamis)"
+            out.append({
+                "id": inv.id,
+                "filename": inv.filename or "",
+                "stored_vendor": stored,
+                "reparsed_vendor": rp_vendor,
+                "vendor_source": rp.get("vendor_source"),
+                "vendor_confidence": rp.get("vendor_confidence"),
+                "fingerprint": fp or None,
+                "known_brand_in_ocr": brand or None,
+                "verdict": verdict,
+                "ocr_head": head,
+            })
+        return {"count": len(out), "scanned": len(invoices), "items": out}
     finally:
         db.close()
 
