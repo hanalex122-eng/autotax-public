@@ -2175,6 +2175,14 @@ def admin_vendor_audit(limit: int = Query(20, ge=1, le=50), user: dict = Depends
             return True
         if sum(c.isdigit() for c in v) > 4:    # cok rakam -> kod/tarih
             return True
+        # Address-like vendor — not a real vendor name. e.g. a LIDL receipt
+        # mis-read as 'Im Rotfeld' (the street) when the fingerprint missed.
+        if _re_va.match(r"^(im|am|an\s+der|auf\s+der|in\s+der|zur|zum|bei\s+der)\b", low):
+            return True
+        if _re_va.search(r"(stra[sß]+e|\bstr\.|\bweg\b|platz|allee|gasse|\bring\b|chaussee)", low):
+            return True
+        if _re_va.search(r"\b\d{5}\b", v):     # PLZ -> address line
+            return True
         return False
 
     def _known_brand_in(head_lines) -> str:
