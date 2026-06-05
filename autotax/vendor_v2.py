@@ -16,9 +16,12 @@ Every public entry point is wrapped so it returns a safe default and never
 raises into the caller (the upload path must be unaffected).
 """
 
+import json
 import logging
 import math
+import os
 import re
+import threading
 from collections import defaultdict
 
 logger = logging.getLogger("autotax")
@@ -241,3 +244,125 @@ def resolve_vendor_v2(raw_text, qr_data=None, filename=None, user_id=None):
         return {"vendor": "Unbekannt", "confidence": 0.0, "status": "error",
                 "evidence": [], "candidates": [], "conflicts": [],
                 "engine_version": ENGINE_VERSION}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Phase 1 SHADOW MODE — silent, observable, flag-gated OFF by default.
+# Writes ONE VendorResolutionLog per invoice; never touches the upload
+# result. Fully wrapped: cannot raise into the caller, cannot slow the
+# upload (runs in a daemon thread), cannot roll back the upload (own session).
+# ═══════════════════════════════════════════════════════════════════
+
+ENABLE_VENDOR_V2_SHADOW = (
+    os.getenv("FEAT_VENDOR_V2_SHADOW", "0") == "1"
+)
+EVIDENCE_JSON_CAP = 8000  # chars per JSON column; oversized -> truncated marker
+
+_SHADOW_METRICS = {
+    "spawned": 0, "resolved": 0, "logged": 0,
+    "skip_flag_off": 0, "skip_duplicate": 0, "errors": 0,
+}
+_metrics_lock = threading.Lock()
+
+
+def get_shadow_metrics():
+    """Read-only snapshot of the shadow pipeline counters (observability)."""
+    with _metrics_lock:
+        snap = dict(_SHADOW_METRICS)
+    snap["enabled"] = ENABLE_VENDOR_V2_SHADOW
+    snap["engine_version"] = ENGINE_VERSION
+    return snap
+
+
+def _bump(key, n=1):
+    with _metrics_lock:
+        _SHADOW_METRICS[key] = _SHADOW_METRICS.get(key, 0) + n
+
+
+def _cap_json(obj):
+    """Serialize to JSON; replace with a small truncated marker if oversized."""
+    try:
+        s = json.dumps(obj, ensure_ascii=False, default=str)
+        if len(s) > EVIDENCE_JSON_CAP:
+            return json.dumps({"_truncated": True, "orig_size": len(s)}, ensure_ascii=False)
+        return s
+    except Exception:
+        return "null"
+
+
+def maybe_log_shadow(invoice_id, user_id, raw_text, qr_data, filename,
+                     current_vendor, current_confidence):
+    """Fire-and-forget shadow entry point. Returns immediately, NEVER raises.
+
+    No-op when FEAT_VENDOR_V2_SHADOW is off (default). When on, the resolver +
+    log write run in a daemon thread so the upload path is never blocked.
+    """
+    try:
+        if not ENABLE_VENDOR_V2_SHADOW:
+            _bump("skip_flag_off")
+            return
+        _bump("spawned")
+        threading.Thread(
+            target=_shadow_worker,
+            args=(invoice_id, user_id, raw_text, qr_data, filename,
+                  current_vendor, current_confidence),
+            daemon=True,
+        ).start()
+    except Exception as e:
+        _bump("errors")
+        logger.warning("[VENDOR_V2] shadow spawn failed: %s", e)
+
+
+def _shadow_worker(invoice_id, user_id, raw_text, qr_data, filename,
+                   current_vendor, current_confidence):
+    """Daemon-thread body: dedup -> resolve -> write. Own session. Never raises."""
+    try:
+        from autotax.db import SessionLocal
+        from autotax.models import VendorResolutionLog
+        db = SessionLocal()
+        try:
+            # One log per invoice (app-level check; UNIQUE index is the backstop)
+            if invoice_id is not None and db.query(VendorResolutionLog.id).filter(
+                    VendorResolutionLog.invoice_id == invoice_id).first():
+                _bump("skip_duplicate")
+                return
+
+            decision = resolve_vendor_v2(raw_text, qr_data, filename, user_id)
+            _bump("resolved")
+
+            cur_v = (current_vendor or "").strip()
+            v2_v = decision.get("vendor") or ""
+            try:
+                cur_c = float(current_confidence) if current_confidence not in (None, "") else None
+            except (TypeError, ValueError):
+                cur_c = None
+
+            db.add(VendorResolutionLog(
+                user_id=user_id,
+                invoice_id=invoice_id,
+                current_vendor=cur_v[:200],
+                current_confidence=cur_c,
+                final_vendor=v2_v[:200],
+                final_confidence=decision.get("confidence"),
+                agree=(_norm_vendor(cur_v) == _norm_vendor(v2_v)),
+                status=decision.get("status"),
+                engine_version=decision.get("engine_version"),
+                evidence=_cap_json(decision.get("evidence")),
+                candidates=_cap_json({"candidates": decision.get("candidates"),
+                                      "conflicts": decision.get("conflicts")}),
+            ))
+            db.commit()
+            _bump("logged")
+        except Exception as e:
+            db.rollback()
+            _msg = str(e).lower()
+            if "unique" in _msg or "duplicate" in _msg:
+                _bump("skip_duplicate")   # lost a race; the other writer logged it
+            else:
+                _bump("errors")
+                logger.warning("[VENDOR_V2] shadow write failed: %s", e)
+        finally:
+            db.close()
+    except Exception as e:
+        _bump("errors")
+        logger.warning("[VENDOR_V2] shadow worker failed: %s", e)

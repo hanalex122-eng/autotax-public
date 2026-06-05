@@ -2193,6 +2193,39 @@ def admin_vendor_audit(limit: int = Query(20, ge=1, le=50), user: dict = Depends
         db.close()
 
 
+@app.get("/admin/vendor-v2/metrics")
+def admin_vendor_v2_metrics(user: dict = Depends(get_current_user)):
+    """Observability for the Vendor v2 SHADOW pipeline (Phase 1). Returns the
+    fire-and-forget in-memory counters (enabled flag, spawned/resolved/logged/
+    skip_*/errors) plus DB stats (total logs, disagreements, agree-rate, status
+    breakdown). Read-only; admin-gated via /admin/* middleware."""
+    out = {}
+    try:
+        from autotax.vendor_v2 import get_shadow_metrics
+        out["shadow"] = get_shadow_metrics()
+    except Exception as e:
+        out["shadow_error"] = str(e)
+    db = SessionLocal()
+    try:
+        from autotax.models import VendorResolutionLog
+        from sqlalchemy import func as _func
+        total = db.query(VendorResolutionLog).count()
+        disagree = db.query(VendorResolutionLog).filter(VendorResolutionLog.agree == False).count()  # noqa: E712
+        by_status = {}
+        for st, cnt in (db.query(VendorResolutionLog.status, _func.count())
+                        .group_by(VendorResolutionLog.status).all()):
+            by_status[st or "null"] = cnt
+        out["log_total"] = total
+        out["log_disagree"] = disagree
+        out["log_agree_rate"] = round((total - disagree) / total, 3) if total else None
+        out["by_status"] = by_status
+    except Exception as e:
+        out["log_error"] = str(e)
+    finally:
+        db.close()
+    return out
+
+
 # ════════════════════════════════════════════════════════════════
 # ADMIN PANEL — kullanici/abonelik yonetimi
 # ════════════════════════════════════════════════════════════════
@@ -8134,6 +8167,16 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
         logger.exception("[AUTO_VISION] schedule failed (continuing)")
 
     auto_create_cash_entry(invoice_id, user["sub"], result)
+    # Vendor Intelligence v2 — SHADOW MODE (Phase 1). Silent + observable,
+    # flag-gated OFF (FEAT_VENDOR_V2_SHADOW). Fire-and-forget: runs in a daemon
+    # thread, never blocks the upload, never raises, never touches the saved
+    # result above. Phase 1 only populates VendorResolutionLog for comparison.
+    try:
+        from autotax.vendor_v2 import maybe_log_shadow
+        maybe_log_shadow(invoice_id, user["sub"], raw_text, qr_data, file.filename,
+                         result.get("vendor"), result.get("vendor_confidence"))
+    except Exception:
+        pass
     # needs_review admin alert (one per invoice, fire-and-forget; silent if no Telegram)
     try:
         if not float(result.get("total_amount") or 0):
