@@ -1587,6 +1587,16 @@ def admin_page():
   <div id="vaResult"></div>
 </div>
 
+<div style="margin-top:28px">
+  <h1 style="font-size:18px">🔬 Shadow Durumu (Vendor v2)</h1>
+  <p class="sub" style="margin-bottom:14px">Shadow engine veri topluyor mu? (enabled + log sayilari). Sadece OKUMA — davranisi etkilemez.</p>
+  <div class="toolbar">
+    <button onclick="loadShadowMetrics()">🔬 Shadow Durumunu Goster</button>
+    <span id="smStatus" class="small" style="align-self:center"></span>
+  </div>
+  <div id="smResult"></div>
+</div>
+
 </div>
 
 <script>
@@ -1627,6 +1637,39 @@ async function api(path, opts) {
 
 // --- Vendor Tani (read-only diagnostics) ---
 let _vaData = null;
+async function loadShadowMetrics() {
+  const st = document.getElementById("smStatus");
+  const box = document.getElementById("smResult");
+  st.textContent = "Yukleniyor...";
+  box.innerHTML = "";
+  try {
+    const d = await api("/admin/vendor-v2/metrics");
+    const sh = d.shadow || {};
+    const on = sh.enabled === true;
+    st.textContent = on ? "✓ Shadow ACIK — veri topluyor" : "Shadow KAPALI (Railway: FEAT_VENDOR_V2_SHADOW=1)";
+    const rows = [
+      ["Durum", on ? "🟢 ACIK" : "🔴 KAPALI"],
+      ["Engine", sh.engine_version || "-"],
+      ["Spawned (tetiklendi)", sh.spawned || 0],
+      ["Logged (yazildi)", sh.logged || 0],
+      ["Skip: flag off", sh.skip_flag_off || 0],
+      ["Skip: manual entry", sh.skip_non_ocr || 0],
+      ["Skip: duplicate", sh.skip_duplicate || 0],
+      ["Errors", sh.errors || 0],
+      ["DB toplam log", d.log_total || 0],
+      ["DB ayrisma (agree=false)", d.log_disagree || 0],
+      ["Agree rate", d.log_agree_rate != null ? (d.log_agree_rate * 100).toFixed(1) + "%" : "-"],
+      ["Status dagilimi", JSON.stringify(d.by_status || {})],
+    ];
+    let h = '<table><tbody>';
+    for (const r of rows) h += '<tr><td class="small">' + esc(r[0]) + '</td><td><strong>' + esc(String(r[1])) + '</strong></td></tr>';
+    h += '</tbody></table>';
+    box.innerHTML = h;
+  } catch (e) {
+    st.textContent = "";
+    box.innerHTML = '<div class="err">Hata: ' + esc(e.message) + '</div>';
+  }
+}
 async function loadVendorAudit() {
   const st = document.getElementById("vaStatus");
   const box = document.getElementById("vaResult");
