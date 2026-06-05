@@ -732,3 +732,79 @@ class CashRegisterImport(Base):
         Index("ix_cri_user_created", "user_id", "created_at"),
         UniqueConstraint("user_id", "file_sha256", name="uq_cri_user_sha"),
     )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Vendor Intelligence System v2 — Evidence-Based Confidence Engine
+# Phase 0: additive infrastructure only. NOTHING reads these yet, so
+# adding them cannot change any existing behavior (zero-risk migration).
+# ═══════════════════════════════════════════════════════════════════
+
+class SignalWeight(Base):
+    """Calibratable per-signal evidence weights for the v2 vendor confidence
+    engine. Lets the log-odds weights be TUNED in production WITHOUT a code
+    deploy (operability). `weight` is in log-odds (nats); the engine combines
+    matching signals as L = L0 + Σ(weight − collision_penalty), grouped by
+    `family` for the correlation discount. Seeded with calibrated defaults
+    (see SIGNAL_WEIGHT_DEFAULTS); admin can override later.
+    """
+    __tablename__ = "signal_weights"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    signal_type = Column(String(40), nullable=False, unique=True, index=True)
+    weight = Column(Float, nullable=False, default=0.0)             # log-odds (nats)
+    collision_penalty = Column(Float, nullable=False, default=0.0)  # subtracted from weight
+    family = Column(String(20), nullable=False, default="other")    # identity|location|device|brand|text|hint
+    enabled = Column(Boolean, nullable=False, default=True)
+    notes = Column(String(200), nullable=True)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class VendorResolutionLog(Base):
+    """Audit + offline-calibration log for the v2 vendor confidence engine.
+    One row per vendor resolution: the evidence that fired, the candidate
+    vendors with their log-odds/confidence, and the final decision.
+
+    Read-only audit — it NEVER drives behavior. Written best-effort (must
+    not block the upload path). No hard FK on purpose: a deleted invoice must
+    not cascade-delete its audit trail, and logging must never fail on FK.
+    """
+    __tablename__ = "vendor_resolution_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    invoice_id = Column(Integer, nullable=True, index=True)
+    evidence = Column(Text, nullable=True)     # JSON: [{signal_type,value,vendor,weight,family,validated}]
+    candidates = Column(Text, nullable=True)   # JSON: [{vendor,log_odds,confidence}]
+    final_vendor = Column(String(200), nullable=True)
+    final_confidence = Column(Float, nullable=True)
+    status = Column(String(20), nullable=True, index=True)  # locked|accepted|provisional|unknown|conflict
+    engine_version = Column(String(20), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+# Calibrated default signal weights (log-odds / nats). Reliability r → weight
+# w = ln(r/(1-r)); single signal under a neutral prior recovers ~r. Tuned in
+# the Confidence Engine v2 technical design. Seeded idempotently in init_db.
+# Order: identity > device/brand > location > text > hint. The scanner-default
+# filename is a HARD VETO (handled in engine code, not as a weight).
+SIGNAL_WEIGHT_DEFAULTS = [
+    # (signal_type, weight, collision_penalty, family, notes)
+    ("ust_id",          3.9, 0.0, "identity", "USt-IdNr (validated)"),
+    ("iban",            3.2, 0.0, "identity", "IBAN (validated)"),
+    ("hrb",             2.2, 0.0, "identity", "Handelsregister HRB"),
+    ("tse_serial",      3.0, 0.0, "device",   "TSE KassenSichV serial"),
+    ("kasse_prefix",    2.0, 0.0, "device",   "Kassen-ID prefix (e.g. LDL-)"),
+    ("barcode_prefix",  2.5, 0.0, "brand",    "Receipt barcode prefix (e.g. 0888)"),
+    ("legal_name",      2.2, 0.0, "brand",    "Legal-name fingerprint"),
+    ("address",         1.8, 0.2, "location", "Street + PLZ"),
+    ("email",           1.4, 0.0, "text",     "Vendor email / domain"),
+    ("phone",           0.8, 0.2, "location", "Phone (OCR-fragile)"),
+    ("known_name",      0.5, 0.0, "text",     "Known-vendor token in OCR head"),
+    ("filename_brand",  0.2, 0.0, "hint",     "Known brand token in filename (capped)"),
+    ("filename_scanner",0.0, 0.0, "hint",     "Scanner-default filename — HARD VETO, never vendor"),
+]
