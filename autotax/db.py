@@ -408,7 +408,8 @@ def init_db():
         _vrl = [c["name"] for c in _inspect(engine).get_columns("vendor_resolution_logs")]
         for _col, _typ in [("current_vendor", "VARCHAR(200)"),
                            ("current_confidence", "DOUBLE PRECISION"),
-                           ("agree", "BOOLEAN")]:
+                           ("agree", "BOOLEAN"),
+                           ("source_type", "VARCHAR(16)")]:
             if _col not in _vrl:
                 try:
                     with engine.begin() as conn:

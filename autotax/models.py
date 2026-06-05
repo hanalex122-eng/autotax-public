@@ -787,6 +787,7 @@ class VendorResolutionLog(Base):
     agree = Column(Boolean, nullable=True, index=True)      # normalized(current) == normalized(v2)?
     status = Column(String(20), nullable=True, index=True)  # locked|accepted|provisional|unknown|conflict
     engine_version = Column(String(20), nullable=True)
+    source_type = Column(String(16), nullable=True, index=True)  # ocr|manual_entry|import
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
     __table_args__ = (
