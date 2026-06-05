@@ -818,3 +818,37 @@ SIGNAL_WEIGHT_DEFAULTS = [
     ("filename_brand",  0.2, 0.0, "hint",     "Known brand token in filename (capped)"),
     ("filename_scanner",0.0, 0.0, "hint",     "Scanner-default filename — HARD VETO, never vendor"),
 ]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Metadata Extraction V1 — structured identifiers pulled from OCR text,
+# INDEPENDENT of vendor resolution. Phase 0: additive infrastructure only.
+# Nothing here feeds vendor/total/date/import — pure metadata store.
+# ═══════════════════════════════════════════════════════════════════
+
+class InvoiceMetadata(Base):
+    """One row per invoice holding identifiers extracted from raw_text:
+    USt-IdNr, IBAN, TSE serial, Kassen-ID, Belegnummer. Written best-effort by
+    a flag-gated, fire-and-forget hook AFTER save_invoice — it never touches the
+    parsed result, the vendor_* columns, or the upload flow. Kept in its own
+    table so vendor logic stays completely independent of it.
+    """
+    __tablename__ = "invoice_metadata"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    invoice_id = Column(Integer, nullable=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    ust_id = Column(String(20), nullable=True, index=True)
+    iban = Column(String(40), nullable=True, index=True)
+    tse_serial = Column(String(120), nullable=True)
+    kasse_id = Column(String(60), nullable=True, index=True)
+    beleg_nr = Column(String(40), nullable=True)
+    raw_snippets = Column(Text, nullable=True)        # JSON: where each was found
+    validation = Column(Text, nullable=True)          # JSON: per-field validity
+    extraction_version = Column(String(16), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+    __table_args__ = (
+        # One metadata row per invoice (NULL invoice_id allowed: NULLs distinct).
+        Index("uq_invoice_metadata_invoice", "invoice_id", unique=True),
+    )
