@@ -780,11 +780,20 @@ class VendorResolutionLog(Base):
     invoice_id = Column(Integer, nullable=True, index=True)
     evidence = Column(Text, nullable=True)     # JSON: [{signal_type,value,vendor,weight,family,validated}]
     candidates = Column(Text, nullable=True)   # JSON: [{vendor,log_odds,confidence}]
-    final_vendor = Column(String(200), nullable=True)
+    current_vendor = Column(String(200), nullable=True)     # old-engine vendor (comparison)
+    current_confidence = Column(Float, nullable=True)
+    final_vendor = Column(String(200), nullable=True)       # v2 vendor
     final_confidence = Column(Float, nullable=True)
+    agree = Column(Boolean, nullable=True, index=True)      # normalized(current) == normalized(v2)?
     status = Column(String(20), nullable=True, index=True)  # locked|accepted|provisional|unknown|conflict
     engine_version = Column(String(20), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+    __table_args__ = (
+        # One shadow log per invoice. invoice_id NULL is allowed (NULLs are
+        # distinct in both PostgreSQL and SQLite unique indexes).
+        Index("uq_vrl_invoice", "invoice_id", unique=True),
+    )
 
 
 # Calibrated default signal weights (log-odds / nats). Reliability r → weight

@@ -399,6 +399,33 @@ def init_db():
     except Exception as e:
         logger.warning("Kasa column-ensure skipped: %s", e)
 
+    # --- Vendor v2 shadow log columns (Phase 1, additive) ---
+    # The table is created by create_all (Phase 0), but create_all cannot ALTER
+    # to add the comparison columns, so they are ensured here. Plus a UNIQUE
+    # index on invoice_id => DB-level "one shadow log per invoice" guarantee.
+    try:
+        from sqlalchemy import text as _text, inspect as _inspect
+        _vrl = [c["name"] for c in _inspect(engine).get_columns("vendor_resolution_logs")]
+        for _col, _typ in [("current_vendor", "VARCHAR(200)"),
+                           ("current_confidence", "DOUBLE PRECISION"),
+                           ("agree", "BOOLEAN")]:
+            if _col not in _vrl:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(_text(f"ALTER TABLE vendor_resolution_logs ADD COLUMN {_col} {_typ}"))
+                    logger.info("vendor-v2: added vendor_resolution_logs.%s", _col)
+                except Exception as _e:
+                    logger.warning("vendor-v2: add %s failed: %s", _col, _e)
+        try:
+            with engine.begin() as conn:
+                conn.execute(_text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_vrl_invoice "
+                    "ON vendor_resolution_logs(invoice_id)"))
+        except Exception as _e:
+            logger.warning("vendor-v2: uq_vrl_invoice skipped: %s", _e)
+    except Exception as e:
+        logger.warning("vendor-v2 column-ensure skipped: %s", e)
+
     # Vendor Intelligence v2, Phase 0 — seed calibratable signal weights.
     ensure_signal_weights()
 
