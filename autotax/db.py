@@ -399,6 +399,40 @@ def init_db():
     except Exception as e:
         logger.warning("Kasa column-ensure skipped: %s", e)
 
+    # Vendor Intelligence v2, Phase 0 — seed calibratable signal weights.
+    ensure_signal_weights()
+
+
+def ensure_signal_weights():
+    """Idempotently seed SignalWeight defaults (Confidence Engine v2, Phase 0).
+
+    Inserts only signal_types that are MISSING; never overwrites admin-tuned
+    rows (so production tuning survives restarts/redeploys). Best-effort — a
+    failure here must not block startup, and nothing reads these weights yet,
+    so a skip changes no behavior.
+    """
+    from autotax.models import SIGNAL_WEIGHT_DEFAULTS, SignalWeight
+    db = SessionLocal()
+    try:
+        existing = {r[0] for r in db.query(SignalWeight.signal_type).all()}
+        added = 0
+        for sig, w, pen, fam, note in SIGNAL_WEIGHT_DEFAULTS:
+            if sig in existing:
+                continue
+            db.add(SignalWeight(
+                signal_type=sig, weight=w, collision_penalty=pen,
+                family=fam, notes=note, enabled=True,
+            ))
+            added += 1
+        if added:
+            db.commit()
+            logger.info("SignalWeight: seeded %d default(s)", added)
+    except Exception as e:
+        db.rollback()
+        logger.warning("SignalWeight seed skipped: %s", e)
+    finally:
+        db.close()
+
 
 def get_db():
     db = SessionLocal()
