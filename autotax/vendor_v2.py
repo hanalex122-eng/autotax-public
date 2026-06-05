@@ -260,9 +260,22 @@ EVIDENCE_JSON_CAP = 8000  # chars per JSON column; oversized -> truncated marker
 
 _SHADOW_METRICS = {
     "spawned": 0, "resolved": 0, "logged": 0,
-    "skip_flag_off": 0, "skip_duplicate": 0, "errors": 0,
+    "skip_flag_off": 0, "skip_duplicate": 0, "skip_non_ocr": 0, "errors": 0,
 }
 _metrics_lock = threading.Lock()
+
+
+def classify_source(raw_text):
+    """Classify the document source so shadow analysis can exclude non-OCR rows.
+    Manual single entries and table imports persist raw_text='manual entry: ...'
+    (db._create_bookkeeping), which is not an OCR receipt -> excluded.
+    Returns 'manual_entry' | 'import' | 'ocr'."""
+    rt = (raw_text or "").lstrip().lower()
+    if rt.startswith("manual entry:"):
+        # Table-import rows carry a 'Tabelle Import' note, but at this layer we
+        # only see raw_text; both are out of scope for OCR vendor recognition.
+        return "manual_entry"
+    return "ocr"
 
 
 def get_shadow_metrics():
@@ -321,6 +334,11 @@ def _shadow_worker(invoice_id, user_id, raw_text, qr_data, filename,
         from autotax.models import VendorResolutionLog
         db = SessionLocal()
         try:
+            # Exclude non-OCR rows (manual entries / table imports) from shadow.
+            source = classify_source(raw_text)
+            if source != "ocr":
+                _bump("skip_non_ocr")
+                return
             # One log per invoice (app-level check; UNIQUE index is the backstop)
             if invoice_id is not None and db.query(VendorResolutionLog.id).filter(
                     VendorResolutionLog.invoice_id == invoice_id).first():
@@ -347,6 +365,7 @@ def _shadow_worker(invoice_id, user_id, raw_text, qr_data, filename,
                 agree=(_norm_vendor(cur_v) == _norm_vendor(v2_v)),
                 status=decision.get("status"),
                 engine_version=decision.get("engine_version"),
+                source_type=source,
                 evidence=_cap_json(decision.get("evidence")),
                 candidates=_cap_json({"candidates": decision.get("candidates"),
                                       "conflicts": decision.get("conflicts")}),

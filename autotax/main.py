@@ -2150,6 +2150,9 @@ def admin_vendor_audit(limit: int = Query(20, ge=1, le=50), user: dict = Depends
             .filter(
                 Invoice.user_id == user["sub"],
                 (Invoice.is_deleted == False) | (Invoice.is_deleted == None),  # noqa: E712
+                # Exclude manual entries / table imports — not OCR receipts, so
+                # vendor recognition does not apply (they pollute the audit).
+                ~Invoice.raw_text.like("manual entry:%"),
             )
             .order_by(Invoice.id.desc())
             .limit(400)
