@@ -2575,6 +2575,9 @@ function TableImportView({triggerRefresh,showToast,onNav}){
   const[queuedFile,setQueuedFile]=useState(null);
   const[uncertainCount,setUncertainCount]=useState(0);
   const[modelUsed,setModelUsed]=useState("");
+  // Gelir/gider tipi override — el yazisi tablolarda sutun belirsizligini cozer.
+  // 'expense' (Ausgaben, varsayilan) | 'income' (Einnahmen) | 'auto' (model karar verir)
+  const[forceType,setForceType]=useState("expense");
   useEffect(()=>{
     const goOn=()=>setOnline(true);
     const goOff=()=>setOnline(false);
@@ -2646,6 +2649,18 @@ function TableImportView({triggerRefresh,showToast,onNav}){
 
   const steps=["Reading file...","Detecting structure...","Mapping columns...","Creating entries..."];
 
+  // Kullanici secimine gore TUM satirlarin gelir/gider tipini zorlar.
+  // 'auto' ise modelin/sutunlarin karari kalir. Tutar hangi alandaysa (income||expense)
+  // onu secilen tipe tasir, digerini sifirlar. Belirsiz (ikisi de 0) satira dokunmaz.
+  const applyForceType=(rws)=>{
+    if(!Array.isArray(rws)||forceType==="auto")return rws;
+    return rws.map(r=>{
+      const amt=(r.income||r.expense||0);
+      if(forceType==="income")return{...r,income:amt,expense:0};
+      return{...r,expense:amt,income:0};
+    });
+  };
+
   const analyze=async()=>{
     if(!file)return;setLoading(true);setRows([]);setCsv("");setSaved(0);setErrorMsg("");setShowTable(false);
     let si=0;const iv=setInterval(()=>{si=(si+1)%steps.length;setStep(steps[si]);},1800);
@@ -2664,9 +2679,10 @@ function TableImportView({triggerRefresh,showToast,onNav}){
         const d=await r.json();
         if(d.success){
           if(d.rows&&d.rows.length>0){
-            setRows(d.rows);setCsv(d.csv||"");setRawRows(d.raw_rows||[]);
+            const _typed=applyForceType(d.rows);
+            setRows(_typed);setCsv(d.csv||"");setRawRows(d.raw_rows||[]);
             // Auto-save rows to Kassenbuch+Rechnungen on server
-            const validRows=d.rows.filter(rr=>!rr.is_uncertain&&(rr.income>0||rr.expense>0));
+            const validRows=_typed.filter(rr=>!rr.is_uncertain&&(rr.income>0||rr.expense>0));
             if(validRows.length>0){
               let autoSaved=0;
               const autoCreatedInvIds=[];
@@ -2758,7 +2774,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
       }
       const kiRows=d.rows||[];
       if(!kiRows.length){setErrorMsg("KI hat keine Zeilen gefunden");setLoading(false);setStep("");return;}
-      setRows(sortRowsByDate(kiRows));setCsv(d.csv||"");setRawRows([]);
+      setRows(sortRowsByDate(applyForceType(kiRows)));setCsv(d.csv||"");setRawRows([]);
       if(showToast)showToast("🪄 Smart-Erkennung: "+kiRows.length+" Zeilen erkannt — pruefen + speichern","success");
       setTimeout(()=>{setShowTable(true);setTimeout(()=>{tableRef.current?.scrollIntoView({behavior:"smooth",block:"start"});},200);},100);
     }catch(e){setErrorMsg("KI Verbindungsfehler — "+(e.message||e));}
@@ -2884,6 +2900,13 @@ function TableImportView({triggerRefresh,showToast,onNav}){
         <div style={{fontSize:13,color:theme.textDim,marginTop:6}}>{mode==="image"?(getLang()==="de"?"Foto, Scan oder PDF — auch handschriftlich":"Photo, scan or PDF — also handwritten"):mode==="csv"?(getLang()==="de"?"CSV-Datei (.csv oder .txt)":"CSV file (.csv or .txt)"):mode==="datev"?(getLang()==="de"?"DATEV Buchungsstapel (.csv) — Umsatz;Soll/Haben;Konto;...":"DATEV posting file (.csv) — Umsatz;Soll/Haben;Konto;..."):(getLang()==="de"?"Excel-Datei (.xlsx oder .xls)":"Excel file (.xlsx or .xls)")}</div>
       </div>}
     </div>
+
+    {mode==="image"&&file&&!loading&&!rows.length&&!saved&&<div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+      <span style={{color:theme.textMuted,fontWeight:600,fontSize:14}}>{getLang()==="de"?"Diese Tabelle enthält:":getLang()==="tr"?"Bu tablo:":"This table contains:"}</span>
+      {[["expense",getLang()==="de"?"Ausgaben":getLang()==="tr"?"Giderler":"Expenses","#ef4444"],["income",getLang()==="de"?"Einnahmen":getLang()==="tr"?"Gelirler":"Income","#10b981"],["auto",getLang()==="de"?"Gemischt":getLang()==="tr"?"Karışık":"Mixed","#8b5cf6"]].map(([v,lbl,clr])=>
+        <button key={v} type="button" onClick={()=>setForceType(v)} style={{padding:"8px 16px",borderRadius:8,border:"2px solid "+(forceType===v?clr:theme.border),background:forceType===v?clr+"22":theme.card,color:forceType===v?clr:theme.textMuted,fontWeight:700,fontSize:13,cursor:"pointer"}}>{(forceType===v?"● ":"○ ")+lbl}</button>
+      )}
+    </div>}
 
     {file&&!loading&&!rows.length&&!saved&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
       <button style={{background:"linear-gradient(135deg,#10b981,#3b82f6)",color:"#fff",border:"none",borderRadius:12,padding:"14px 28px",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 20px rgba(16,185,129,0.3)",transition:"all 0.3s",flex:mode==="image"?1:"1 1 100%"}} onClick={analyze} onMouseOver={e=>e.currentTarget.style.transform="scale(1.03)"} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}>{mode==="image"?"🔍 Tabelle erkennen":"📥 Jetzt importieren"}</button>
