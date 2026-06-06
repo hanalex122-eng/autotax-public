@@ -771,6 +771,8 @@ def invoice_to_dict(i):
         "vendor_email": safe_str(i.vendor_email) if hasattr(i, "vendor_email") and i.vendor_email else "",
         "vendor_phone": safe_str(i.vendor_phone) if hasattr(i, "vendor_phone") and i.vendor_phone else _extract_first_phone(i.raw_text or ""),
         "vendor_address": safe_str(i.vendor_address) if hasattr(i, "vendor_address") and i.vendor_address else _extract_first_address(i.raw_text or ""),
+        # §14 — Leistungsempfänger-Adresse (eigene Rechnungen) für Kunden-Autofill
+        "recipient_address": safe_str(getattr(i, "recipient_address", None) or ""),
         # Reminder system
         "due_date": safe_str(getattr(i, "due_date", None) or ""),
         "payment_status": safe_str(getattr(i, "payment_status", None) or "unpaid"),
@@ -7148,6 +7150,13 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
         mwst_satz = body.get("mwst_satz", "19%")
         rate = float(mwst_satz.replace("%", "").replace(",", ".").strip() or "19")
         mwst_betrag = float(body.get("mwst_betrag", 0)) or round(betrag * rate / (100 + rate), 2)
+        # §19 UStG (Kleinunternehmer) — darf keine USt ausweisen. Erzwinge 0%/0,00,
+        # damit PDF nicht gleichzeitig 19% MwSt UND den §19-Hinweis zeigt (Widerspruch).
+        _u_kr = db.query(User).filter(User.id == user["sub"]).first()
+        if _u_kr and getattr(_u_kr, "is_kleinunternehmer", False):
+            mwst_satz = "0%"
+            rate = 0.0
+            mwst_betrag = 0.0
         # Faelligkeitsdatum: body'de varsa onu kullan, yoksa Rechnungsdatum + 7 gun
         datum_str = (body.get("datum") or "").strip()
         due_str = (body.get("faellig") or body.get("due_date") or "").strip()
