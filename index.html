@@ -688,26 +688,28 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     if(hasCloudAddon){window.open(CLOUD_URL,"_blank");}
     else{setShowCloudModal(true);}
   };
+  // Sidebar grouped into 4 sections (UX only — same ids/routes/state).
+  const _gl=getLang();
   const items=[
     {id:"dashboard",icon:I.dashboard,label:_t("dashboard")},
-    ...(F.email_import!==false?[{id:"email-import",icon:I.chat,label:"Email-Import",href:"/email-settings"}]:[]),
-    {id:"invoices",icon:I.invoice,label:_t("invoices"),badge:overdueCount>0?overdueCount:null},
-    {id:"send_invoices",icon:I.export,label:getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"},
+    {id:"_hdr",label:_gl==="tr"?"BELGELER":_gl==="en"?"DOCUMENTS":"BELEGE"},
     ...(F.upload!==false?[{id:"upload",icon:I.upload,label:_t("upload")}]:[]),
+    ...(F.email_import!==false?[{id:"email-import",icon:I.chat,label:"Email-Import",href:"/email-settings"}]:[]),
     ...(F.tableimport!==false?[{id:"tableimport",icon:I.upload,label:_t("tableimport")}]:[]),
     ...(F.beleg_manual!==false?[{id:"beleg",icon:I.invoice,label:"Neuen Beleg erfassen",href:"/beleg"}]:[]),
-    {id:"bookkeeping",icon:I.tax,label:_t("bookkeeping")},
     {id:"vault",icon:I.invoice,label:_t("vault")},
-    {id:"steuer_uebersicht",icon:I.tax,label:getLang()==="de"?"Steuer-Übersicht":"Tax Overview"},
-    {id:"declaration",icon:I.invoice,label:getLang()==="de"?"Steuererklärung 2025":getLang()==="tr"?"Vergi Beyannamesi 2025":"Tax Return 2025",badge:"BETA"},
-    ...(F.kasse_v2===true?[{id:"kasse_v2",icon:I.upload,label:getLang()==="de"?"Kasse":getLang()==="tr"?"Kasa":"Cash",badge:"NEU"}]:[]),
-    // Kassensystem — sidebar'dan gizlendi (user 2026-05-31: MVP yetersiz,
-    // site+programda göstermek acemilik). View kayıtlı kalıyor (admin /app#kasse
-    // ile erişebilir), Phase 2'de Pos Parser v2 production-ready olunca açılacak.
-    // {id:"kasse",icon:I.upload,label:getLang()==="de"?"Kassensystem":getLang()==="tr"?"Kasiyer Sistemi":"Cash Register",badge:"NEU"},
     ...(F.editor!==false?[{id:"editor",icon:I.check,label:_t("editor")}]:[]),
+    {id:"_hdr",label:_gl==="tr"?"MUHASEBE":_gl==="en"?"ACCOUNTING":"BUCHHALTUNG"},
+    {id:"invoices",icon:I.invoice,label:_t("invoices"),badge:overdueCount>0?overdueCount:null},
+    {id:"send_invoices",icon:I.export,label:_gl==="de"?"Rechnungen senden":_gl==="tr"?"Faturaları gönder":"Send invoices"},
+    {id:"bookkeeping",icon:I.tax,label:_gl==="de"?"💰 Kasse":_gl==="tr"?"💰 Kasa":"💰 Cash Book"},
+    ...(F.kasse_v2===true?[{id:"kasse_v2",icon:I.upload,label:_gl==="de"?"Kasse":_gl==="tr"?"Kasa":"Cash",badge:"NEU"}]:[]),
     {id:"export",icon:I.export,label:_t("export")},
     {id:"companies",icon:I.invoice,label:_t("companies")},
+    {id:"_hdr",label:_gl==="tr"?"VERGİ":_gl==="en"?"TAX":"STEUER"},
+    {id:"steuer_uebersicht",icon:I.tax,label:_gl==="de"?"Steuer-Übersicht":"Tax Overview"},
+    {id:"declaration",icon:I.invoice,label:_gl==="de"?"Steuererklärung 2025":_gl==="tr"?"Vergi Beyannamesi 2025":"Tax Return 2025",badge:"BETA"},
+    {id:"_hdr",label:_gl==="tr"?"ARAÇLAR":"TOOLS"},
     ...(F.ai_chat!==false?[{id:"chat",icon:I.chat,label:_t("chat")}]:[]),
     {id:"_sep"},
     {id:"pricing",icon:I.export,label:_t("pricing")},
@@ -722,7 +724,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
       {!collapsed&&<div style={{display:"flex",flexDirection:"column",lineHeight:1}}><span style={{fontSize:15,fontWeight:700,color:theme.text,whiteSpace:"nowrap"}}>AutoTax <span style={{background:"#f59e0b",color:"#000",fontSize:8,fontWeight:700,padding:"1px 4px",borderRadius:3,verticalAlign:"middle"}}>BETA</span></span><span style={{fontSize:10,fontWeight:800,color:"#00a8cc",letterSpacing:2}}>HUB</span></div>}
     </div>
     <div style={{flex:1,padding:"14px 10px",display:"flex",flexDirection:"column",gap:2,overflowY:"auto"}}>
-      {items.map(it=>it.id==="_sep"?<div key="_sep" style={{height:1,background:theme.border,margin:"6px 8px"}}/>:(<div key={it.id} onClick={()=>it.onClick?it.onClick():it.href?(window.location.href=it.href):onNav(it.id)} onMouseEnter={()=>setHovered(it.id)} onMouseLeave={()=>setHovered(null)}
+      {items.map(it=>it.id==="_sep"?<div key="_sep" style={{height:1,background:theme.border,margin:"6px 8px"}}/>:it.id==="_hdr"?(collapsed?<div key={"h-"+it.label} style={{height:1,background:theme.border,margin:"8px 12px"}}/>:<div key={"h-"+it.label} style={{fontSize:10,fontWeight:700,letterSpacing:1,textTransform:"uppercase",opacity:0.6,color:theme.textMuted,padding:"0 14px",margin:"14px 0 8px"}}>{it.label}</div>):(<div key={it.id} onClick={()=>it.onClick?it.onClick():it.href?(window.location.href=it.href):onNav(it.id)} onMouseEnter={()=>setHovered(it.id)} onMouseLeave={()=>setHovered(null)}
         style={{display:"flex",alignItems:"center",gap:12,padding:collapsed?"10px 16px":"8px 14px",borderRadius:10,cursor:"pointer",
         transition:"all 0.2s cubic-bezier(0.4,0,0.2,1)",
         transitionDelay:hovered===it.id&&active!==it.id?"70ms":"0ms",
