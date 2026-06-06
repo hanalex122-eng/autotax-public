@@ -1151,6 +1151,11 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
   const _now=new Date();const _today=_now.getFullYear()+"-"+String(_now.getMonth()+1).padStart(2,"0")+"-"+String(_now.getDate()).padStart(2,"0");const _jan1="2020-01-01";
   const[filter,setFilter]=useState("");const[filterCat,setFilterCat]=useState("");const[dateFrom,setDateFrom]=useState(_jan1);const[dateTo,setDateTo]=useState(_today);const[filterStatus,setFilterStatus]=useState("");
   const[activeRange,setActiveRange]=useState("all");const[showAdvFilters,setShowAdvFilters]=useState(false);const[searchQ,setSearchQ]=useState("");
+  // Fälligkeit/Mahnung — hatırlatma uyarıları Rechnungen sayfasında da (önce sadece Dashboard'daydı)
+  const[invRem,setInvRem]=useState({overdue:null,upcoming:null,mahnung:{count:0,items:[]}});
+  const reloadReminders=()=>{Promise.all([api("/reminders/overdue").catch(()=>null),api("/reminders/upcoming?days=7").catch(()=>null),api("/invoices/mahnung/queue").catch(()=>({count:0,items:[]}))]).then(([ov,up,mq])=>setInvRem({overdue:ov,upcoming:up,mahnung:{count:(mq&&mq.count)||0,items:(mq&&mq.items)||[]}}));};
+  useEffect(reloadReminders,[refreshKey]);
+  const sendMahnungInv=async(invoiceId,withEmail)=>{try{const d=await api("/invoices/"+invoiceId+"/mahnung/send",{method:"POST",body:JSON.stringify({send_email:withEmail})});if(showToast)showToast(`✓ Mahnung Stufe ${d.level} gesendet${d.email_sent?" + E-Mail":""}`,"success");if(d.pdf_url){const tk=localStorage.getItem("atx_token");const r=await fetch(API+d.pdf_url,{headers:{Authorization:"Bearer "+tk}});if(r.ok){const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`Mahnung-${invoiceId}-Stufe${d.level}.pdf`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);}}reloadReminders();doSearch();}catch(e){alert(_extractErr(e)||e.message);}};
   const[editId,setEditId]=useState(null);const[editData,setEditData]=useState({});
   const[selected,setSelected]=useState(new Set());
   const[deleting,setDeleting]=useState(false);
@@ -1357,6 +1362,26 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
         </>}
       </div>}
     </div>
+    {(invRem.overdue?.count>0||invRem.upcoming?.count>0||invRem.mahnung.count>0)&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {invRem.overdue?.count>0&&<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px",background:"rgba(239,68,68,0.08)",borderRadius:12,border:"1px solid rgba(239,68,68,0.4)",flexWrap:"wrap",gap:10}}>
+        <div><div style={{fontSize:14,fontWeight:700,color:"#ef4444"}}>🚨 {invRem.overdue.count} {getLang()==="de"?"überfällige Rechnung"+(invRem.overdue.count>1?"en":""):getLang()==="tr"?"vadesi geçmiş fatura":"overdue invoice"+(invRem.overdue.count>1?"s":"")}</div><div style={{fontSize:12,color:theme.textMuted,marginTop:2}}>€{(invRem.overdue.total_amount||0).toFixed(2)} {getLang()==="de"?"offen":getLang()==="tr"?"açık":"open"}</div></div>
+        <button style={{...css.btnOutline,borderColor:"rgba(239,68,68,0.4)",color:"#ef4444",fontSize:12}} onClick={()=>setFilterStatus("overdue")}>{getLang()==="de"?"Anzeigen":getLang()==="tr"?"Göster":"Show"}</button>
+      </div>}
+      {invRem.upcoming?.count>0&&<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px",background:"rgba(245,158,11,0.08)",borderRadius:12,border:"1px solid rgba(245,158,11,0.4)",flexWrap:"wrap",gap:10}}>
+        <div><div style={{fontSize:14,fontWeight:700,color:"#f59e0b"}}>📅 {invRem.upcoming.count} {getLang()==="de"?"Rechnung"+(invRem.upcoming.count>1?"en":"")+" in 7 Tagen fällig":getLang()==="tr"?"fatura 7 gün içinde vadeli":"invoice"+(invRem.upcoming.count>1?"s":"")+" due in 7 days"}</div><div style={{fontSize:12,color:theme.textMuted,marginTop:2}}>{(invRem.upcoming.items||[]).slice(0,3).map(i=>i.vendor).join(" · ")}{invRem.upcoming.count>3?" + …":""}</div></div>
+        <button style={{...css.btnOutline,borderColor:"rgba(245,158,11,0.4)",color:"#f59e0b",fontSize:12}} onClick={()=>setFilterStatus("due_soon")}>{getLang()==="de"?"Anzeigen":getLang()==="tr"?"Göster":"Show"}</button>
+      </div>}
+      {invRem.mahnung.count>0&&<div style={{...css.card,padding:"14px 18px",border:"1px solid rgba(245,158,11,0.35)"}}>
+        <div style={{fontSize:14,fontWeight:700,color:"#f59e0b",marginBottom:8}}>📨 {invRem.mahnung.count} {getLang()==="de"?"Mahnung empfohlen":getLang()==="tr"?"Mahnung önerisi":"dunning recommended"}</div>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        {invRem.mahnung.items.slice(0,6).map(m=>(<div key={m.invoice_id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",padding:"6px 10px",background:theme.surfaceAlt,borderRadius:8}}>
+          <div><div style={{fontSize:13,fontWeight:600,color:theme.text}}>{m.vendor}</div><div style={{fontSize:11,color:theme.textMuted}}>€{(m.amount||0).toFixed(2)} · {m.days_overdue}T überfällig{m.current_level>0?" · Stufe "+m.current_level:""}</div></div>
+          <button style={{...css.btn("#f59e0b"),fontSize:12,padding:"6px 12px"}} onClick={()=>{const lvl=(m.current_level||0)+1;const askEmail=m.vendor_email&&confirm(`📨 Mahnung Stufe ${lvl} für „${m.vendor}" — auch per E-Mail an ${m.vendor_email}?\n\nOK = E-Mail + PDF / Abbrechen = nur PDF`);sendMahnungInv(m.invoice_id,askEmail);}}>📨 Mahnung</button>
+        </div>))}
+        </div>
+        {invRem.mahnung.count>6&&<div style={{fontSize:11,color:theme.textDim,textAlign:"center",padding:4}}>+ {invRem.mahnung.count-6} {getLang()==="de"?"weitere":getLang()==="tr"?"daha":"more"}</div>}
+      </div>}
+    </div>}
     {showCreateInv&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,overflow:"auto"}} onClick={()=>setShowCreateInv(false)}>
       <div style={{background:theme.surface,borderRadius:16,padding:28,width:"100%",maxWidth:1100,maxHeight:"95vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
         <h3 style={{color:theme.text,margin:"0 0 20px",fontSize:20,fontWeight:700}}>{t("create_invoice_title")}</h3>
