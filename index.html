@@ -4837,6 +4837,30 @@ function HelpView(){
         </div>
       </div>
     </div>
+    <div style={{...css.card,border:"1px solid rgba(245,158,11,0.25)",background:"rgba(245,158,11,0.05)"}}>
+      <h3 style={{fontSize:16,fontWeight:700,color:"#f59e0b",margin:"0 0 2px"}}>📣 {h3("Was ist neu?","What's new?","Neler yeni?")}</h3>
+      <div style={{fontSize:12,color:theme.textDim,margin:"0 0 14px",fontWeight:600,fontFamily:mono}}>Version 1.8 · {h3("Juni 2026","June 2026","Haziran 2026")}</div>
+      {(()=>{const blk=(ico,col,title,items)=>(<div style={{marginBottom:12}}><div style={{fontSize:13,fontWeight:700,color:col,marginBottom:4}}>{ico} {title}</div><ul style={{margin:0,paddingLeft:20,display:"flex",flexDirection:"column",gap:3}}>{items.map((x,i)=><li key={i} style={{fontSize:13,color:theme.textMuted,lineHeight:1.5}}>{x}</li>)}</ul></div>);return(<div>
+        {blk("✨",theme.accent,h3("Neu","New","Yeni"),[
+          h3("Kassenbuch: Zeitraum-Filter (Tag/Woche/Monat/Quartal/Jahr)","Cash Book: period filter (day/week/month/quarter/year)","Kasa: dönem filtresi (gün/hafta/ay/çeyrek/yıl)"),
+          h3("PDF-Berichte für jeden Zeitraum","PDF reports for any period","Her dönem için PDF rapor"),
+          h3("Firmendaten füllen sich automatisch (Kasse-Einnahme & Rechnung)","Company data auto-fills (cash income & invoice)","Firma bilgileri otomatik dolar (kasa geliri & fatura)"),
+          h3("Rechnungs-PDF zeigt jetzt Adresse, USt-IdNr & IBAN (§14 UStG)","Invoice PDF now shows address, VAT-ID & IBAN (§14 UStG)","Fatura PDF artık adres, USt-IdNr & IBAN gösteriyor (§14 UStG)"),
+        ])}
+        {blk("🔧",theme.blue,h3("Behoben","Fixed","Düzeltildi"),[
+          h3("Betrag-Eingabe: Komma & Punkt funktionieren, '0' lässt sich löschen","Amount input: comma & dot work, '0' clears","Tutar girişi: virgül & nokta çalışıyor, '0' silinebiliyor"),
+          h3("Kassenbuch-Filter aktualisiert jetzt auch die Liste","Cash Book filter now also updates the list","Kasa filtresi artık listeyi de güncelliyor"),
+        ])}
+        {blk("🚧","#f59e0b",h3("Bekannte Einschränkungen","Known limitations","Bilinen kısıtlar"),[
+          h3("Beleg-Erkennung (Vendor) noch in Entwicklung — bei Bedarf manuell korrigieren","Receipt vendor recognition still in development — correct manually if needed","Fiş satıcı tanıma hâlâ geliştiriliyor — gerekirse elle düzelt"),
+        ])}
+        {blk("🔜",theme.textMuted,h3("Bald","Coming soon","Yakında"),[
+          h3("Empfänger-Adresse & Leistungsdatum auf der Rechnung","Recipient address & service date on invoice","Faturada alıcı adresi & hizmet tarihi"),
+          h3("Automatische Beleg-Kategorisierung","Automatic receipt categorization","Otomatik fiş kategorize"),
+          h3("Erweiterte Berichte","Advanced reports","Gelişmiş raporlar"),
+        ])}
+      </div>);})()}
+    </div>
     <div>
       <h3 style={{fontSize:16,fontWeight:600,color:theme.text,margin:"0 0 16px"}}>{_t("features_detail")}</h3>
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -4882,6 +4906,15 @@ function HelpView(){
         <div>OCR: ocr.space API + pdfplumber | Datenbank: PostgreSQL</div>
         <div>Hosting: Railway | Encryption: bcrypt (passwords), JWT (auth)</div>
       </div>
+    </div>
+    <div style={{...css.card,background:theme.surfaceAlt}}>
+      <h3 style={{fontSize:14,fontWeight:600,color:theme.text,margin:"0 0 10px"}}>⚖️ {h3("Rechtliches","Legal","Yasal")}</h3>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+        {[["/impressum","Impressum"],["/datenschutz",h3("Datenschutz","Privacy","Gizlilik")],["/agb","AGB"]].map(([href,lbl])=>(
+          <span key={href} onClick={()=>window.open(href,"_blank")} style={{fontSize:13,color:theme.accent,cursor:"pointer",textDecoration:"underline",fontWeight:500}}>{lbl} ↗</span>
+        ))}
+      </div>
+      <p style={{fontSize:11,color:theme.textDim,margin:"10px 0 0",lineHeight:1.6}}>{h3("AutoTax-HUB ist ein Buchhaltungs-Werkzeug, keine Steuerberatung im Sinne des StBerG.","AutoTax-HUB is an accounting tool, not tax advice under StBerG.","AutoTax-HUB bir muhasebe aracıdır, StBerG anlamında vergi danışmanlığı değildir.")}</p>
     </div>
   </div>);
 }
