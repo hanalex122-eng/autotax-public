@@ -1137,20 +1137,56 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
         if not inv:
             raise HTTPException(status_code=404, detail="Rechnung nicht gefunden")
 
-        companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
-        company_name = companies[0].company_name if companies else "Meine Firma"
+        # --- C2: Briefkopf — vollständige Firmendaten (§14 UStG) ---
+        # Standardfirma bevorzugen, sonst zuletzt angelegte (wie /company/default + Formular)
+        comp = db.query(UserCompany).filter(
+            UserCompany.user_id == user["sub"], UserCompany.is_default == True
+        ).first()
+        if not comp:
+            comp = db.query(UserCompany).filter(
+                UserCompany.user_id == user["sub"]
+            ).order_by(UserCompany.id.desc()).first()
+        company_name = (comp.company_name if comp else None) or "Meine Firma"
         u = db.query(User).filter(User.id == user["sub"]).first()
 
         buf = io.BytesIO()
         c = pdf_canvas.Canvas(buf, pagesize=A4)
         w, h = A4
 
+        # Firmenname
         c.setFillColor(HexColor("#1a2d4a"))
-        c.setFont("Helvetica-Bold", 22)
-        c.drawString(2*cm, h-2.5*cm, company_name)
-        c.setFillColor(HexColor("#00e5a0"))
-        c.setFont("Helvetica", 9)
-        c.drawString(2*cm, h-3*cm, f"E-Mail: {u.email if u else ''}")
+        c.setFont("Helvetica-Bold", 18)
+        c.drawString(2*cm, h-2.3*cm, company_name)
+        # Firmen-Details (Adresse / Kontakt / Steuer) — nur vorhandene Zeilen
+        c.setFillColor(HexColor("#5a6b85"))
+        hy = h - 2.85*cm
+        if comp and comp.address:
+            c.setFont("Helvetica", 8.5)
+            c.drawString(2*cm, hy, str(comp.address))
+            hy -= 0.42*cm
+        _phone = (comp.phone if comp else None)
+        _email = (comp.email if comp else None) or (u.email if u else None)
+        _web = (comp.website if comp else None)
+        _contact = []
+        if _phone:
+            _contact.append(f"Tel: {_phone}")
+        if _email:
+            _contact.append(f"E-Mail: {_email}")
+        if _web:
+            _contact.append(str(_web))
+        if _contact:
+            c.setFont("Helvetica", 8)
+            c.drawString(2*cm, hy, "   ·   ".join(_contact))
+            hy -= 0.42*cm
+        _tax = []
+        if comp and comp.tax_id:
+            _tax.append(f"USt-IdNr/Steuernr.: {comp.tax_id}")
+        if comp and comp.iban:
+            _tax.append(f"IBAN: {comp.iban}")
+        if _tax:
+            c.setFont("Helvetica", 8)
+            c.drawString(2*cm, hy, "   ·   ".join(_tax))
+            hy -= 0.42*cm
 
         c.setFillColor(HexColor("#1a2d4a"))
         c.setFont("Helvetica-Bold", 16)
