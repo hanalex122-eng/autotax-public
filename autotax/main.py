@@ -1195,11 +1195,25 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
         c.setFont("Helvetica", 11)
         c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or f'RE-{inv.id}'}")
         c.drawString(12*cm, h-5.1*cm, f"Datum: {inv.date or 'k.A.'}")
+        # §14 UStG — Leistungsdatum (Liefer-/Leistungszeitpunkt), default = Rechnungsdatum
+        _lstg = getattr(inv, "service_date", None) or inv.date
+        if inv.invoice_type == "income" and _lstg:
+            c.drawString(12*cm, h-5.7*cm, f"Leistungsdatum: {_lstg}")
 
         c.setFont("Helvetica-Bold", 11)
         c.drawString(2*cm, h-6*cm, "An:" if inv.invoice_type == "income" else "Von:")
         c.setFont("Helvetica", 11)
         c.drawString(2*cm, h-6.6*cm, inv.vendor or "Unbekannt")
+        # §14 UStG — Leistungsempfänger-Anschrift (max. 3 Zeilen, kein Überlauf in Tabelle)
+        _raddr = getattr(inv, "recipient_address", None)
+        if inv.invoice_type == "income" and _raddr:
+            c.setFont("Helvetica", 9)
+            c.setFillColor(HexColor("#444444"))
+            _ry = h - 7.1*cm
+            for _line in [s.strip() for s in str(_raddr).replace("\n", ", ").split(", ") if s.strip()][:3]:
+                c.drawString(2*cm, _ry, _line)
+                _ry -= 0.5*cm
+            c.setFillColor(HexColor("#1a2d4a"))
 
         y = h - 8.5*cm
         c.setFillColor(HexColor("#1a2d4a"))
@@ -7128,6 +7142,9 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
             category=body.get("kategorie", "service"), processed=True,
             due_date=due_str, payment_status="unpaid",
             vendor_email=(body.get("kunde_email") or "").strip() or None,
+            # §14 UStG — Leistungsempfänger-Adresse + Leistungsdatum (default=Rechnungsdatum)
+            recipient_address=(body.get("kunde_adresse") or "").strip() or None,
+            service_date=((body.get("leistungsdatum") or "").strip()[:10] or (datum_str[:10] if datum_str else None)),
         )
         db.add(inv)
         db.commit()

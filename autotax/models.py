@@ -342,6 +342,10 @@ class Invoice(Base):
     recurring_freq = Column(String(20), nullable=True)  # monthly|quarterly|yearly
     recurring_next_at = Column(String(10), nullable=True)  # YYYY-MM-DD next spawn
     recurring_parent_id = Column(Integer, ForeignKey("invoices.id"), nullable=True, index=True)
+    # §14 UStG — eigene (income) Rechnung: Leistungsempfänger-Adresse + Leistungsdatum.
+    # Additive, nullable (safe migration). Nur für selbst erstellte Rechnungen relevant.
+    recipient_address = Column(String, nullable=True)   # Kunde/Leistungsempfänger Anschrift
+    service_date = Column(String, nullable=True)        # Leistungsdatum YYYY-MM-DD (default=Rechnungsdatum)
 
 
 class CashEntry(Base):

@@ -192,6 +192,13 @@ def init_db():
             if "tax_missing_docs" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN tax_missing_docs TEXT"))
                 logger.info("Added 'tax_missing_docs' column to invoices (Steuerlogik v1)")
+            # §14 UStG (2026-06-07) — eigene Rechnung: Empfänger-Adresse + Leistungsdatum
+            if "recipient_address" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN recipient_address VARCHAR"))
+                logger.info("Added 'recipient_address' column to invoices (§14 UStG)")
+            if "service_date" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN service_date VARCHAR"))
+                logger.info("Added 'service_date' column to invoices (§14 UStG)")
             # Steuerlogik v2 (2026-05-17) — 4-bolumlu juristisch sicher yapi
             if "ki_einschaetzung" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN ki_einschaetzung TEXT"))
