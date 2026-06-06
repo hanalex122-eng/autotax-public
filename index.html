@@ -2245,11 +2245,33 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
         <input ref={csvRef} type="file" accept=".csv,.txt,.CSV,text/csv,application/vnd.ms-excel" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;const tk=localStorage.getItem("atx_token");if(!tk){alert("Bitte zuerst einloggen");return;}setImporting(true);const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/bookkeeping/import-csv",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await r.json();if(d.success){alert(d.imported+" entries imported");load();if(triggerRefresh)triggerRefresh();}else alert("Error: "+_extractErr(d));}catch(ex){alert("Import fehlgeschlagen: "+ex.message);}setImporting(false);e.target.value="";}}/>
       </div>
     </div>
-    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",margin:"4px 0"}}>
-      <span style={{fontSize:11,color:theme.textDim,marginRight:2}}>{getLang()==="de"?"Zeitraum":getLang()==="tr"?"Dönem":"Period"}:</span>
-      {[["day",getLang()==="de"?"Heute":getLang()==="tr"?"Bugün":"Today"],["week",getLang()==="de"?"Woche":getLang()==="tr"?"Hafta":"Week"],["month",getLang()==="de"?"Monat":getLang()==="tr"?"Ay":"Month"],["quarter",getLang()==="de"?"Quartal":getLang()==="tr"?"Çeyrek":"Quarter"],["year",getLang()==="de"?"Jahr":getLang()==="tr"?"Yıl":"Year"]].map(([k,lbl])=><button key={k} onClick={()=>setPeriod(k)} style={period===k?{...css.btn(theme.accent),padding:"6px 11px",fontSize:12,boxShadow:"none"}:{...css.btnOutline,padding:"6px 11px",fontSize:12}}>{lbl}</button>)}
-      <button style={{...css.btn("#6366f1"),padding:"6px 11px",fontSize:12,marginLeft:"auto"}} onClick={dlReport} title="PDF Bericht">📄 PDF Bericht</button>
-    </div>
+    {(()=>{
+      const L=(de,tr,en)=>getLang()==="de"?de:getLang()==="tr"?tr:en;
+      const _mn=({de:["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"],tr:["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]})[getLang()]||["January","February","March","April","May","June","July","August","September","October","November","December"];
+      const _n=new Date();
+      const _fd=(d)=>("0"+d.getDate()).slice(-2)+"."+("0"+(d.getMonth()+1)).slice(-2)+"."+d.getFullYear();
+      const _rt=(p)=>{const y=_n.getFullYear(),m=_n.getMonth();
+        if(p==="day")return _fd(_n);
+        if(p==="week"){const wd=(_n.getDay()+6)%7;const s=new Date(y,m,_n.getDate()-wd);const e=new Date(s);e.setDate(e.getDate()+6);return _fd(s)+" - "+_fd(e);}
+        if(p==="month")return _mn[m]+" "+y;
+        if(p==="quarter"){const q=Math.floor(m/3)*3;return _mn[q]+" "+y+" - "+_mn[q+2]+" "+y;}
+        return ""+y;};
+      const defs=[["day","📅",L("Heute","Bugün","Today")],["week","📆",L("Diese Woche","Bu Hafta","This Week")],["month","🗓️",L("Dieser Monat","Bu Ay","This Month")],["quarter","📊",L("Dieses Quartal","Bu Çeyrek","This Quarter")],["year","📈",L("Dieses Jahr","Bu Yıl","This Year")]];
+      return(<div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))",gap:8,margin:"4px 0"}}>
+          {defs.map(([k,ico,lbl])=>{const on=period===k;return(
+            <button key={k} type="button" onClick={()=>setPeriod(k)} style={{minHeight:72,padding:"10px 6px",borderRadius:12,cursor:"pointer",border:"1.5px solid "+(on?theme.accent:theme.border),background:on?theme.accent:theme.card,color:on?"#fff":theme.text,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,transition:"all 0.15s",boxShadow:on?"0 4px 14px rgba(16,185,129,0.30)":"none"}} onMouseOver={ev=>{if(!on){ev.currentTarget.style.borderColor=theme.accent;ev.currentTarget.style.transform="translateY(-2px)";}}} onMouseOut={ev=>{if(!on){ev.currentTarget.style.borderColor=theme.border;ev.currentTarget.style.transform="none";}}}>
+              <div style={{fontSize:20,lineHeight:1}}>{ico}</div>
+              <div style={{fontSize:13,fontWeight:700}}>{lbl}</div>
+              <div style={{fontSize:10,opacity:on?0.95:0.6,whiteSpace:"nowrap",fontFamily:mono}}>{_rt(k)}</div>
+            </button>);})}
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,margin:"6px 0 10px"}}>
+          <div style={{fontSize:13,color:theme.textMuted}}>{L("Gewählter Zeitraum","Seçilen Dönem","Selected period")}: <strong style={{color:theme.accent,fontSize:14}}>{_rt(period)}</strong></div>
+          <button style={{...css.btn("#6366f1"),padding:"8px 14px",fontSize:13}} onClick={dlReport}>📄 {L("PDF Bericht","PDF Rapor","PDF Report")}</button>
+        </div>
+      </div>);
+    })()}
     <div style={{display:"flex",gap:8,margin:"4px 0 12px",maxWidth:500}}>
       <input style={{...css.input,flex:1}} placeholder="Search description, vendor..." value={searchKB} onChange={e=>setSearchKB(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")e.preventDefault();}}/>
       {searchKB&&<button style={{...css.btnOutline,padding:"8px 12px"}} onClick={()=>setSearchKB("")}>x</button>}
