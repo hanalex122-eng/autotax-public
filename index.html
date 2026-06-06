@@ -2195,6 +2195,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   const[entries,setEntries]=useState([]);const[loading,setLoading]=useState(true);const[showForm,setShowForm]=useState(false);
   const[form,setForm]=useState({entry_type:"expense",date:new Date().toISOString().slice(0,10),description:"",vendor:"",category:"",gross_amount:"",vat_rate:"19%",payment_method:"",reference:"",notes:""});
   const[syncing,setSyncing]=useState(false);const[summary,setSummary]=useState(null);
+  const[period,setPeriod]=useState("month");const[periodSummary,setPeriodSummary]=useState(null);
   const[selected,setSelected]=useState(new Set());
   const[deleting,setDeleting]=useState(false);
   const[editId,setEditId]=useState(null);
@@ -2206,6 +2207,8 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   const load=()=>{api("/bookkeeping?limit=1000").then(d=>{const items=Array.isArray(d)?d:(d.items||[]);setEntries(items);if(d.summary)setSummary(d.summary);setSelected(new Set());}).catch(e=>{console.error("KASSENBUCH LOAD ERROR:",e);}).finally(()=>setLoading(false));
     api("/bookkeeping/summary/overview").then(s=>{if(s)setSummary(prev=>({...prev,...s}));}).catch(()=>{});};
   useEffect(load,[refreshKey]);
+  useEffect(()=>{api("/bookkeeping/summary?period="+period).then(setPeriodSummary).catch(()=>setPeriodSummary(null));},[period,refreshKey]);
+  const dlReport=async()=>{const tk=localStorage.getItem("atx_token");try{const r=await fetch(API+"/bookkeeping/report?period="+period,{headers:{Authorization:"Bearer "+tk}});if(!r.ok){alert("PDF Fehler ("+r.status+")");return;}const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="kassenbuch_"+period+".pdf";a.click();URL.revokeObjectURL(url);}catch(e){alert("PDF fehlgeschlagen: "+(e.message||e));}};
   const add=async()=>{if(!form.description||!form.gross_amount){alert("Description and amount required");return;}
     try{await api("/bookkeeping",{method:"POST",body:JSON.stringify({...form,gross_amount:parseFloat(form.gross_amount)})});setShowForm(false);setForm({entry_type:"expense",date:new Date().toISOString().slice(0,10),description:"",vendor:"",category:"",gross_amount:"",vat_rate:"19%",payment_method:"",reference:"",notes:""});load();if(triggerRefresh)triggerRefresh();}catch(e){alert(e.message);}};
   const del=async(id)=>{if(!confirm(_t("delete_entry")))return;try{await api("/bookkeeping/"+id,{method:"DELETE"});load();if(triggerRefresh)triggerRefresh();}catch(e){alert(e.message);}};
@@ -2242,16 +2245,22 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
         <input ref={csvRef} type="file" accept=".csv,.txt,.CSV,text/csv,application/vnd.ms-excel" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;const tk=localStorage.getItem("atx_token");if(!tk){alert("Bitte zuerst einloggen");return;}setImporting(true);const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/bookkeeping/import-csv",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await r.json();if(d.success){alert(d.imported+" entries imported");load();if(triggerRefresh)triggerRefresh();}else alert("Error: "+_extractErr(d));}catch(ex){alert("Import fehlgeschlagen: "+ex.message);}setImporting(false);e.target.value="";}}/>
       </div>
     </div>
-    <div style={{display:"flex",gap:8,margin:"12px 0",maxWidth:500}}>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",margin:"4px 0"}}>
+      <span style={{fontSize:11,color:theme.textDim,marginRight:2}}>{getLang()==="de"?"Zeitraum":getLang()==="tr"?"Dönem":"Period"}:</span>
+      {[["day",getLang()==="de"?"Heute":getLang()==="tr"?"Bugün":"Today"],["week",getLang()==="de"?"Woche":getLang()==="tr"?"Hafta":"Week"],["month",getLang()==="de"?"Monat":getLang()==="tr"?"Ay":"Month"],["quarter",getLang()==="de"?"Quartal":getLang()==="tr"?"Çeyrek":"Quarter"],["year",getLang()==="de"?"Jahr":getLang()==="tr"?"Yıl":"Year"]].map(([k,lbl])=><button key={k} onClick={()=>setPeriod(k)} style={period===k?{...css.btn(theme.accent),padding:"6px 11px",fontSize:12,boxShadow:"none"}:{...css.btnOutline,padding:"6px 11px",fontSize:12}}>{lbl}</button>)}
+      <button style={{...css.btn("#6366f1"),padding:"6px 11px",fontSize:12,marginLeft:"auto"}} onClick={dlReport} title="PDF Bericht">📄 PDF Bericht</button>
+    </div>
+    <div style={{display:"flex",gap:8,margin:"4px 0 12px",maxWidth:500}}>
       <input style={{...css.input,flex:1}} placeholder="Search description, vendor..." value={searchKB} onChange={e=>setSearchKB(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")e.preventDefault();}}/>
       {searchKB&&<button style={{...css.btnOutline,padding:"8px 12px"}} onClick={()=>setSearchKB("")}>x</button>}
     </div>
-    {(()=>{const fe=entries.filter(e=>!searchKB||(e.description||"").toLowerCase().includes(searchKB.toLowerCase())||(e.vendor||"").toLowerCase().includes(searchKB.toLowerCase()));const fInc=fe.filter(e=>e.entry_type==="income").reduce((s,e)=>s+(e.gross_amount||0),0);const fExp=fe.filter(e=>e.entry_type==="expense").reduce((s,e)=>s+(e.gross_amount||0),0);const fNet=fInc-fExp;const fVat=fe.filter(e=>e.entry_type==="income").reduce((s,e)=>s+(e.vat_amount||0),0)-fe.filter(e=>e.entry_type==="expense").reduce((s,e)=>s+(e.vat_amount||0),0);return(
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12}}>
-      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{_t("einnahmen")}{searchKB?" (filtered)":""}</div><div style={{fontSize:22,fontWeight:700,color:theme.accent,fontFamily:mono}}>€{fInc.toFixed(2)}</div></div>
-      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{_t("ausgaben")}{searchKB?" (filtered)":""}</div><div style={{fontSize:22,fontWeight:700,color:theme.danger,fontFamily:mono}}>€{fExp.toFixed(2)}</div></div>
-      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{t("profit")}{searchKB?" (filtered)":""}</div><div style={{fontSize:22,fontWeight:700,color:fNet>=0?theme.accent:theme.danger,fontFamily:mono}}>€{fNet.toFixed(2)}</div></div>
-      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{t("balance")+" ("+t("vat")+")"}{searchKB?" (filtered)":""}</div><div style={{fontSize:22,fontWeight:700,color:theme.blue,fontFamily:mono}}>€{fVat.toFixed(2)}</div></div>
+    {(()=>{const ps=periodSummary||{};const _g=Number(ps.gewinn||0);return(
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))",gap:12}}>
+      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{_t("einnahmen")}</div><div style={{fontSize:22,fontWeight:700,color:theme.accent,fontFamily:mono}}>€{Number(ps.einnahmen||0).toFixed(2)}</div></div>
+      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{_t("ausgaben")}</div><div style={{fontSize:22,fontWeight:700,color:theme.danger,fontFamily:mono}}>€{Number(ps.ausgaben||0).toFixed(2)}</div></div>
+      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{t("profit")}</div><div style={{fontSize:22,fontWeight:700,color:_g>=0?theme.accent:theme.danger,fontFamily:mono}}>€{_g.toFixed(2)}</div></div>
+      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{t("balance")+" ("+t("vat")+")"}</div><div style={{fontSize:22,fontWeight:700,color:theme.blue,fontFamily:mono}}>€{Number(ps.mwst||0).toFixed(2)}</div></div>
+      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{_t("entries")}</div><div style={{fontSize:22,fontWeight:700,color:theme.text,fontFamily:mono}}>{Number(ps.anzahl||0)}</div></div>
     </div>);})()}
     {showForm&&<div style={css.card}>
       <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 16px"}}>{_t("new_entry")}</h3>
