@@ -1193,7 +1193,7 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
         typ = "RECHNUNG" if inv.invoice_type == "income" else "BELEG"
         c.drawString(2*cm, h-4.5*cm, typ)
         c.setFont("Helvetica", 11)
-        c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or f'RE-{inv.id}'}")
+        c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or '—'}")
         c.drawString(12*cm, h-5.1*cm, f"Datum: {inv.date or 'k.A.'}")
         # §14 UStG — Leistungsdatum (Liefer-/Leistungszeitpunkt), default = Rechnungsdatum
         _lstg = getattr(inv, "service_date", None) or inv.date
@@ -4236,7 +4236,7 @@ def _fetch_invoice_pdf_bytes(inv, db, user_sub: int) -> tuple[bytes | None, str,
         typ = "RECHNUNG" if inv.invoice_type == "income" else "BELEG"
         c.drawString(2*cm, h-4.5*cm, typ)
         c.setFont("Helvetica", 11)
-        c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or f'RE-{inv.id}'}")
+        c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or '—'}")
         c.drawString(12*cm, h-5.1*cm, f"Datum: {inv.date or 'k.A.'}")
         c.setFont("Helvetica-Bold", 11)
         c.drawString(2*cm, h-6*cm, "An:" if inv.invoice_type == "income" else "Von:")
@@ -4553,7 +4553,7 @@ async def email_invoice_attachment(
                     typ = "RECHNUNG" if inv.invoice_type == "income" else "BELEG"
                     c.drawString(2*cm, h-4.5*cm, typ)
                     c.setFont("Helvetica", 11)
-                    c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or f'RE-{inv.id}'}")
+                    c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or '—'}")
                     c.drawString(12*cm, h-5.1*cm, f"Datum: {inv.date or 'k.A.'}")
                     c.setFont("Helvetica-Bold", 11)
                     c.drawString(2*cm, h-6*cm, "An:" if inv.invoice_type == "income" else "Von:")
@@ -7109,6 +7109,31 @@ def email_test(request: Request, user: dict = Depends(get_current_user)):
         db.close()
 
 
+def _next_invoice_number(db, uid: int) -> str:
+    """§14 UStG — nächste fortlaufende, eindeutige Rechnungsnummer: RE-YYYY-NNNN.
+
+    Pro Nutzer und Jahr zurückgesetzt. Sucht die höchste vorhandene Nummer mit
+    Präfix RE-{Jahr}- (nullpadded NNNN -> korrekte String-Sortierung) und +1.
+    Nur für selbst erstellte Rechnungen; manuell vergebene Nummern bleiben
+    unberührt und werden separat auf Eindeutigkeit geprüft.
+    """
+    year = datetime.now().year
+    prefix = f"RE-{year}-"
+    last = (
+        db.query(Invoice)
+        .filter(Invoice.user_id == uid, Invoice.invoice_number.like(f"{prefix}%"))
+        .order_by(Invoice.invoice_number.desc())
+        .first()
+    )
+    seq = 1
+    if last and last.invoice_number:
+        try:
+            seq = int(str(last.invoice_number).split("-")[-1]) + 1
+        except (ValueError, IndexError):
+            seq = 1
+    return f"{prefix}{seq:04d}"
+
+
 @app.post("/invoices/create-rechnung")
 def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_user)):
     """Create a manual outgoing invoice (Einnahme).
@@ -7132,12 +7157,25 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
             except ValueError:
                 base_d = datetime.now().date()
             due_str = (base_d + timedelta(days=7)).isoformat()
+        # §14 UStG — Rechnungsnummer: manuell -> Eindeutigkeit prüfen; leer -> auto RE-YYYY-NNNN
+        rnr = (body.get("rechnung_nr") or "").strip()
+        if rnr:
+            dup = db.query(Invoice).filter(
+                Invoice.user_id == user["sub"],
+                Invoice.invoice_number == rnr,
+                (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
+            ).first()
+            if dup:
+                err(400, f"Rechnungsnummer '{rnr}' existiert bereits (Rechnung #{dup.id}). "
+                         "§14 UStG verlangt eindeutige Nummern.")
+        else:
+            rnr = _next_invoice_number(db, user["sub"])
         inv = Invoice(
             user_id=user["sub"], filename="rechnung-erstellt",
             vendor=body.get("kunde", ""), total_amount=betrag,
             vat_amount=mwst_betrag, vat_rate=mwst_satz,
             date=datum_str, raw_text="Manuell erstellte Rechnung",
-            invoice_type="income", invoice_number=body.get("rechnung_nr", ""),
+            invoice_type="income", invoice_number=rnr,
             payment_method=body.get("zahlungsart", ""),
             category=body.get("kategorie", "service"), processed=True,
             due_date=due_str, payment_status="unpaid",
@@ -7155,7 +7193,8 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
             "date": body.get("datum", ""), "category": "service",
             "invoice_type": "income",
         })
-        return {"success": True, "id": inv.id, "invoice_number": inv.invoice_number}
+        return {"success": True, "id": inv.id, "invoice_number": inv.invoice_number,
+                "generated_invoice_number": inv.invoice_number}
     except HTTPException:
         raise
     except Exception:
