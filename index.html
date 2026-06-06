@@ -2299,7 +2299,10 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
       </div>);
     })()}
     <div style={{display:"flex",gap:8,margin:"4px 0 12px",maxWidth:500}}>
-      <input style={{...css.input,flex:1}} placeholder="Search description, vendor..." value={searchKB} onChange={e=>setSearchKB(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")e.preventDefault();}}/>
+      <div style={{position:"relative",flex:1}}>
+        <input style={{...css.input,width:"100%",paddingLeft:38,border:"1px solid rgba(16,185,129,0.30)",background:"rgba(16,185,129,0.04)"}} placeholder={getLang()==="de"?"Beschreibung, Lieferant suchen…":getLang()==="tr"?"Açıklama, tedarikçi ara…":"Search description, vendor…"} value={searchKB} onChange={e=>setSearchKB(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")e.preventDefault();}}/>
+        <div style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}><Icon d={I.search} size={16} color={theme.accent}/></div>
+      </div>
       {searchKB&&<button style={{...css.btnOutline,padding:"8px 12px"}} onClick={()=>setSearchKB("")}>x</button>}
     </div>
     {(()=>{const ps=periodSummary||{};const _g=Number(ps.gewinn||0);return(
