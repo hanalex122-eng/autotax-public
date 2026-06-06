@@ -9726,6 +9726,58 @@ def bookkeeping_summary(year: int = Query(None), user: dict = Depends(get_acting
         db.close()
 
 
+@app.get("/bookkeeping/summary")
+def bookkeeping_summary_period(
+    period: str = Query("month"),
+    ref: str = Query(None, description="reference date YYYY-MM-DD (default: today)"),
+    user: dict = Depends(get_acting_context),
+):
+    """Period-aware cash-book summary for the Kassenbuch cards (Einnahmen/
+    Ausgaben/Gewinn/MwSt/Anzahl). Delegates to kasse_service.summarize — the
+    single source of truth (same numbers as the v2 PDF reports). Read-only +
+    additive: the legacy /bookkeeping/summary/overview is untouched. Excludes
+    soft-deleted and pending_review entries (legacy NULL status = confirmed)."""
+    from autotax import kasse_service as _ks
+    from datetime import date as _date, datetime as _dt
+    p = (period or "month").lower()
+    try:
+        today = _dt.strptime((ref or "")[:10], "%Y-%m-%d").date() if ref else _date.today()
+    except Exception:
+        today = _date.today()
+    if p == "day":
+        start, end = _ks.day_range(today)
+    elif p == "week":
+        start, end = _ks.week_range(today)
+    elif p == "month":
+        start, end = _ks.month_range(today.year, today.month)
+    elif p == "quarter":
+        _q0 = ((today.month - 1) // 3) * 3 + 1
+        start = _dt(today.year, _q0, 1)
+        end = _dt(today.year + 1, 1, 1) if _q0 + 3 > 12 else _dt(today.year, _q0 + 3, 1)
+    elif p == "year":
+        start, end = _dt(today.year, 1, 1), _dt(today.year + 1, 1, 1)
+    else:
+        err(422, "period must be day|week|month|quarter|year")
+    db = SessionLocal()
+    try:
+        s = _ks.summarize(db, user["sub"], start, end)
+        return {
+            "period": p,
+            "period_start": s["period_start"],
+            "period_end": s["period_end"],
+            "einnahmen": s["total_income"],
+            "ausgaben": s["total_expense"],
+            "gewinn": round(s["total_income"] - s["total_expense"], 2),
+            "mwst": round(s["vat_collected"] - s["vat_paid"], 2),
+            "anzahl": s["entry_count"],
+        }
+    except Exception:
+        logger.exception("Bookkeeping period summary failed")
+        err(500, "Summary failed")
+    finally:
+        db.close()
+
+
 # ============================================================
 # BOOKKEEPING: EXPORT CSV
 # ============================================================
