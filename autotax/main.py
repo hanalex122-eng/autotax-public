@@ -9778,6 +9778,63 @@ def bookkeeping_summary_period(
         db.close()
 
 
+def _kasse_period_range(period: str, ref: str):
+    """(start, end, label) for a period; same logic as /bookkeeping/summary so
+    cards and PDF always cover the identical range. err(422) on bad period."""
+    from datetime import date as _date, datetime as _dt
+    from autotax import kasse_service as _ks
+    p = (period or "month").lower()
+    try:
+        today = _dt.strptime((ref or "")[:10], "%Y-%m-%d").date() if ref else _date.today()
+    except Exception:
+        today = _date.today()
+    labels = {"day": "Tag", "week": "Woche", "month": "Monat", "quarter": "Quartal", "year": "Jahr"}
+    if p == "day":
+        start, end = _ks.day_range(today)
+    elif p == "week":
+        start, end = _ks.week_range(today)
+    elif p == "month":
+        start, end = _ks.month_range(today.year, today.month)
+    elif p == "quarter":
+        _q0 = ((today.month - 1) // 3) * 3 + 1
+        start = _dt(today.year, _q0, 1)
+        end = _dt(today.year + 1, 1, 1) if _q0 + 3 > 12 else _dt(today.year, _q0 + 3, 1)
+    elif p == "year":
+        start, end = _dt(today.year, 1, 1), _dt(today.year + 1, 1, 1)
+    else:
+        err(422, "period must be day|week|month|quarter|year")
+    return start, end, labels.get(p, p), p
+
+
+@app.get("/bookkeeping/report")
+def bookkeeping_report_pdf(
+    period: str = Query("month"),
+    ref: str = Query(None, description="reference date YYYY-MM-DD (default: today)"),
+    user: dict = Depends(get_acting_context),
+):
+    """Stream a Kassenbuch PDF for the given period. Reuses kasse_reports'
+    renderer + kasse_service aggregation (single source — same numbers as the
+    cards). Download-on-the-fly: nothing stored in R2. Read-only + additive."""
+    from autotax import kasse_service as _ks, kasse_reports as _kr
+    start, end, label, _p = _kasse_period_range(period, ref)
+    db = SessionLocal()
+    try:
+        summary = _ks.summarize(db, user["sub"], start, end)
+        # Keep PDF 'Gewinn' consistent with the cards + legacy overview (gross).
+        summary["profit"] = round(summary["total_income"] - summary["total_expense"], 2)
+        pdf = _kr._render_pdf(label, summary)
+        fname = f"kassenbuch_{_p}_{summary['period_start']}.pdf"
+        return StreamingResponse(
+            io.BytesIO(pdf), media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+    except Exception:
+        logger.exception("Bookkeeping PDF report failed")
+        err(500, "Report failed")
+    finally:
+        db.close()
+
+
 # ============================================================
 # BOOKKEEPING: EXPORT CSV
 # ============================================================
