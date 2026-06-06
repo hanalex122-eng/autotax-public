@@ -1148,6 +1148,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
   const[invoices,setInvoices]=useState([]);const[total,setTotal]=useState(0);const[loading,setLoading]=useState(true);
   const _now=new Date();const _today=_now.getFullYear()+"-"+String(_now.getMonth()+1).padStart(2,"0")+"-"+String(_now.getDate()).padStart(2,"0");const _jan1="2020-01-01";
   const[filter,setFilter]=useState("");const[filterCat,setFilterCat]=useState("");const[dateFrom,setDateFrom]=useState(_jan1);const[dateTo,setDateTo]=useState(_today);const[filterStatus,setFilterStatus]=useState("");
+  const[activeRange,setActiveRange]=useState("all");const[showAdvFilters,setShowAdvFilters]=useState(false);const[searchQ,setSearchQ]=useState("");
   const[editId,setEditId]=useState(null);const[editData,setEditData]=useState({});
   const[selected,setSelected]=useState(new Set());
   const[deleting,setDeleting]=useState(false);
@@ -1177,10 +1178,11 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
     else if(p==="quarter")from=_isoI(new Date(n.getFullYear(),Math.floor(n.getMonth()/3)*3,1));
     else if(p==="year")from=_isoI(new Date(n.getFullYear(),0,1));
     else {from=_jan1;}
-    setDateFrom(from);setDateTo(to);load(filter,filterCat,from,to);};
+    setActiveRange(p);setDateFrom(from);setDateTo(to);load(filter,filterCat,from,to);};
   const[syncing,setSyncing]=useState(false);
   const syncAll=async()=>{setSyncing(true);try{const r=await api("/bookkeeping/sync-invoices",{method:"POST"});if(showToast)showToast((r.synced||0)+" sync, "+(r.reverse_synced||0)+" synced from cash book","success");doSearch();}catch(e){if(showToast)showToast(_t("sync_failed"),"error");}setSyncing(false);};
   useEffect(()=>{load(filter,filterCat,dateFrom,dateTo);},[refreshKey]);
+  useEffect(()=>{const _dt=setTimeout(()=>setSearchQ(filter),300);return()=>clearTimeout(_dt);},[filter]);
   useEffect(()=>{
     if(typeof sessionStorage==="undefined")return;
     const hint=sessionStorage.getItem("atx_invoices_status");
@@ -1292,6 +1294,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
   const cats=[...new Set(invoices.map(i=>i.category).filter(Boolean))];
   const _today_iso=new Date().toISOString().slice(0,10);
   const filtered=invoices.filter(inv=>{
+    if(searchQ){const _q=searchQ.toLowerCase();if(!((inv.vendor||"").toLowerCase().includes(_q)||(inv.description||"").toLowerCase().includes(_q)||(inv.invoice_number||"").toLowerCase().includes(_q)))return false;}
     if(filterStatus==="read"&&(!inv.total_amount||inv.total_amount===0))return false;
     if(filterStatus==="unread"&&inv.total_amount>0)return false;
     if(filterStatus==="no_date"&&inv.date)return false;  // Belegdatum fehlt — schnell finden & nachtragen
@@ -1443,9 +1446,9 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
     }
     <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
       <div style={{position:"relative",flex:1,minWidth:160}}><input style={{...css.input,paddingLeft:36}} placeholder="Search vendor..." value={filter} onChange={e=>setFilter(e.target.value)}/><div style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}><Icon d={I.search} size={16} color={theme.textDim}/></div></div>
-      <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:theme.textDim}}>Von</span><input style={{...css.input,width:140,cursor:"pointer"}} type="date" min="2020-01-01" max={dateTo||_today} value={dateFrom} onKeyDown={e=>e.preventDefault()} onChange={e=>setDateFrom(e.target.value)}/></div>
-      <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:theme.textDim}}>Bis</span><input style={{...css.input,width:140,cursor:"pointer"}} type="date" min={dateFrom||"2020-01-01"} max={_today} value={dateTo} onKeyDown={e=>e.preventDefault()} onChange={e=>setDateTo(e.target.value)}/></div>
-      <select style={{...css.input,width:130}} value={filterCat} onChange={e=>setFilterCat(e.target.value)}><option value="">{_t("all_categories")}</option><option value="food">{_t("food")}</option><option value="restaurant">{_t("restaurant")}</option><option value="fuel">{_t("fuel")}</option><option value="clothing">{_t("clothing")}</option><option value="electronics">{_t("electronics")}</option><option value="office">{_t("office")}</option><option value="telecom">{_t("telecom")}</option><option value="transport">{_t("transport")}</option><option value="drugstore">{_t("drugstore")}</option><option value="other">{_t("other")}</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select>
+      <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:theme.textDim}}>Von</span><input style={{...css.input,width:140,cursor:"pointer"}} type="date" min="2020-01-01" max={dateTo||_today} value={dateFrom} onKeyDown={e=>e.preventDefault()} onChange={e=>{setActiveRange("");setDateFrom(e.target.value);load(filter,filterCat,e.target.value,dateTo);}}/></div>
+      <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:theme.textDim}}>Bis</span><input style={{...css.input,width:140,cursor:"pointer"}} type="date" min={dateFrom||"2020-01-01"} max={_today} value={dateTo} onKeyDown={e=>e.preventDefault()} onChange={e=>{setActiveRange("");setDateTo(e.target.value);load(filter,filterCat,dateFrom,e.target.value);}}/></div>
+      <select style={{...css.input,width:130}} value={filterCat} onChange={e=>{setFilterCat(e.target.value);load(filter,e.target.value,dateFrom,dateTo);}}><option value="">{_t("all_categories")}</option><option value="food">{_t("food")}</option><option value="restaurant">{_t("restaurant")}</option><option value="fuel">{_t("fuel")}</option><option value="clothing">{_t("clothing")}</option><option value="electronics">{_t("electronics")}</option><option value="office">{_t("office")}</option><option value="telecom">{_t("telecom")}</option><option value="transport">{_t("transport")}</option><option value="drugstore">{_t("drugstore")}</option><option value="other">{_t("other")}</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select>
       <select style={{...css.input,width:170}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
         <option value="">{_t("all_entries")}</option>
         <option value="read">{_t("processed")}</option>
@@ -1456,16 +1459,37 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
         <option value="due_soon">📅 Fällig in 7 Tagen</option>
         <option value="no_date">⚠️ Ohne Belegdatum</option>
       </select>
-      <button style={{...css.btn(),padding:"10px 16px",fontSize:12}} onClick={doSearch}>{_t("search")}</button>
       <button style={{padding:"10px 18px",fontSize:13,fontWeight:700,borderRadius:10,border:"none",background:"linear-gradient(135deg,#22c55e,#16a34a)",color:"#fff",cursor:"pointer",boxShadow:"0 2px 12px rgba(34,197,94,0.35)",transition:"all 0.15s",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6}} onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.03)";e.currentTarget.style.boxShadow="0 4px 18px rgba(34,197,94,0.5)"}} onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="0 2px 12px rgba(34,197,94,0.35)"}} onClick={async()=>{setShowCreateInv(true);try{const dc=await api("/company/default");if(dc&&dc.exists){setNewInv(p=>({...p,firma_name:p.firma_name||dc.company_name,firma_adresse:p.firma_adresse||dc.address,firma_email:p.firma_email||dc.email,firma_phone:p.firma_phone||dc.phone,firma_fax:p.firma_fax||dc.fax,firma_iban:p.firma_iban||dc.iban}));if(showToast)showToast("Firma bilgileri otomatik dolduruldu","info");}else{if(showToast)showToast("Firma bilgilerinizi kaydedin — bir daha yazmanız gerekmez","warn");}}catch(e){}}}>➕ {t("create_invoice")}</button>
       <button style={{padding:"10px 18px",fontSize:13,fontWeight:700,borderRadius:10,border:"none",background:syncing?"#64748b":"linear-gradient(135deg,#f59e0b,#ef4444)",color:"#fff",cursor:syncing?"wait":"pointer",boxShadow:syncing?"none":"0 2px 12px rgba(245,158,11,0.45)",transition:"all 0.15s",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,opacity:syncing?0.7:1}} onMouseEnter={e=>{if(!syncing){e.currentTarget.style.transform="scale(1.03)";e.currentTarget.style.boxShadow="0 4px 18px rgba(245,158,11,0.6)";}}} onMouseLeave={e=>{if(!syncing){e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="0 2px 12px rgba(245,158,11,0.45)";}}} onClick={syncAll} disabled={syncing}>{syncing?"⏳ Sync...":"⚡ "+_t("sync_invoices_btn")}</button>
       <button style={{...css.btnOutline,padding:"8px 12px",fontSize:11,borderColor:"rgba(0,194,255,0.3)",color:"#00c2ff"}} onClick={()=>{const allIds=filtered.map(i=>i.id);if(!allIds.length){if(showToast)showToast("Keine Rechnungen vorhanden","info");return;}if(!confirm("Alle "+allIds.length+" PDFs herunterladen?"))return;downloadBulkPDF(allIds,showToast);}}>🖨️ Alle PDFs ({filtered.length})</button>
       {(filter||filterCat||filterStatus)&&<button style={{...css.btnOutline,padding:"8px 12px",fontSize:11}} onClick={()=>{setFilter("");setDateFrom(_jan1);setDateTo(_today);setFilterCat("");setFilterStatus("");load("","",_jan1,_today);}}>Reset</button>}
     </div>
-    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-      <span style={{fontSize:11,color:theme.textDim,marginRight:2}}>{_pl3("Zeitraum","Dönem","Period")}:</span>
-      {[["today",_pl3("Heute","Bugün","Today")],["week",_pl3("Woche","Hafta","Week")],["month",_pl3("Monat","Ay","Month")],["quarter",_pl3("Quartal","Çeyrek","Quarter")],["year",_pl3("Jahr","Yıl","Year")],["all",_pl3("Alle","Tümü","All")]].map(([k,lbl])=><button key={k} onClick={()=>setRange(k)} style={{...css.btnOutline,padding:"6px 11px",fontSize:11}}>{lbl}</button>)}
-    </div>
+    {(()=>{
+      const _m=({de:["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"],tr:["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]})[_lng]||["January","February","March","April","May","June","July","August","September","October","November","December"];
+      const _N=new Date();const _p2=x=>("0"+x).slice(-2);
+      const _dmy=d=>_p2(d.getDate())+"."+_p2(d.getMonth()+1)+"."+d.getFullYear();
+      const _dm=d=>_p2(d.getDate())+"."+_p2(d.getMonth()+1);
+      const _rt=p=>{const y=_N.getFullYear(),mo=_N.getMonth();
+        if(p==="today")return _dmy(_N);
+        if(p==="week"){const wd=(_N.getDay()+6)%7;const s=new Date(y,mo,_N.getDate()-wd);const e=new Date(s);e.setDate(e.getDate()+6);return _dm(s)+" - "+_dm(e);}
+        if(p==="month")return _m[mo]+" "+y;
+        if(p==="quarter")return "Q"+(Math.floor(mo/3)+1)+" "+y;
+        if(p==="year")return ""+y;
+        return _pl3("Gesamte Daten","Tüm Veriler","All data");};
+      const defs=[["today","📅",_pl3("Heute","Bugün","Today")],["week","📆",_pl3("Diese Woche","Bu Hafta","This Week")],["month","🗓️",_pl3("Dieser Monat","Bu Ay","This Month")],["quarter","📊",_pl3("Dieses Quartal","Bu Çeyrek","This Quarter")],["year","📈",_pl3("Dieses Jahr","Bu Yıl","This Year")],["all","📋",_pl3("Alle","Tümü","All")]];
+      const headTxt=defs.some(d=>d[0]===activeRange)?_rt(activeRange):(dateFrom+" - "+dateTo);
+      return(<div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))",gap:8}}>
+          {defs.map(([k,ico,lbl])=>{const on=activeRange===k;return(
+            <button key={k} type="button" onClick={()=>setRange(k)} style={{minHeight:70,padding:"10px 8px",borderRadius:12,cursor:"pointer",border:"1.5px solid "+(on?theme.accent:theme.border),background:on?theme.accent:theme.card,color:on?"#fff":theme.text,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,transition:"all 0.15s",boxShadow:on?"0 4px 14px rgba(16,185,129,0.30)":"none"}} onMouseOver={ev=>{if(!on){ev.currentTarget.style.borderColor=theme.accent;ev.currentTarget.style.transform="translateY(-2px)";}}} onMouseOut={ev=>{if(!on){ev.currentTarget.style.borderColor=theme.border;ev.currentTarget.style.transform="none";}}}>
+              <div style={{fontSize:20,lineHeight:1}}>{ico}</div>
+              <div style={{fontSize:13,fontWeight:700}}>{lbl}</div>
+              <div style={{fontSize:10,opacity:on?0.95:0.6,whiteSpace:"nowrap",fontFamily:mono}}>{_rt(k)}</div>
+            </button>);})}
+        </div>
+        <div style={{margin:"8px 0 2px",fontSize:13,color:theme.textMuted}}>Zeitraum: <strong style={{color:theme.accent,fontSize:14}}>{headTxt}</strong></div>
+      </div>);
+    })()}
     {filtered.length>0&&<div style={{...css.card,display:"flex",flexWrap:"wrap",gap:16,padding:"16px 20px"}}>
       {[[_pl3("Einnahmen","Gelir","Income"),_e3(filtered.filter(i=>i.invoice_type==="income").reduce((s,i)=>s+(i.total_amount||0),0)),theme.accent],
         [_pl3("Ausgaben","Gider","Expenses"),_e3(filtered.filter(i=>i.invoice_type!=="income").reduce((s,i)=>s+(i.total_amount||0),0)),theme.danger],
