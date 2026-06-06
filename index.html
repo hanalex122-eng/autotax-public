@@ -3612,7 +3612,7 @@ function SteuerOverviewView(){
         }} style={{padding:"22px 22px",borderRadius:16,background:`linear-gradient(135deg, ${theme.card}, rgba(139,92,246,0.08))`,border:"1px solid rgba(139,92,246,0.35)",cursor:"pointer",transition:"all 0.25s",position:"relative",overflow:"hidden"}}
           onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-4px)";e.currentTarget.style.borderColor="#8b5cf6";e.currentTarget.style.boxShadow="0 12px 32px rgba(139,92,246,0.3)";}}
           onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(139,92,246,0.35)";e.currentTarget.style.boxShadow="none";}}>
-          <div style={{position:"absolute",top:8,right:8,fontSize:9,fontWeight:800,padding:"3px 7px",borderRadius:5,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",letterSpacing:0.5}}>PREMIUM</div>
+          <div style={{position:"absolute",top:8,right:8,fontSize:11,fontWeight:600,padding:"2px 6px",borderRadius:6,background:"rgba(139,92,246,0.10)",color:"#8b5cf6",border:"1px solid rgba(139,92,246,0.25)",letterSpacing:0.3}}>PREMIUM</div>
           <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
             <div style={{width:52,height:52,borderRadius:14,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,boxShadow:"0 4px 14px rgba(139,92,246,0.5)",animation:"aiPulse 3s ease-in-out infinite"}}>🧠</div>
             <div>
@@ -3695,13 +3695,13 @@ function SteuerOverviewView(){
             <div style={{color:theme.accent,fontWeight:700,marginBottom:4}}>{tr("Alle typischen Kategorien erfasst","All typical categories covered")}</div>
             <div>{tr("KI Jahresreview für individuelle Tipps starten","Start AI Yearly Review for personalized tips")}</div>
           </div>);
-          return(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
-            {tips.map((t,i)=>(<div key={i} style={{padding:"14px 16px",borderRadius:12,background:theme.surface,border:"1px solid "+theme.border,display:"flex",gap:12}}>
-              <div style={{fontSize:24,flexShrink:0}}>{t.icon}</div>
+          return(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:16}}>
+            {tips.map((t,i)=>(<div key={i} style={{padding:"16px 18px",borderRadius:12,background:theme.surface,border:"1px solid "+theme.border,display:"flex",gap:14}}>
+              <div style={{width:40,height:40,flexShrink:0,borderRadius:11,background:t.color+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{t.icon}</div>
               <div style={{minWidth:0}}>
-                <div style={{fontSize:13,fontWeight:700,color:theme.text,marginBottom:3}}>{t.title}</div>
-                <div style={{fontSize:11.5,color:theme.textMuted,lineHeight:1.45}}>{t.desc}</div>
-                {t.amount&&<div style={{marginTop:6,display:"inline-flex",alignItems:"center",gap:4,padding:"3px 8px",borderRadius:8,background:t.color+"22",color:t.color,fontSize:10,fontWeight:800}}>
+                <div style={{fontSize:14.5,fontWeight:700,color:theme.text,marginBottom:4}}>{t.title}</div>
+                <div style={{fontSize:12.5,color:theme.textMuted,lineHeight:1.5}}>{t.desc}</div>
+                {t.amount&&<div style={{marginTop:8,display:"inline-flex",alignItems:"center",gap:4,padding:"3px 8px",borderRadius:8,background:t.color+"22",color:t.color,fontSize:10,fontWeight:800}}>
                   + ca. {fmtEur(t.amount)} {tr("Ersparnis","savings")}
                 </div>}
               </div>
