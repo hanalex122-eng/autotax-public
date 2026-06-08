@@ -2486,16 +2486,51 @@ def admin_delete_user(user_id: int, user: dict = Depends(get_current_user)):
         if u.email == user.get("email"):
             err(400, "Cannot delete yourself")
         email = u.email
-        db.query(Invoice).filter(Invoice.user_id == user_id).delete()
-        db.query(CashEntry).filter(CashEntry.user_id == user_id).delete()
-        db.query(CashCategory).filter(CashCategory.user_id == user_id).delete()
-        db.query(KasseDocument).filter(KasseDocument.user_id == user_id).delete()
-        db.query(CashReport).filter(CashReport.user_id == user_id).delete()
-        db.query(UserCompany).filter(UserCompany.user_id == user_id).delete()
-        db.delete(u)
-        db.commit()
-        logger.warning("ADMIN DELETE user id=%d email=%s by=%s", user_id, email, user.get("email"))
-        return {"success": True, "deleted": email}
+        from autotax import models as _models
+        from sqlalchemy import or_ as _or
+        # Self-FK (Invoice.recurring_parent_id) erst lösen, sonst Bulk-Delete kann brechen
+        try:
+            db.query(Invoice).filter(Invoice.user_id == user_id).update(
+                {Invoice.recurring_parent_id: None}, synchronize_session=False)
+        except Exception:
+            pass
+        # Generisch: jede gemappte Tabelle mit user_id / client_user_id / advisor_user_id /
+        # inviter_user_id leeren. Pro Tabelle ein SAVEPOINT, damit ein Fehler die anderen
+        # nicht abbricht. So bleiben keine FK-Referenzen auf den User übrig (Löschen schlug
+        # bisher fehl, weil EmailConfig/AuditLog/SteuerReminder/Advisor… stehen blieben).
+        _rows = 0
+        for _cls in list(_models.Base.__subclasses__()):
+            if _cls is User:
+                continue
+            try:
+                _cols = _cls.__table__.columns.keys()
+            except Exception:
+                continue
+            _conds = []
+            if "user_id" in _cols:
+                _t = str(_cls.__table__.columns["user_id"].type).upper()
+                _val = str(user_id) if ("CHAR" in _t or "TEXT" in _t or "STRING" in _t) else user_id
+                _conds.append(getattr(_cls, "user_id") == _val)
+            for _alt in ("client_user_id", "advisor_user_id", "inviter_user_id"):
+                if _alt in _cols:
+                    _conds.append(getattr(_cls, _alt) == user_id)
+            if not _conds:
+                continue
+            try:
+                with db.begin_nested():
+                    _rows += db.query(_cls).filter(_or(*_conds)).delete(synchronize_session=False)
+            except Exception as _de:
+                logger.warning("admin delete: table %s skipped for user %d: %s",
+                               getattr(_cls, "__tablename__", _cls), user_id, _de)
+        try:
+            db.delete(u)
+            db.commit()
+        except Exception as _ue:
+            db.rollback()
+            logger.exception("admin delete user failed (user_id=%d)", user_id)
+            err(500, f"Löschen fehlgeschlagen — Restreferenz: {_ue}")
+        logger.warning("ADMIN DELETE user id=%d email=%s rows=%d by=%s", user_id, email, _rows, user.get("email"))
+        return {"success": True, "deleted": email, "rows_deleted": _rows}
     finally:
         db.close()
 
