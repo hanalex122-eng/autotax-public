@@ -244,6 +244,19 @@ def init_db():
             if "recurring_parent_id" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN recurring_parent_id INTEGER"))
                 logger.info("Added 'recurring_parent_id' column to invoices")
+        # §14 — eindeutige Rechnungsnummer pro Nutzer (nur nicht-leere Nummern).
+        # Eigener try/with-Block: bei vorhandenen Duplikaten wird der Index
+        # übersprungen (Warnung), Startup darf NICHT blockieren.
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_user_number "
+                    "ON invoices(user_id, invoice_number) "
+                    "WHERE invoice_number IS NOT NULL AND invoice_number <> ''"
+                ))
+            logger.info("Unique index uq_invoices_user_number ready (§14 eindeutige Rechnungsnummer)")
+        except Exception as _uqe:
+            logger.warning("uq_invoices_user_number skipped (existing duplicates?): %s", _uqe)
         # --- Vendor identity fingerprint (USt-IdNr + HRB) ---
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:
