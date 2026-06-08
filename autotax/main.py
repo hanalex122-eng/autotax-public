@@ -1230,7 +1230,7 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
         y -= 0.8*cm
         c.setFillColor(HexColor("#1a2d4a"))
         c.setFont("Helvetica", 10)
-        c.drawString(2.2*cm, y+0.25*cm, inv.vendor or "Position 1")
+        c.drawString(2.2*cm, y+0.25*cm, (getattr(inv, "service_description", None) or inv.vendor or "Position 1")[:60])
         c.drawString(10*cm, y+0.25*cm, inv.category or "other")
         c.drawString(13*cm, y+0.25*cm, f"{inv.vat_rate or '19%'}")
         c.drawString(16*cm, y+0.25*cm, f"EUR {inv.total_amount or 0:.2f}")
@@ -7192,6 +7192,7 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
             # §14 UStG — Leistungsempfänger-Adresse + Leistungsdatum (default=Rechnungsdatum)
             recipient_address=(body.get("kunde_adresse") or "").strip() or None,
             service_date=((body.get("leistungsdatum") or "").strip()[:10] or (datum_str[:10] if datum_str else None)),
+            service_description=(body.get("beschreibung") or "").strip() or None,
         )
         db.add(inv)
         db.commit()

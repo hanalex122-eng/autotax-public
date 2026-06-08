@@ -346,6 +346,7 @@ class Invoice(Base):
     # Additive, nullable (safe migration). Nur für selbst erstellte Rechnungen relevant.
     recipient_address = Column(String, nullable=True)   # Kunde/Leistungsempfänger Anschrift
     service_date = Column(String, nullable=True)        # Leistungsdatum YYYY-MM-DD (default=Rechnungsdatum)
+    service_description = Column(String, nullable=True) # §14 — Leistungsbeschreibung (was wurde geleistet)
 
 
 class CashEntry(Base):
