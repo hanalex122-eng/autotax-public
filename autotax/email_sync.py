@@ -29,6 +29,7 @@ MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25 MB per attachment (PDF rechnungen 
 # --- Auto-sync loop configuration ---
 AUTO_SYNC_INTERVAL_SEC = int(os.getenv("EMAIL_AUTO_SYNC_INTERVAL", "600"))  # every 10 min
 AUTO_SYNC_MIN_GAP_SEC = 540        # skip if last_sync < 9 min ago (respects 6/h limit)
+AUTH_FAIL_LIMIT = 3                 # auto-disable email auto-sync after N consecutive IMAP auth failures
 AUTO_SYNC_STARTUP_DELAY_SEC = 45   # let app warm up before first tick
 AUTO_SYNC_USER_STAGGER_SEC = 2     # small gap between users to smooth IMAP load
 
@@ -390,12 +391,36 @@ async def sync_user_inbox(user_id: int, max_messages: int = 20, all_messages: bo
                 M = _connect_imap(host, port, cfg.email, password)
             except imaplib.IMAP4.error as _e:
                 logger.warning("IMAP login failed user=%s host=%s: %s", user_id, host, _e)
+                # Auth-Fail-Backoff: zähle Login-Fehler; ab Limit auto-sync deaktivieren,
+                # um Gmail-Sperre + Log-Spam (Tick alle ~9 min) zu vermeiden.
+                _disabled = False
+                try:
+                    cfg.auth_fail_count = (getattr(cfg, "auth_fail_count", 0) or 0) + 1
+                    if cfg.auth_fail_count >= AUTH_FAIL_LIMIT:
+                        cfg.enabled = False
+                        _disabled = True
+                        logger.warning("Auto-sync DISABLED user=%s after %d auth failures (wrong app password?)",
+                                       user_id, cfg.auth_fail_count)
+                    db.commit()
+                except Exception:
+                    db.rollback()
                 _status_finish(user_id, f"IMAP-Login fehlgeschlagen: {_e}")
-                return {"processed": 0, "skipped": 0, "errors": 0, "message": "IMAP-Login fehlgeschlagen — prüfe Email und App-Passwort"}
+                _m = ("Auto-Sync deaktiviert nach mehreren fehlgeschlagenen Logins — bitte App-Passwort "
+                      "prüfen und Email-Import erneut speichern." if _disabled
+                      else "IMAP-Login fehlgeschlagen — prüfe Email und App-Passwort")
+                return {"processed": 0, "skipped": 0, "errors": 0, "message": _m}
             except (OSError, ssl.SSLError, TimeoutError) as _e:
                 logger.warning("IMAP connection failed user=%s host=%s: %s", user_id, host, _e)
                 _status_finish(user_id, f"IMAP-Verbindung fehlgeschlagen: {_e}")
                 return {"processed": 0, "skipped": 0, "errors": 0, "message": "IMAP-Server nicht erreichbar"}
+
+            # Login erfolgreich -> Auth-Fail-Zähler zurücksetzen
+            if getattr(cfg, "auth_fail_count", 0):
+                try:
+                    cfg.auth_fail_count = 0
+                    db.commit()
+                except Exception:
+                    db.rollback()
 
             # Gmail icin ozel arama: 'All Mail' folder + X-GM-RAW has:attachment
             # boylece Kaufe/Abos kategorisindeki, arsivlenmis Rechnungen de yakalanir.

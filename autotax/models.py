@@ -493,6 +493,10 @@ class EmailConfig(Base):
     encrypted_password = Column(Text, nullable=False)  # Fernet ciphertext
     last_sync = Column(DateTime, nullable=True)
     enabled = Column(Boolean, default=True, nullable=False)
+    # Auth-Fail-Backoff: aufeinanderfolgende IMAP-Login-Fehler. Bei Erreichen des
+    # Limits wird enabled=False gesetzt (Gmail-Sperre + Log-Spam vermeiden). Reset
+    # bei erfolgreichem Sync oder beim erneuten Speichern der Zugangsdaten.
+    auth_fail_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 

@@ -260,6 +260,15 @@ def init_db():
             logger.info("Unique index uq_invoices_user_number ready (§14 eindeutige Rechnungsnummer)")
         except Exception as _uqe:
             logger.warning("uq_invoices_user_number skipped (existing duplicates?): %s", _uqe)
+        # EmailConfig — auth-fail backoff counter (auto-disable nach wiederholten IMAP-Logins)
+        try:
+            ec_cols = [c["name"] for c in insp.get_columns("email_configs")]
+            if "auth_fail_count" not in ec_cols:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE email_configs ADD COLUMN auth_fail_count INTEGER NOT NULL DEFAULT 0"))
+                logger.info("Added 'auth_fail_count' column to email_configs")
+        except Exception as _ece:
+            logger.warning("email_configs.auth_fail_count migration skipped: %s", _ece)
         # --- Vendor identity fingerprint (USt-IdNr + HRB) ---
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:

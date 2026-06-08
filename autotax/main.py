@@ -7008,6 +7008,7 @@ def set_email_config(body: dict = Body(...), user: dict = Depends(get_current_us
             cfg.host = host if provider == "imap" else None
             cfg.port = port if provider == "imap" else None
             cfg.enabled = True
+            cfg.auth_fail_count = 0  # neue Zugangsdaten -> Backoff zurücksetzen
         else:
             cfg = EmailConfig(
                 user_id=user["sub"], provider=provider, email=email_addr,
