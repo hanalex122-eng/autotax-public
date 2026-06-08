@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re as _re_global  # module-level regex alias (used by PDF/keyword paths; Phase 2.3 refactor left 4 call-sites referencing it)
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, Body, Request, Response
