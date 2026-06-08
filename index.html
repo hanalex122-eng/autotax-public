@@ -2306,6 +2306,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
 
   const tc={income:{bg:theme.accentSoft,c:theme.accent,t:_t("income")},expense:{bg:theme.dangerSoft,c:theme.danger,t:_t("expense")}};
   const _pB=(()=>{const n=new Date();let s,e;
+    if(period==="all"){return[new Date(2000,0,1),new Date(3000,0,1)];}
     if(period==="day"){s=new Date(n.getFullYear(),n.getMonth(),n.getDate());e=new Date(s);e.setDate(e.getDate()+1);}
     else if(period==="week"){const wd=(n.getDay()+6)%7;s=new Date(n.getFullYear(),n.getMonth(),n.getDate()-wd);e=new Date(s);e.setDate(e.getDate()+7);}
     else if(period==="month"){s=new Date(n.getFullYear(),n.getMonth(),1);e=new Date(n.getFullYear(),n.getMonth()+1,1);}
@@ -2337,8 +2338,9 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
         if(p==="week"){const wd=(_n.getDay()+6)%7;const s=new Date(y,m,_n.getDate()-wd);const e=new Date(s);e.setDate(e.getDate()+6);return _fd(s)+" - "+_fd(e);}
         if(p==="month")return _mn[m]+" "+y;
         if(p==="quarter"){const q=Math.floor(m/3)*3;return _mn[q]+" "+y+" - "+_mn[q+2]+" "+y;}
+        if(p==="all")return L("Gesamte Daten","Tüm veriler","All data");
         return ""+y;};
-      const defs=[["day","📅",L("Heute","Bugün","Today")],["week","📆",L("Diese Woche","Bu Hafta","This Week")],["month","🗓️",L("Dieser Monat","Bu Ay","This Month")],["quarter","📊",L("Dieses Quartal","Bu Çeyrek","This Quarter")],["year","📈",L("Dieses Jahr","Bu Yıl","This Year")]];
+      const defs=[["day","📅",L("Heute","Bugün","Today")],["week","📆",L("Diese Woche","Bu Hafta","This Week")],["month","🗓️",L("Dieser Monat","Bu Ay","This Month")],["quarter","📊",L("Dieses Quartal","Bu Çeyrek","This Quarter")],["year","📈",L("Dieses Jahr","Bu Yıl","This Year")],["all","📋",L("Alle","Tümü","All")]];
       return(<div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))",gap:8,margin:"4px 0"}}>
           {defs.map(([k,ico,lbl])=>{const on=period===k;return(
@@ -2356,18 +2358,18 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
     })()}
     <div style={{display:"flex",gap:8,margin:"4px 0 12px",maxWidth:500}}>
       <div style={{position:"relative",flex:1}}>
-        <input style={{...css.input,width:"100%",paddingLeft:38,border:"1px solid rgba(16,185,129,0.30)",background:"rgba(16,185,129,0.04)"}} placeholder={getLang()==="de"?"Beschreibung, Lieferant suchen…":getLang()==="tr"?"Açıklama, tedarikçi ara…":"Search description, vendor…"} value={searchKB} onChange={e=>setSearchKB(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")e.preventDefault();}}/>
+        <input style={{...css.input,width:"100%",paddingLeft:38,border:"1.5px solid "+theme.accent,background:theme.card}} placeholder={getLang()==="de"?"Beschreibung, Lieferant suchen…":getLang()==="tr"?"Açıklama, tedarikçi ara…":"Search description, vendor…"} value={searchKB} onChange={e=>setSearchKB(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")e.preventDefault();}}/>
         <div style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}><Icon d={I.search} size={16} color={theme.accent}/></div>
       </div>
       {searchKB&&<button style={{...css.btnOutline,padding:"8px 12px"}} onClick={()=>setSearchKB("")}>x</button>}
     </div>
     {(()=>{const ps=periodSummary||{};const _g=Number(ps.gewinn||0);return(
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))",gap:12}}>
-      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{_t("einnahmen")}</div><div style={{fontSize:22,fontWeight:700,color:theme.accent,fontFamily:mono}}>€{Number(ps.einnahmen||0).toFixed(2)}</div></div>
-      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{_t("ausgaben")}</div><div style={{fontSize:22,fontWeight:700,color:theme.danger,fontFamily:mono}}>€{Number(ps.ausgaben||0).toFixed(2)}</div></div>
-      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{t("profit")}</div><div style={{fontSize:22,fontWeight:700,color:_g>=0?theme.accent:theme.danger,fontFamily:mono}}>€{_g.toFixed(2)}</div></div>
-      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{t("balance")+" ("+t("vat")+")"}</div><div style={{fontSize:22,fontWeight:700,color:theme.blue,fontFamily:mono}}>€{Number(ps.mwst||0).toFixed(2)}</div></div>
-      <div style={css.card}><div style={{fontSize:12,color:theme.textMuted}}>{_t("entries")}</div><div style={{fontSize:22,fontWeight:700,color:theme.text,fontFamily:mono}}>{Number(ps.anzahl||0)}</div></div>
+      <div style={{...css.card,borderLeft:"3px solid "+theme.accent}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>📈</span>{_t("einnahmen")}</div><div style={{fontSize:22,fontWeight:700,color:theme.accent,fontFamily:mono}}>€{Number(ps.einnahmen||0).toFixed(2)}</div></div>
+      <div style={{...css.card,borderLeft:"3px solid "+theme.danger}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>📉</span>{_t("ausgaben")}</div><div style={{fontSize:22,fontWeight:700,color:theme.danger,fontFamily:mono}}>€{Number(ps.ausgaben||0).toFixed(2)}</div></div>
+      <div style={{...css.card,borderLeft:"3px solid "+(_g>=0?theme.accent:theme.danger)}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>💰</span>{t("profit")}</div><div style={{fontSize:22,fontWeight:700,color:_g>=0?theme.accent:theme.danger,fontFamily:mono}}>€{_g.toFixed(2)}</div></div>
+      <div style={{...css.card,borderLeft:"3px solid "+theme.blue}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>🧾</span>{t("balance")+" ("+t("vat")+")"}</div><div style={{fontSize:22,fontWeight:700,color:theme.blue,fontFamily:mono}}>€{Number(ps.mwst||0).toFixed(2)}</div></div>
+      <div style={{...css.card,borderLeft:"3px solid "+theme.textMuted}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>🔢</span>{_t("entries")}</div><div style={{fontSize:22,fontWeight:700,color:theme.text,fontFamily:mono}}>{Number(ps.anzahl||0)}</div></div>
     </div>);})()}
     {showForm&&<div style={css.card}>
       <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 16px"}}>{_t("new_entry")}</h3>

@@ -9858,8 +9858,10 @@ def bookkeeping_summary_period(
         end = _dt(today.year + 1, 1, 1) if _q0 + 3 > 12 else _dt(today.year, _q0 + 3, 1)
     elif p == "year":
         start, end = _dt(today.year, 1, 1), _dt(today.year + 1, 1, 1)
+    elif p == "all":
+        start, end = _dt(2000, 1, 1), _dt(today.year + 100, 1, 1)
     else:
-        err(422, "period must be day|week|month|quarter|year")
+        err(422, "period must be day|week|month|quarter|year|all")
     db = SessionLocal()
     try:
         s = _ks.summarize(db, user["sub"], start, end)
@@ -9890,7 +9892,7 @@ def _kasse_period_range(period: str, ref: str):
         today = _dt.strptime((ref or "")[:10], "%Y-%m-%d").date() if ref else _date.today()
     except Exception:
         today = _date.today()
-    labels = {"day": "Tag", "week": "Woche", "month": "Monat", "quarter": "Quartal", "year": "Jahr"}
+    labels = {"day": "Tag", "week": "Woche", "month": "Monat", "quarter": "Quartal", "year": "Jahr", "all": "Gesamt"}
     if p == "day":
         start, end = _ks.day_range(today)
     elif p == "week":
@@ -9903,8 +9905,10 @@ def _kasse_period_range(period: str, ref: str):
         end = _dt(today.year + 1, 1, 1) if _q0 + 3 > 12 else _dt(today.year, _q0 + 3, 1)
     elif p == "year":
         start, end = _dt(today.year, 1, 1), _dt(today.year + 1, 1, 1)
+    elif p == "all":
+        start, end = _dt(2000, 1, 1), _dt(today.year + 100, 1, 1)
     else:
-        err(422, "period must be day|week|month|quarter|year")
+        err(422, "period must be day|week|month|quarter|year|all")
     return start, end, labels.get(p, p), p
 
 
