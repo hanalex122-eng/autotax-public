@@ -1223,20 +1223,31 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
         c.setFillColor(HexColor("#ffffff"))
         c.setFont("Helvetica-Bold", 10)
         c.drawString(2.2*cm, y+0.25*cm, "Beschreibung")
-        c.drawString(10*cm, y+0.25*cm, "Kategorie")
-        c.drawString(13*cm, y+0.25*cm, "MwSt")
-        c.drawString(16*cm, y+0.25*cm, "Betrag")
+        c.drawRightString(18.8*cm, y+0.25*cm, "Betrag")
 
-        y -= 0.8*cm
+        # §14 Positionen (mehrzeilig) oder Einzelposition (Fallback)
+        _rows = []
+        try:
+            if getattr(inv, "positions", None):
+                import json as _jr
+                _rows = [(str(p.get("description") or "")[:70], float(p.get("amount") or 0))
+                         for p in (_jr.loads(inv.positions) or [])]
+        except Exception:
+            _rows = []
+        if not _rows:
+            _rows = [((getattr(inv, "service_description", None) or inv.vendor or "Position 1")[:70],
+                      inv.total_amount or 0)]
+
+        y -= 0.7*cm
         c.setFillColor(HexColor("#1a2d4a"))
         c.setFont("Helvetica", 10)
-        c.drawString(2.2*cm, y+0.25*cm, (getattr(inv, "service_description", None) or inv.vendor or "Position 1")[:60])
-        c.drawString(10*cm, y+0.25*cm, inv.category or "other")
-        c.drawString(13*cm, y+0.25*cm, f"{inv.vat_rate or '19%'}")
-        c.drawString(16*cm, y+0.25*cm, f"EUR {inv.total_amount or 0:.2f}")
-        c.line(2*cm, y, 19*cm, y)
+        for _desc, _amt in _rows[:18]:
+            c.drawString(2.2*cm, y+0.2*cm, _desc)
+            c.drawRightString(18.8*cm, y+0.2*cm, f"EUR {_amt:.2f}")
+            y -= 0.55*cm
+        c.line(2*cm, y+0.35*cm, 19*cm, y+0.35*cm)
 
-        y -= 1.5*cm
+        y -= 0.9*cm
         netto = (inv.total_amount or 0) - (inv.vat_amount or 0)
         c.setFont("Helvetica", 10)
         c.drawRightString(19*cm, y, f"Netto: EUR {netto:.2f}")
@@ -7147,6 +7158,16 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
     db = SessionLocal()
     try:
         betrag = float(body.get("betrag", 0))
+        # §14 Positionen — mehrzeilige Rechnung. Wenn vorhanden: Summe = Gesamtbetrag.
+        import json as _jsonp
+        _positions = body.get("positions") if isinstance(body.get("positions"), list) else []
+        _positions = [
+            {"description": str(p.get("description") or "").strip(), "amount": round(float(p.get("amount") or 0), 2)}
+            for p in _positions
+            if isinstance(p, dict) and (float(p.get("amount") or 0) > 0 or str(p.get("description") or "").strip())
+        ]
+        if _positions:
+            betrag = round(sum(p["amount"] for p in _positions), 2)
         mwst_satz = body.get("mwst_satz", "19%")
         rate = float(mwst_satz.replace("%", "").replace(",", ".").strip() or "19")
         mwst_betrag = float(body.get("mwst_betrag", 0)) or round(betrag * rate / (100 + rate), 2)
@@ -7193,6 +7214,7 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
             recipient_address=(body.get("kunde_adresse") or "").strip() or None,
             service_date=((body.get("leistungsdatum") or "").strip()[:10] or (datum_str[:10] if datum_str else None)),
             service_description=(body.get("beschreibung") or "").strip() or None,
+            positions=(_jsonp.dumps(_positions, ensure_ascii=False) if _positions else None),
         )
         db.add(inv)
         db.commit()

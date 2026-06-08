@@ -202,6 +202,9 @@ def init_db():
             if "service_description" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN service_description VARCHAR"))
                 logger.info("Added 'service_description' column to invoices (§14 UStG)")
+            if "positions" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN positions TEXT"))
+                logger.info("Added 'positions' column to invoices (§14 Positionen)")
             # Steuerlogik v2 (2026-05-17) — 4-bolumlu juristisch sicher yapi
             if "ki_einschaetzung" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN ki_einschaetzung TEXT"))

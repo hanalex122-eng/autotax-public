@@ -347,6 +347,7 @@ class Invoice(Base):
     recipient_address = Column(String, nullable=True)   # Kunde/Leistungsempfänger Anschrift
     service_date = Column(String, nullable=True)        # Leistungsdatum YYYY-MM-DD (default=Rechnungsdatum)
     service_description = Column(String, nullable=True) # §14 — Leistungsbeschreibung (was wurde geleistet)
+    positions = Column(Text, nullable=True)             # §14 — Positionen JSON: [{description, amount}] (mehrzeilig)
 
 
 class CashEntry(Base):
