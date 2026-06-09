@@ -2328,9 +2328,13 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
     else{s=new Date(n.getFullYear(),0,1);e=new Date(n.getFullYear()+1,0,1);}
     return[s,e];})();
   const _inPeriod=(en)=>{if(!en.date)return false;const p=String(en.date).slice(0,10).split("-");if(p.length<3)return false;const d=new Date(+p[0],+p[1]-1,+p[2]);return d>=_pB[0]&&d<_pB[1];};
+  // C3: TEK KAYNAK — KPI + liste + footer hep aynı (dönem + arama) filtreli kümeden hesaplanır.
+  const _sQ=(searchKB||"").toLowerCase();
+  const _vis=entries.filter(e=>_inPeriod(e)&&(!_sQ||(e.description||"").toLowerCase().includes(_sQ)||(e.vendor||"").toLowerCase().includes(_sQ)));
+  const _agg=_vis.reduce((a,e)=>{const g=Number(e.gross_amount||0),v=Number(e.vat_amount||0);if(e.entry_type==="income"){a.ein+=g;a.vin+=v;}else{a.aus+=g;a.vex+=v;}return a;},{ein:0,aus:0,vin:0,vex:0});
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
-      <div><h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>{_t("bookkeeping")}</h2><p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{entries.length} {_t("entries")}</p></div>
+      <div><h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>{_t("bookkeeping")}</h2><p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{_vis.length} {_t("entries")}</p></div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
         {selected.size>0&&<button style={css.btn(theme.danger)} onClick={deleteSelected} disabled={deleting}><Icon d={I.trash} size={14} color="#fff"/>{deleting?"...":selected.size+t("n_delete")}</button>}
         {selected.size>0&&<button style={{...css.btnOutline,borderColor:"rgba(59,130,246,0.4)",color:theme.blue}} onClick={async()=>{if(!confirm(selected.size+" Copy entries to Invoices?"))return;const tk=localStorage.getItem("atx_token");let ok=0;for(const id of selected){const e=entries.find(x=>x.id===id);if(!e)continue;try{await fetch(API+"/invoices/create",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+tk},body:JSON.stringify({vendor:e.vendor||e.description,total_amount:e.gross_amount,vat_amount:e.vat_amount,vat_rate:e.vat_rate,date:e.date,category:e.category,invoice_type:e.entry_type,raw_text:"Aus Kassenbuch ID:"+e.id+": "+e.description})});ok++;}catch(ex){}}alert(ok+" → copied to Invoices");setSelected(new Set());}}>→ Invoices ({selected.size})</button>}
@@ -2377,13 +2381,13 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
       </div>
       {searchKB&&<button style={{...css.btnOutline,padding:"8px 12px"}} onClick={()=>setSearchKB("")}>x</button>}
     </div>
-    {(()=>{const ps=periodSummary||{};const _g=Number(ps.gewinn||0);return(
+    {(()=>{const ein=_agg.ein,aus=_agg.aus,_g=ein-aus,_mwst=_agg.vin-_agg.vex,_cnt=_vis.length;return(
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))",gap:12}}>
-      <div style={{...css.card,borderLeft:"3px solid "+theme.accent}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>📈</span>{_t("einnahmen")}</div><div style={{fontSize:22,fontWeight:700,color:theme.accent,fontFamily:mono}}>€{Number(ps.einnahmen||0).toFixed(2)}</div></div>
-      <div style={{...css.card,borderLeft:"3px solid "+theme.danger}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>📉</span>{_t("ausgaben")}</div><div style={{fontSize:22,fontWeight:700,color:theme.danger,fontFamily:mono}}>€{Number(ps.ausgaben||0).toFixed(2)}</div></div>
+      <div style={{...css.card,borderLeft:"3px solid "+theme.accent}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>📈</span>{_t("einnahmen")}</div><div style={{fontSize:22,fontWeight:700,color:theme.accent,fontFamily:mono}}>€{ein.toFixed(2)}</div></div>
+      <div style={{...css.card,borderLeft:"3px solid "+theme.danger}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>📉</span>{_t("ausgaben")}</div><div style={{fontSize:22,fontWeight:700,color:theme.danger,fontFamily:mono}}>€{aus.toFixed(2)}</div></div>
       <div style={{...css.card,borderLeft:"3px solid "+(_g>=0?theme.accent:theme.danger)}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>💰</span>{t("profit")}</div><div style={{fontSize:22,fontWeight:700,color:_g>=0?theme.accent:theme.danger,fontFamily:mono}}>€{_g.toFixed(2)}</div></div>
-      <div style={{...css.card,borderLeft:"3px solid "+theme.blue}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>🧾</span>{t("balance")+" ("+t("vat")+")"}</div><div style={{fontSize:22,fontWeight:700,color:theme.blue,fontFamily:mono}}>€{Number(ps.mwst||0).toFixed(2)}</div></div>
-      <div style={{...css.card,borderLeft:"3px solid "+theme.textMuted}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>🔢</span>{_t("entries")}</div><div style={{fontSize:22,fontWeight:700,color:theme.text,fontFamily:mono}}>{Number(ps.anzahl||0)}</div></div>
+      <div style={{...css.card,borderLeft:"3px solid "+theme.blue}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>🧾</span>{t("balance")+" ("+t("vat")+")"}</div><div style={{fontSize:22,fontWeight:700,color:theme.blue,fontFamily:mono}}>€{_mwst.toFixed(2)}</div></div>
+      <div style={{...css.card,borderLeft:"3px solid "+theme.textMuted}}><div style={{fontSize:12,color:theme.textMuted,display:"flex",alignItems:"center",gap:5}}><span>🔢</span>{_t("entries")}</div><div style={{fontSize:22,fontWeight:700,color:theme.text,fontFamily:mono}}>{_cnt}</div></div>
     </div>);})()}
     {showForm&&<div style={css.card}>
       <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:"0 0 16px"}}>{_t("new_entry")}</h3>
@@ -2433,7 +2437,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
           <th style={{padding:"12px 8px",width:36}} className="cb-cell"><input type="checkbox" checked={selected.size===entries.length&&entries.length>0} onChange={toggleAll}/></th>
           {[_t("type"),_t("date"),_t("description"),_t("amount"),_t("vat"),_t("category"),"","","",""].map((h,i)=><th key={h+i} className={(i===4||i===5||i===6||i===8)?"hide-mobile":""} style={{padding:"8px 6px",textAlign:"left",color:theme.textDim,fontWeight:500,fontSize:10,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}
         </tr></thead>
-        <tbody>{entries.filter(e=>_inPeriod(e)&&(!searchKB||(e.description||"").toLowerCase().includes(searchKB.toLowerCase())||(e.vendor||"").toLowerCase().includes(searchKB.toLowerCase()))).map(e=>{const t=tc[e.entry_type]||tc.expense;return(
+        <tbody>{_vis.map(e=>{const t=tc[e.entry_type]||tc.expense;return(
           <tr key={e.id} style={{borderBottom:"1px solid "+theme.border,background:selected.has(e.id)?"rgba(16,185,129,0.08)":"transparent"}}>
             <td style={{padding:"10px 8px"}} className="cb-cell"><input type="checkbox" checked={selected.has(e.id)} onChange={()=>toggleSelect(e.id)}/></td>
             <td style={{padding:"6px 6px"}}><span style={css.badge(t.bg,t.c)}>{t.t}</span></td>
@@ -2448,27 +2452,27 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
             {!e.invoice_id&&<td className="hide-mobile" style={{padding:"6px 4px"}}></td>}
             <td style={{padding:"6px 4px"}}><div style={{cursor:"pointer",padding:4}} onClick={()=>del(e.id)} title="Löschen"><Icon d={I.x} size={12} color={theme.danger}/></div></td>
           </tr>);})}</tbody>
-        {summary&&<tfoot>
-          <tr style={{background:"rgba(16,185,129,0.08)",borderTop:"2px solid "+theme.accent}}>
+        {_vis.length>0&&<tfoot>
+          <tr className="hide-mobile" style={{background:"rgba(16,185,129,0.08)",borderTop:"2px solid "+theme.accent}}>
             <td style={{padding:"12px 14px"}}></td>
             <td style={{padding:"12px 14px"}}></td>
             <td style={{padding:"12px 14px",color:theme.accent,fontWeight:700,fontSize:14}}>{_t("gesamt")}</td>
             <td style={{padding:"12px 14px"}}></td>
-            <td style={{padding:"12px 14px",color:theme.accent,fontFamily:mono,fontWeight:700,fontSize:15}}>€{Number(summary.total_gross||0).toFixed(2)}</td>
-            <td style={{padding:"12px 14px",color:theme.textMuted,fontFamily:mono,fontWeight:600,fontSize:12}}>€{Number(summary.total_vat||0).toFixed(2)}</td>
+            <td style={{padding:"12px 14px",color:theme.accent,fontFamily:mono,fontWeight:700,fontSize:15}}>€{(_agg.ein+_agg.aus).toFixed(2)}</td>
+            <td style={{padding:"12px 14px",color:theme.textMuted,fontFamily:mono,fontWeight:600,fontSize:12}}>€{(_agg.vin+_agg.vex).toFixed(2)}</td>
             <td style={{padding:"12px 14px"}}></td>
             <td style={{padding:"12px 14px"}}></td>
             <td style={{padding:"12px 14px"}}></td>
             <td style={{padding:"12px 14px"}}></td>
           </tr>
-          <tr style={{background:"rgba(16,185,129,0.04)"}}>
+          <tr className="hide-mobile" style={{background:"rgba(16,185,129,0.04)"}}>
             <td colSpan={2}></td>
             <td style={{padding:"8px 14px",fontSize:12,color:theme.textMuted}}>{t("income")}</td>
-            <td style={{padding:"8px 14px",fontSize:12,color:"#22c55e",fontFamily:mono,fontWeight:600}}>€{Number(summary.total_income||0).toFixed(2)}</td>
+            <td style={{padding:"8px 14px",fontSize:12,color:"#22c55e",fontFamily:mono,fontWeight:600}}>€{_agg.ein.toFixed(2)}</td>
             <td style={{padding:"8px 14px",fontSize:12,color:theme.textMuted}}>{t("expenses_label")}</td>
-            <td style={{padding:"8px 14px",fontSize:12,color:"#ef4444",fontFamily:mono,fontWeight:600}}>€{Number(summary.total_expense||0).toFixed(2)}</td>
+            <td style={{padding:"8px 14px",fontSize:12,color:"#ef4444",fontFamily:mono,fontWeight:600}}>€{_agg.aus.toFixed(2)}</td>
             <td style={{padding:"8px 14px",fontSize:12,color:theme.textMuted}}>{t("net")}</td>
-            <td style={{padding:"8px 14px",fontSize:13,color:(summary.net||0)>=0?"#22c55e":"#ef4444",fontFamily:mono,fontWeight:700}}>€{Number(summary.net||0).toFixed(2)}</td>
+            <td style={{padding:"8px 14px",fontSize:13,color:(_agg.ein-_agg.aus)>=0?"#22c55e":"#ef4444",fontFamily:mono,fontWeight:700}}>€{(_agg.ein-_agg.aus).toFixed(2)}</td>
             <td colSpan={2}></td>
           </tr>
         </tfoot>}
