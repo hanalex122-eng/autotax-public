@@ -12612,7 +12612,9 @@ def export_datev(year: int = Query(None), user: dict = Depends(get_acting_contex
         _bu = {"S": {"19": "9", "7": "8"}, "H": {"19": "3", "7": "2"}}.get(sh, {}).get(vat, "")
         # Belegfeld 1 = Rechnungs-/Belegnummer (Steuerberater-Referenz auf den Beleg)
         beleg = csv_safe((t.get("invoice_number") or "").replace(";", " "))[:36]
-        buf.write(f"{amt};{sh};{konto};1200;{_bu};{date_str};{beleg};{vendor};{vat}\n")
+        # Gegenkonto nach Zahlungsart: bar -> 1000 (Kasse), sonst 1200 (Bank)
+        _gegen = "1000" if (t.get("payment_method") or "").lower() in ("cash", "bar") else "1200"
+        buf.write(f"{amt};{sh};{konto};{_gegen};{_bu};{date_str};{beleg};{vendor};{vat}\n")
     buf.seek(0)
     return StreamingResponse(buf, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=autotax_datev_{year or 'all'}.csv"})
 
