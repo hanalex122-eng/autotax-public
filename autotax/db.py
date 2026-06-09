@@ -269,6 +269,17 @@ def init_db():
                 logger.info("Added 'auth_fail_count' column to email_configs")
         except Exception as _ece:
             logger.warning("email_configs.auth_fail_count migration skipped: %s", _ece)
+        # Verwaiste EmailConfigs (User existiert nicht mehr) entfernen -> stoppt den
+        # Auto-Sync-Spam für früher gelöschte Accounts (alter Delete-Code räumte
+        # email_configs nicht auf; z.B. user=4 mit AUTHENTICATIONFAILED jede Runde).
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM email_configs WHERE user_id NOT IN (SELECT id FROM users)"
+                ))
+            logger.info("Cleaned orphaned email_configs (users no longer exist)")
+        except Exception as _oce:
+            logger.warning("orphaned email_configs cleanup skipped: %s", _oce)
         # --- Vendor identity fingerprint (USt-IdNr + HRB) ---
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
         with engine.begin() as conn:
