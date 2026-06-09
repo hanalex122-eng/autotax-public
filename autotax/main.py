@@ -12595,7 +12595,7 @@ def export_datev(year: int = Query(None), user: dict = Depends(get_acting_contex
     buf = io.StringIO()
     buf.write("# HINWEIS: AutoTax-HUB - Alle Daten pruefen. Keine Steuerberatung.\n")
     buf.write(f"# Einnahmen: {m['total_income']:.2f} | Ausgaben: {m['total_expenses']:.2f} | Gewinn: {m['profit']:.2f}\n")
-    buf.write("Umsatz;Soll/Haben;Konto;Gegenkonto;BU;Belegdatum;Buchungstext;USt\n")
+    buf.write("Umsatz;Soll/Haben;Konto;Gegenkonto;BU;Belegdatum;Belegfeld1;Buchungstext;USt\n")
     for t in txns:
         sh = "S" if t["invoice_type"] == "expense" else "H"
         date_str = ""
@@ -12606,7 +12606,9 @@ def export_datev(year: int = Query(None), user: dict = Depends(get_acting_contex
         vendor = csv_safe((t["vendor"] or "").replace(";", " "))
         konto = csv_safe(t["konto"])
         vat = (t["vat_rate"] or "0%").replace("%", "")
-        buf.write(f"{amt};{sh};{konto};1200;{vat};{date_str};{vendor};{vat}\n")
+        # Belegfeld 1 = Rechnungs-/Belegnummer (Steuerberater-Referenz auf den Beleg)
+        beleg = csv_safe((t.get("invoice_number") or "").replace(";", " "))[:36]
+        buf.write(f"{amt};{sh};{konto};1200;{vat};{date_str};{beleg};{vendor};{vat}\n")
     buf.seek(0)
     return StreamingResponse(buf, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=autotax_datev_{year or 'all'}.csv"})
 
