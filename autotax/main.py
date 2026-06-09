@@ -7706,6 +7706,63 @@ def get_kleinunternehmer(user: dict = Depends(get_current_user)):
         db.close()
 
 
+@app.get("/account/ku-status")
+def ku_status(user: dict = Depends(get_current_user)):
+    """§19 Umsatz vs. Grenzen — NUR WARNUNG, ändert NIE die Besteuerung.
+
+    Laufendes Jahr löst die Warnung aus (>=80.000 gelb, >=100.000 rot).
+    Das Vorjahr (25.000-Grenze) ist NICHT verlässlich, weil der Nutzer das
+    Vorjahr evtl. nicht in AutoTax erfasst hat -> KEIN Auto-Trigger, nur
+    informativ (prior_reliable=false). Keine automatische Umstellung.
+    Umsatz = Einnahme-Rechnungen (brutto) + manuelle Kasseneinnahmen (ohne
+    invoice_id), damit auch Barumsätze (Handwerker) zählen.
+    """
+    from sqlalchemy import func as _func
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.id == user["sub"]).first()
+        is_ku = bool(getattr(u, "is_kleinunternehmer", False)) if u else False
+        cy = datetime.now().year
+
+        def _turnover(yr):
+            inv = db.query(_func.coalesce(_func.sum(Invoice.total_amount), 0.0)).filter(
+                Invoice.user_id == user["sub"],
+                Invoice.invoice_type == "income",
+                (Invoice.is_deleted == False) | (Invoice.is_deleted == None),  # noqa: E712
+                Invoice.date.like(f"{yr}-%"),
+            ).scalar() or 0.0
+            cash = db.query(_func.coalesce(_func.sum(CashEntry.gross_amount), 0.0)).filter(
+                CashEntry.user_id == user["sub"],
+                CashEntry.entry_type == "income",
+                CashEntry.invoice_id.is_(None),
+                (CashEntry.is_deleted == False) | (CashEntry.is_deleted == None),  # noqa: E712
+                (CashEntry.status == "confirmed") | (CashEntry.status.is_(None)),
+                CashEntry.date >= datetime(yr, 1, 1),
+                CashEntry.date < datetime(yr + 1, 1, 1),
+            ).scalar() or 0.0
+            return round(float(inv) + float(cash), 2)
+
+        cur = _turnover(cy)
+        prior = _turnover(cy - 1)
+        # Auto-Level NUR aus dem laufenden Jahr (Vorjahr nicht verlässlich)
+        if cur >= 100000:
+            level = "red"
+        elif cur >= 80000:
+            level = "yellow"
+        else:
+            level = "none"
+        return {
+            "is_kleinunternehmer": is_ku,
+            "current_year": cy,
+            "current_turnover": cur,
+            "prior_turnover": prior,
+            "prior_reliable": False,
+            "level": level,
+        }
+    finally:
+        db.close()
+
+
 @app.post("/invoices/create")
 def create_invoice_manual(body: dict = Body(...), user: dict = Depends(get_current_user)):
     """Create invoice from JSON (manual entry / cross-page transfer).
