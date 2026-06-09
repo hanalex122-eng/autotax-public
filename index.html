@@ -4968,14 +4968,24 @@ function HelpView(){
         <div>Hosting: Railway | Encryption: bcrypt (passwords), JWT (auth)</div>
       </div>
     </div>
-    <div style={{...css.card,background:theme.surfaceAlt}}>
-      <h3 style={{fontSize:14,fontWeight:600,color:theme.text,margin:"0 0 10px"}}>⚖️ {h3("Rechtliches","Legal","Yasal")}</h3>
-      <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
-        {[["/impressum","Impressum"],["/datenschutz",h3("Datenschutz","Privacy","Gizlilik")],["/agb","AGB"]].map(([href,lbl])=>(
-          <span key={href} onClick={()=>window.open(href,"_blank")} style={{fontSize:13,color:theme.accent,cursor:"pointer",textDecoration:"underline",fontWeight:500}}>{lbl} ↗</span>
+    <div id="rechtliches" style={{...css.card,background:theme.surfaceAlt,border:"1px solid "+theme.border}}>
+      <h3 style={{fontSize:15,fontWeight:700,color:theme.text,margin:"0 0 2px"}}>⚖️ {h3("Rechtliches","Legal","Yasal")}</h3>
+      <p style={{fontSize:11,color:theme.textDim,margin:"0 0 12px"}}>{h3("Alle rechtlichen Hinweise an einem Ort.","All legal notices in one place.","Tüm yasal bilgiler tek yerde.")}</p>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
+        {[["/impressum","Impressum","📄"],["/datenschutz",h3("Datenschutz","Privacy","Gizlilik"),"🔒"],["/agb",h3("Nutzungsbedingungen (AGB)","Terms (AGB)","Kullanım Şartları (AGB)"),"📑"]].map(([href,lbl,ic])=>(
+          <button key={href} type="button" onClick={()=>window.open(href,"_blank")} style={{display:"inline-flex",alignItems:"center",gap:6,padding:"9px 14px",borderRadius:8,border:"1px solid "+theme.border,background:theme.card,color:theme.text,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onMouseEnter={e=>e.currentTarget.style.borderColor=theme.accent} onMouseLeave={e=>e.currentTarget.style.borderColor=theme.border}>{ic} {lbl} ↗</button>
         ))}
       </div>
-      <p style={{fontSize:11,color:theme.textDim,margin:"10px 0 0",lineHeight:1.6}}>{h3("AutoTax-HUB ist ein Buchhaltungs-Werkzeug, keine Steuerberatung im Sinne des StBerG.","AutoTax-HUB is an accounting tool, not tax advice under StBerG.","AutoTax-HUB bir muhasebe aracıdır, StBerG anlamında vergi danışmanlığı değildir.")}</p>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",borderRadius:8,background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.2)"}}>
+          <span style={{fontSize:14}}>⚠️</span>
+          <div style={{fontSize:12,color:theme.text,lineHeight:1.5}}><strong style={{color:"#f59e0b"}}>{h3("Keine Steuerberatung","No tax advice","Vergi danışmanlığı değildir")}</strong> — {h3("AutoTax-HUB ist ein Buchhaltungs-Werkzeug, keine Steuerberatung im Sinne des StBerG. Für steuerliche Beratung wenden Sie sich an einen Steuerberater.","AutoTax-HUB is an accounting tool, not tax advice under StBerG. For tax advice consult a tax advisor.","AutoTax-HUB bir muhasebe aracıdır, StBerG anlamında vergi danışmanlığı değildir. Vergi konularında mali müşavirinize danışın.")}</div>
+        </div>
+        <div style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",borderRadius:8,background:"rgba(148,163,184,0.08)",border:"1px solid "+theme.border}}>
+          <span style={{fontSize:14}}>ℹ️</span>
+          <div style={{fontSize:12,color:theme.text,lineHeight:1.5}}><strong>{h3("Alle Angaben ohne Gewähr","All information without warranty","Tüm bilgiler garanti olmaksızın")}</strong> — {h3("Automatisch erkannte oder erstellte Daten (OCR, Beträge, MwSt, Export) können Fehler enthalten. Bitte vor Verwendung und vor Abgabe an Finanzamt/Steuerberater prüfen.","Auto-detected or generated data (OCR, amounts, VAT, export) may contain errors. Please verify before use and before submitting to the tax office / advisor.","Otomatik okunan veya oluşturulan veriler (OCR, tutar, KDV, export) hata içerebilir. Kullanmadan ve Finanzamt'a/müşavire vermeden önce kontrol edin.")}</div>
+        </div>
+      </div>
     </div>
   </div>);
 }
