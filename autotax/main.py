@@ -12616,6 +12616,39 @@ def export_datev(year: int = Query(None), user: dict = Depends(get_acting_contex
         # Gegenkonto nach Zahlungsart: bar -> 1000 (Kasse), sonst 1200 (Bank)
         _gegen = "1000" if (t.get("payment_method") or "").lower() in ("cash", "bar") else "1200"
         buf.write(f"{amt};{sh};{konto};{_gegen};{_bu};{date_str};{beleg};{vendor};{vat}\n")
+    # Kassenbuch: manuelle Kasseneinträge OHNE invoice_id (synchronisierte Belege
+    # stehen schon oben als Rechnung -> sonst Doppelzählung). Kritisch für
+    # Handwerker/Kleinunternehmer, die bar im Kassenbuch erfassen.
+    _dbc = SessionLocal()
+    try:
+        _cq = _dbc.query(CashEntry).filter(
+            CashEntry.user_id == user["sub"],
+            CashEntry.invoice_id.is_(None),
+            (CashEntry.is_deleted == False) | (CashEntry.is_deleted == None),  # noqa: E712
+            (CashEntry.status == "confirmed") | (CashEntry.status.is_(None)),
+        )
+        if year:
+            _cq = _cq.filter(CashEntry.date >= datetime(int(year), 1, 1),
+                             CashEntry.date < datetime(int(year) + 1, 1, 1))
+        for ce in _cq.order_by(CashEntry.date.asc()).all():
+            if not ce.gross_amount:
+                continue
+            _is_inc = (ce.entry_type == "income")
+            sh = "H" if _is_inc else "S"
+            date_str = ce.date.strftime("%d%m") if getattr(ce, "date", None) else ""
+            amt = f"{(ce.gross_amount or 0):.2f}".replace(".", ",")
+            cat = ce.category or "other"
+            konto = (_DATEV_KONTO_MAP_INCOME.get(cat, "8400") if _is_inc
+                     else _DATEV_KONTO_MAP.get(cat, "6800"))
+            vat = (ce.vat_rate or "0%").replace("%", "").strip()
+            _bu = {"S": {"19": "9", "7": "8"}, "H": {"19": "3", "7": "2"}}.get(sh, {}).get(vat, "")
+            # Kassenbuch -> Gegenkonto bevorzugt 1000 (Kasse); Karte/Bank -> 1200
+            _gegen = "1200" if (ce.payment_method or "").lower() in ("card", "transfer", "paypal", "bank") else "1000"
+            desc = csv_safe((ce.description or "Kasse").replace(";", " "))[:80]
+            beleg = csv_safe((ce.reference or "").replace(";", " "))[:36]
+            buf.write(f"{amt};{sh};{konto};{_gegen};{_bu};{date_str};{beleg};{desc};{vat}\n")
+    finally:
+        _dbc.close()
     buf.seek(0)
     return StreamingResponse(buf, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=autotax_datev_{year or 'all'}.csv"})
 
