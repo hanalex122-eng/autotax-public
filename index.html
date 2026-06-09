@@ -1171,8 +1171,8 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
     const params=new URLSearchParams({limit:"500"});
     if(vendorQ)params.set("vendor",vendorQ);
     if(catQ)params.set("category",catQ);
-    if(dfQ)params.set("date_from",dfQ);
-    if(dtQ)params.set("date_to",dtQ);
+    // Datum-Filter jetzt client-seitig (robust gegen ISO/US/DE) — siehe `filtered`.
+    // Server-String-Vergleich brach bei DE-Daten (09.04.2026) -> Periode-Buttons leer.
     setLoading(true);
     api("/invoices?"+params.toString()).then(d=>{setInvoices(d.items);setTotal(d.total);setSelected(new Set());}).catch(()=>{}).finally(()=>setLoading(false));
   };
@@ -1307,8 +1307,12 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
   }catch(e){alert(e.message);}};
   const cats=[...new Set(invoices.map(i=>i.category).filter(Boolean))];
   const _today_iso=new Date().toISOString().slice(0,10);
+  // Datum -> ISO (YYYY-MM-DD) normalisieren; akzeptiert ISO / DD.MM.YYYY / MM/DD/YYYY
+  const _invISO=(s)=>{if(!s)return"";const a=String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);if(a)return a[1]+"-"+a[2]+"-"+a[3];const b=String(s).match(/^(\d{2})\.(\d{2})\.(\d{4})/);if(b)return b[3]+"-"+b[2]+"-"+b[1];const c=String(s).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(c)return c[3]+"-"+c[1].padStart(2,"0")+"-"+c[2].padStart(2,"0");return"";};
   const filtered=invoices.filter(inv=>{
     if(searchQ){const _q=searchQ.toLowerCase();if(!((inv.vendor||"").toLowerCase().includes(_q)||(inv.description||"").toLowerCase().includes(_q)||(inv.invoice_number||"").toLowerCase().includes(_q)))return false;}
+    // Period-Filter (client-seitig, robust). "all" -> kein Datumsfilter.
+    if(activeRange!=="all"&&(dateFrom||dateTo)){const _d=_invISO(inv.date);if(!_d)return false;if(dateFrom&&_d<dateFrom)return false;if(dateTo&&_d>dateTo)return false;}
     if(filterStatus==="read"&&(!inv.total_amount||inv.total_amount===0))return false;
     if(filterStatus==="unread"&&inv.total_amount>0)return false;
     if(filterStatus==="no_date"&&inv.date)return false;  // Belegdatum fehlt — schnell finden & nachtragen
