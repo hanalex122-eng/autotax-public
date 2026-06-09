@@ -784,6 +784,22 @@ function Sidebar({active,onNav,onLogout,collapsed}){
 /* ══════════════════════════════════════════
    FIX #4: Dashboard — Reset butonu eklendi
    ══════════════════════════════════════════ */
+function KUWarning(){
+  const[ku,setKu]=useState(null);
+  useEffect(()=>{api("/account/ku-status").then(setKu).catch(()=>{});},[]);
+  if(!ku||!ku.is_kleinunternehmer||ku.level==="none")return null;
+  const red=ku.level==="red";const _l=getLang();
+  const tt=(de,tr,en)=>_l==="de"?de:_l==="tr"?tr:en;
+  const eur=n=>"€"+Number(n||0).toLocaleString(_l==="en"?"en-US":"de-DE",{maximumFractionDigits:0});
+  return(<div style={{display:"flex",alignItems:"flex-start",gap:12,padding:"14px 18px",borderRadius:12,background:red?"rgba(239,68,68,0.08)":"rgba(245,158,11,0.08)",border:"1px solid "+(red?"rgba(239,68,68,0.4)":"rgba(245,158,11,0.4)")}}>
+    <span style={{fontSize:22}}>{red?"🔴":"🟡"}</span>
+    <div style={{flex:1}}>
+      <div style={{fontSize:14,fontWeight:700,color:red?"#ef4444":"#f59e0b"}}>{red?tt("§19-Grenze möglicherweise überschritten","§19 Kleinunternehmer sınırını aşmış olabilirsiniz","§19 limit possibly exceeded"):tt("Sie nähern sich der Kleinunternehmer-Grenze","Kleinunternehmer sınırına yaklaşıyorsunuz","Approaching the Kleinunternehmer limit")}</div>
+      <div style={{fontSize:12.5,color:theme.text,marginTop:4,lineHeight:1.5}}>{red?tt("Neue Rechnungen müssen ggf. mit USt ausgestellt werden. Bitte mit Ihrem Steuerberater abstimmen.","Yeni faturalarda KDV uygulamanız gerekebilir. Lütfen Steuerberater'inizle görüşün.","New invoices may need VAT. Please consult your tax advisor."):tt("Bitte mit Ihrem Steuerberater abstimmen.","Lütfen Steuerberater'inizle görüşün.","Please consult your tax advisor.")}</div>
+      <div style={{fontSize:11,color:theme.textMuted,marginTop:6,lineHeight:1.5}}>{tt("Umsatz","Ciro","Turnover")+" "+ku.current_year+" ("+tt("laut Ihren AutoTax-Daten","AutoTax kayıtlarınıza göre","per your AutoTax data")+"): "}<strong style={{color:theme.text}}>{eur(ku.current_turnover)}</strong>{red?" · "+tt("Auch ein Vorjahresumsatz über 25.000 € kann den Status beenden — bitte prüfen lassen.","Önceki yıl cironuz 25.000 € üzeriyse de statü sona erebilir — kontrol ettirin.","A prior-year turnover above €25,000 can also end the status — please verify."):""}</div>
+    </div>
+  </div>);
+}
 function DashboardView({refreshKey,triggerRefresh,onNav}){
   const[data,setData]=useState(null);const[loading,setLoading]=useState(true);const[allInv,setAllInv]=useState([]);
   const[me,setMe]=useState(null);
@@ -893,6 +909,7 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
   const _delta=(cur,prev)=>{if(prev===0||prev==null)return null;const d=Math.round(((cur-prev)/Math.abs(prev))*100);return (d>=0?"▲ ":"▼ ")+Math.abs(d)+"% "+_vp;};
   const _periods=[["today",_pl("Heute","Bugün","Today")],["week",_pl("Diese Woche","Bu Hafta","This Week")],["month",_pl("Dieser Monat","Bu Ay","This Month")],["quarter",_pl("Dieses Quartal","Bu Çeyrek","This Quarter")],["year",_pl("Dieses Jahr","Bu Yıl","This Year")],["custom",_pl("Benutzerdefiniert","Özel","Custom")]];
   return(<div style={{display:"flex",flexDirection:"column",gap:28}}>
+    <KUWarning/>
     {me?.is_trial && me.trial_days_left !== null && me.trial_days_left <= 14 && <div onClick={()=>onNav&&onNav("pricing")} style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px",background:me.trial_days_left<=3?"rgba(239,68,68,0.08)":"rgba(168,85,247,0.08)",borderRadius:12,border:`1px solid ${me.trial_days_left<=3?"rgba(239,68,68,0.4)":"rgba(168,85,247,0.4)"}`,flexWrap:"wrap",gap:10,boxShadow:me.trial_days_left<=3?"0 0 12px rgba(239,68,68,0.15)":"0 0 12px rgba(168,85,247,0.15)"}}>
       <div style={{display:"flex",alignItems:"center",gap:14}}>
         <div style={{fontSize:24}}>{me.trial_days_left<=3?"⚠️":"🎁"}</div>
@@ -2653,7 +2670,8 @@ function CompaniesView(){
     React.createElement("input",{style:css.input,type:type||"text",placeholder:ph||"",value:form[field],onChange:e=>setForm({...form,[field]:e.target.value})}));
   return(<div style={{maxWidth:700}}>
     <h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:"0 0 8px"}}>{_t("companies")}</h2>
-    <p style={{color:theme.textMuted,fontSize:14,margin:"0 0 24px"}}>{getLang()==="de"?"Firmendaten werden bei Rechnungserstellung automatisch ausgefüllt. IBAN-Abgleich erkennt Einnahmen automatisch.":"Company info auto-fills when creating invoices. IBAN match detects income automatically."}</p>
+    <p style={{color:theme.textMuted,fontSize:14,margin:"0 0 16px"}}>{getLang()==="de"?"Firmendaten werden bei Rechnungserstellung automatisch ausgefüllt. IBAN-Abgleich erkennt Einnahmen automatisch.":"Company info auto-fills when creating invoices. IBAN match detects income automatically."}</p>
+    <div style={{marginBottom:16}}><KUWarning/></div>
     {loading?<div style={{color:theme.textMuted,padding:20}}>Laden...</div>:<div>
       {companies.length===0&&!showForm&&<div style={{...css.card,textAlign:"center",padding:32,color:theme.textDim}}>No companies registered yet</div>}
       {companies.map(c=><div key={c.id} style={{...css.card,marginBottom:12}}>
