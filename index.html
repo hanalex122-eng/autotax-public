@@ -400,7 +400,7 @@ function StatCard({label,value,sub,icon,color,bgColor,sparkData}){return(
   </div>
 );}
 
-const downloadPDF=async(id)=>{try{const r=await fetch(API+"/invoices/"+id+"/pdf",{headers:{Authorization:"Bearer "+localStorage.getItem("atx_token")}});if(!r.ok){alert("PDF Error");return;}const blob=await r.blob();const url=window.URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="Rechnung_"+id+".pdf";a.click();window.URL.revokeObjectURL(url);}catch(e){alert("PDF Download fehlgeschlagen");}};
+const downloadPDF=async(id)=>{try{const r=await fetch(API+"/invoices/"+id+"/pdf",{headers:{Authorization:"Bearer "+localStorage.getItem("atx_token")}});if(!r.ok){alert("PDF Error");return;}const blob=await r.blob();const url=window.URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="Rechnung_"+id+".pdf";a.target="_blank";document.body.appendChild(a);a.click();setTimeout(()=>{a.remove();window.URL.revokeObjectURL(url);},1500);}catch(e){alert("PDF Download fehlgeschlagen");}};
 
 const downloadBulkPDF=async(ids,showToast)=>{
   if(!ids||ids.length===0)return;
@@ -1396,7 +1396,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
         <h3 style={{color:theme.text,margin:"0 0 20px",fontSize:20,fontWeight:700}}>{t("create_invoice_title")}</h3>
         {/* --- ADDED START: 2-column layout --- */}
         {(() => { const _inpStyle={width:"100%",borderWidth:2,borderStyle:"solid",borderColor:"#3a4a68",padding:"11px 13px",background:"#0f1825",color:"#f1f5f9",fontSize:14,fontFamily:"inherit",borderRadius:10,outline:"none",cursor:"text",transition:"border-color 0.15s, box-shadow 0.15s, background 0.15s"};const _inpFocus="this.style.borderColor='#22c55e';this.style.boxShadow='0 0 0 3px rgba(34,197,94,0.2)';this.style.background='#132033'";const _inpBlur="this.style.borderColor='#3a4a68';this.style.boxShadow='none';this.style.background='#0f1825'";const _inpHover="if(document.activeElement!==this){this.style.borderColor='#4d6186'}";const _inpLeave="if(document.activeElement!==this){this.style.borderColor='#3a4a68'}";const _lblStyle={fontSize:11,color:"#e2e8f0",fontWeight:700,display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:0.4};const _posTotal=(newInv.positionen||[]).reduce((s,p)=>s+(parseFloat(String(p.amount||"").replace(",","."))||0),0);return(
-        <div style={{display:"grid",gridTemplateColumns:"minmax(300px,1fr) minmax(300px,1fr)",gap:28}}>
+        <div style={{display:"grid",gridTemplateColumns:window.innerWidth<820?"1fr":"minmax(300px,1fr) minmax(300px,1fr)",gap:window.innerWidth<820?16:28}}>
           {/* LEFT: Form (ACTIVE — bright, clear inputs) */}
           <div>
             <div style={{fontSize:13,fontWeight:800,color:theme.accent,textTransform:"uppercase",letterSpacing:1.2,marginBottom:4,display:"flex",alignItems:"center",gap:8}}>🏢 Sender (Company)</div>
@@ -2299,7 +2299,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   useEffect(()=>{api("/company/default").then(d=>{if(d&&d.exists)setDefCompany(d);}).catch(()=>{});},[]);
   // C1: tek tıkla eigene Einnahme — entry_type=income + vendor=Firma (düzenlenebilir)
   const openIncome=()=>{setForm(f=>({...f,entry_type:"income",vendor:f.vendor||(defCompany&&defCompany.company_name)||""}));setShowForm(true);};
-  const dlReport=async()=>{const tk=localStorage.getItem("atx_token");try{const r=await fetch(API+"/bookkeeping/report?period="+period,{headers:{Authorization:"Bearer "+tk}});if(!r.ok){alert("PDF Fehler ("+r.status+")");return;}const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="kassenbuch_"+period+".pdf";a.click();URL.revokeObjectURL(url);}catch(e){alert("PDF fehlgeschlagen: "+(e.message||e));}};
+  const dlReport=async()=>{const tk=localStorage.getItem("atx_token");try{const r=await fetch(API+"/bookkeeping/report?period="+period,{headers:{Authorization:"Bearer "+tk}});if(!r.ok){alert("PDF Fehler ("+r.status+")");return;}const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="kassenbuch_"+period+".pdf";a.target="_blank";document.body.appendChild(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(url);},1500);}catch(e){alert("PDF fehlgeschlagen: "+(e.message||e));}};
   const add=async()=>{if(!form.description||!form.gross_amount){alert("Description and amount required");return;}
     try{await api("/bookkeeping",{method:"POST",body:JSON.stringify({...form,gross_amount:parseFloat(form.gross_amount)})});setShowForm(false);setForm({entry_type:"expense",date:new Date().toISOString().slice(0,10),description:"",vendor:"",category:"",gross_amount:"",vat_rate:"19%",payment_method:"",reference:"",notes:""});load();if(triggerRefresh)triggerRefresh();}catch(e){alert(e.message);}};
   const del=async(id)=>{if(!confirm(_t("delete_entry")))return;try{await api("/bookkeeping/"+id,{method:"DELETE"});load();if(triggerRefresh)triggerRefresh();}catch(e){alert(e.message);}};
