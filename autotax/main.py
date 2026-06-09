@@ -12605,10 +12605,14 @@ def export_datev(year: int = Query(None), user: dict = Depends(get_acting_contex
         amt = f"{t['total_amount']:.2f}".replace(".", ",")
         vendor = csv_safe((t["vendor"] or "").replace(";", " "))
         konto = csv_safe(t["konto"])
-        vat = (t["vat_rate"] or "0%").replace("%", "")
+        vat = (t["vat_rate"] or "0%").replace("%", "").strip()
+        # BU-Schlüssel (DATEV Steuerschlüssel) statt roher MwSt-%: Ausgabe=Vorsteuer
+        # (19%->9, 7%->8), Einnahme=Umsatzsteuer (19%->3, 7%->2), sonst leer.
+        # Orientierung — bei Automatikkonten ggf. leer lassen (Steuerberater prüft).
+        _bu = {"S": {"19": "9", "7": "8"}, "H": {"19": "3", "7": "2"}}.get(sh, {}).get(vat, "")
         # Belegfeld 1 = Rechnungs-/Belegnummer (Steuerberater-Referenz auf den Beleg)
         beleg = csv_safe((t.get("invoice_number") or "").replace(";", " "))[:36]
-        buf.write(f"{amt};{sh};{konto};1200;{vat};{date_str};{beleg};{vendor};{vat}\n")
+        buf.write(f"{amt};{sh};{konto};1200;{_bu};{date_str};{beleg};{vendor};{vat}\n")
     buf.seek(0)
     return StreamingResponse(buf, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=autotax_datev_{year or 'all'}.csv"})
 
