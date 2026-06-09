@@ -1312,7 +1312,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
   const filtered=invoices.filter(inv=>{
     if(searchQ){const _q=searchQ.toLowerCase();if(!((inv.vendor||"").toLowerCase().includes(_q)||(inv.description||"").toLowerCase().includes(_q)||(inv.invoice_number||"").toLowerCase().includes(_q)))return false;}
     // Period-Filter (client-seitig, robust). "all" -> kein Datumsfilter.
-    if(activeRange!=="all"&&(dateFrom||dateTo)){const _d=_invISO(inv.date);if(!_d)return false;if(dateFrom&&_d<dateFrom)return false;if(dateTo&&_d>dateTo)return false;}
+    if(activeRange!=="all"&&(dateFrom||dateTo)){const _d=_invISO(inv.date)||_invISO(inv.created_at);if(!_d)return false;if(dateFrom&&_d<dateFrom)return false;if(dateTo&&_d>dateTo)return false;}
     if(filterStatus==="read"&&(!inv.total_amount||inv.total_amount===0))return false;
     if(filterStatus==="unread"&&inv.total_amount>0)return false;
     if(filterStatus==="no_date"&&inv.date)return false;  // Belegdatum fehlt — schnell finden & nachtragen
