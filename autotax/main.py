@@ -3403,15 +3403,16 @@ def declaration_steuerberater_bundle(
             vat = (inv.vat_rate or "0").replace("%", "") if inv.vat_rate else "0"
             csv_buf.write(f"{amt};{sh};{konto};1200;{vat};{date_str};{vendor};{vat}\n")
         for ce in cash:
-            sh = "H" if (ce.amount or 0) > 0 else "S"
-            date_str = ""
-            parts = (ce.date or "").split("-")
-            if len(parts) == 3:
-                date_str = f"{parts[2]}{parts[1]}"
-            amt = f"{abs(ce.amount or 0):.2f}".replace(".", ",")
+            # FIX: CashEntry hat gross_amount (nicht amount), entry_type (nicht Vorzeichen),
+            # und date ist DateTime (kein String -> .split brach). Konto je nach Typ.
+            _is_inc = (ce.entry_type == "income")
+            sh = "H" if _is_inc else "S"
+            date_str = ce.date.strftime("%d%m") if getattr(ce, "date", None) else ""
+            amt = f"{(ce.gross_amount or 0):.2f}".replace(".", ",")
             desc = (ce.description or "Kasse").replace(";", " ")[:80]
-            cat = ce.category or "kasse_income"
-            konto = _DATEV_KONTO_MAP_INCOME.get(cat, "8400")
+            cat = ce.category or "other"
+            konto = (_DATEV_KONTO_MAP_INCOME.get(cat, "8400") if _is_inc
+                     else _DATEV_KONTO_MAP.get(cat, "6800"))
             csv_buf.write(f"{amt};{sh};{konto};1000;0;{date_str};{desc};0\n")
         csv_bytes = csv_buf.getvalue().encode("utf-8")
 
