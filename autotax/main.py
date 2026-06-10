@@ -10286,7 +10286,7 @@ def kasse_speedy_confirm(body: dict = Body(...), user: dict = Depends(get_curren
             rate = str(p.get("rate") or "").strip() or "19%"
             dup = db.query(CashEntry).filter(
                 CashEntry.user_id == user["sub"],
-                CashEntry.reference == "Speedy-Import",
+                CashEntry.reference == "Kassenbericht-Import",
                 CashEntry.gross_amount == brutto,
                 CashEntry.vat_rate == rate,
                 CashEntry.date >= datetime(dval.year, dval.month, dval.day),
@@ -10298,11 +10298,11 @@ def kasse_speedy_confirm(body: dict = Body(...), user: dict = Depends(get_curren
                 continue
             db.add(CashEntry(
                 user_id=user["sub"],
-                description=f"Speedy Tageseinnahme {rate}" + (f" ({datum})" if datum else ""),
-                vendor="Speedy Kasse", gross_amount=brutto, vat_amount=steuer, vat_rate=rate,
+                description=f"Kassen-Einnahme {rate}" + (f" ({datum})" if datum else ""),
+                vendor="Kasse", gross_amount=brutto, vat_amount=steuer, vat_rate=rate,
                 net_amount=round(brutto - steuer, 2), entry_type="income", category="kasse_income",
-                payment_method=pay_map.get(zahlungsart, ""), reference="Speedy-Import",
-                notes="Import aus Speedy Z-/Sammel-Endabrechnung", date=dval,
+                payment_method=pay_map.get(zahlungsart, ""), reference="Kassenbericht-Import",
+                notes="Import aus Kassenbericht / Z-Bericht", date=dval,
                 source="import", status="confirmed",
             ))
             created += 1

@@ -2370,8 +2370,8 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}>
     {speedyPrev&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setSpeedyPrev(null)}>
       <div style={{...css.card,maxWidth:560,width:"100%",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-        <h3 style={{fontSize:17,fontWeight:700,color:theme.text,margin:"0 0 4px"}}>📷 {getLang()==="tr"?"Speedy — Önizleme":"Speedy — Vorschau"}</h3>
-        <p style={{fontSize:12,color:theme.textMuted,margin:"0 0 12px"}}>{getLang()==="tr"?"Tutarları kontrol et, doğruysa onayla — gelir olarak Kassenbuch'a eklenir. (TSE Speedy'de kalır.)":"Beträge prüfen und bestätigen — wird als Einnahme gebucht. (TSE bleibt in Speedy.)"}</p>
+        <h3 style={{fontSize:17,fontWeight:700,color:theme.text,margin:"0 0 4px"}}>📷 {getLang()==="tr"?"Kasa Toplamı — Önizleme":getLang()==="en"?"Cash Report — Preview":"Kassenbericht — Vorschau"}</h3>
+        <p style={{fontSize:12,color:theme.textMuted,margin:"0 0 12px"}}>{getLang()==="tr"?"Tutarları kontrol et, doğruysa onayla — gelir olarak Kassenbuch'a eklenir. (TSE/kasa cihazın sende kalır.)":getLang()==="en"?"Check the amounts and confirm — booked as income. (Your till/TSE stays with you.)":"Beträge prüfen und bestätigen — wird als Einnahme gebucht. (Deine Kasse/TSE bleibt bei dir.)"}</p>
         <div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:13,marginBottom:12}}>
           <div><span style={{color:theme.textDim}}>Datum:</span> <strong style={{color:theme.text}}>{speedyPrev.datum?formatDateEU(speedyPrev.datum):"—"}</strong></div>
           <div><span style={{color:theme.textDim}}>Zahlung:</span> <strong style={{color:theme.text}}>{speedyPrev.zahlungsart||"—"}</strong></div>
@@ -2403,7 +2403,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
         <button style={{...css.btn("#f59e0b"),fontSize:13}} onClick={sync} disabled={syncing}>{syncing?"⏳ Sync...":"🔄 "+_t("sync_invoices")}</button>
         <button style={{...css.btn("#10b981"),fontSize:13}} onClick={()=>onNav&&onNav("export")}>📤 Export</button>
         <button style={{...css.btn("#3b82f6"),fontSize:13}} onClick={()=>csvRef.current?.click()} disabled={importing}>{importing?"⏳ Importing...":"📥 CSV Import"}</button>
-        <button style={{...css.btn("#8b5cf6"),fontSize:13}} onClick={()=>speedyRef.current?.click()} disabled={speedyBusy} title="Speedy Z-/Sammel-Endabrechnung importieren">{speedyBusy?"⏳ OCR...":"📷 Speedy"}</button>
+        <button style={{...css.btn("#8b5cf6"),fontSize:13}} onClick={()=>speedyRef.current?.click()} disabled={speedyBusy} title={getLang()==="tr"?"Kasa raporu / Z-Bericht yükle (foto/PDF) → gelir":"Kassenbericht / Z-Bericht hochladen (Foto/PDF) → Einnahme"}>{speedyBusy?"⏳ OCR...":(getLang()==="tr"?"📷 Kasa Toplamı":getLang()==="en"?"📷 Cash Report":"📷 Kassenbericht")}</button>
         <input ref={speedyRef} type="file" accept="image/*,application/pdf" style={{display:"none"}} onChange={speedyUpload}/>
         <input ref={csvRef} type="file" accept=".csv,.txt,.CSV,text/csv,application/vnd.ms-excel" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;const tk=localStorage.getItem("atx_token");if(!tk){alert("Bitte zuerst einloggen");return;}setImporting(true);const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/bookkeeping/import-csv",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await r.json();if(d.success){alert(d.imported+" entries imported");load();if(triggerRefresh)triggerRefresh();}else alert("Error: "+_extractErr(d));}catch(ex){alert("Import fehlgeschlagen: "+ex.message);}setImporting(false);e.target.value="";}}/>
       </div>
