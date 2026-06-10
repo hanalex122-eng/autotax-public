@@ -2666,6 +2666,13 @@ function CompaniesView(){
   const resetForm=()=>setForm({company_name:"",iban:"",tax_id:"",address:"",phone:"",fax:"",email:"",website:""});
   const add=async()=>{if(!form.company_name.trim())return;try{const r=await api("/companies",{method:"POST",body:JSON.stringify(form)});if(r.success){resetForm();setShowForm(false);load();}}catch(e){alert(e.message);}};
   const del=async(id)=>{if(!confirm(_t("delete_company")))return;try{await api("/companies/"+id,{method:"DELETE"});load();}catch(e){alert(e.message);}};
+  const uploadLogo=(id,file)=>{if(!file)return;if(!/image\/(png|jpe?g)/.test(file.type)){alert("Nur PNG/JPG");return;}
+    const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=async()=>{
+      const max=400,sc=Math.min(1,max/img.width);const cv=document.createElement("canvas");cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);
+      cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);
+      const dataUrl=cv.toDataURL(file.type.includes("png")?"image/png":"image/jpeg",0.9);
+      try{await api("/company/logo",{method:"POST",body:JSON.stringify({company_id:id,logo:dataUrl})});if(showToast)showToast(getLang()==="tr"?"Logo kaydedildi":"Logo gespeichert","success");load();}catch(ex){alert(ex.message);}};img.src=reader.result;};reader.readAsDataURL(file);};
+  const removeLogo=async(id)=>{try{await api("/company/logo",{method:"POST",body:JSON.stringify({company_id:id,logo:""})});load();}catch(e){alert(e.message);}};
   const F=({label,field,ph,type})=>React.createElement("div",{style:{marginBottom:10}},
     React.createElement("label",{style:{fontSize:11,color:theme.textMuted,display:"block",marginBottom:3,fontWeight:600}},label),
     React.createElement("input",{style:css.input,type:type||"text",placeholder:ph||"",value:form[field],onChange:e=>setForm({...form,[field]:e.target.value})}));
@@ -2691,6 +2698,12 @@ function CompaniesView(){
           {c.fax&&<div><span style={{color:theme.textDim}}>Fax:</span> <span style={{color:theme.text}}>{c.fax}</span></div>}
           {c.email&&<div><span style={{color:theme.textDim}}>E-Mail:</span> <span style={{color:theme.text}}>{c.email}</span></div>}
           {c.website&&<div><span style={{color:theme.textDim}}>Web:</span> <span style={{color:theme.text}}>{c.website}</span></div>}
+        </div>
+        <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+theme.border,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:12,color:theme.textMuted}}>🖼️ Logo (PDF):</span>
+          {c.has_logo?<span style={{fontSize:12,color:theme.accent,fontWeight:600}}>✓ {getLang()==="tr"?"yüklendi":getLang()==="en"?"uploaded":"hochgeladen"}</span>:<span style={{fontSize:12,color:theme.textDim}}>{getLang()==="tr"?"yok":getLang()==="en"?"none":"keins"}</span>}
+          <label style={{...css.btnOutline,padding:"5px 12px",fontSize:11,cursor:"pointer"}}>{c.has_logo?(getLang()==="tr"?"Değiştir":getLang()==="en"?"Replace":"Ersetzen"):(getLang()==="tr"?"Yükle":getLang()==="en"?"Upload":"Hochladen")}<input type="file" accept="image/png,image/jpeg" style={{display:"none"}} onChange={e=>{uploadLogo(c.id,e.target.files&&e.target.files[0]);e.target.value="";}}/></label>
+          {c.has_logo&&<button style={{background:"transparent",border:"none",color:theme.danger,cursor:"pointer",fontSize:11,textDecoration:"underline"}} onClick={()=>removeLogo(c.id)}>{getLang()==="tr"?"Kaldır":getLang()==="en"?"Remove":"Entfernen"}</button>}
         </div>
       </div>)}
       {showForm?<div style={css.card}>

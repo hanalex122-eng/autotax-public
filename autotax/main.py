@@ -12094,7 +12094,34 @@ def list_companies(user: dict = Depends(get_acting_context)):
     db = SessionLocal()
     try:
         companies = db.query(UserCompany).filter(UserCompany.user_id == user["sub"]).all()
-        return [{"id": c.id, "company_name": c.company_name, "iban": c.iban or "", "tax_id": c.tax_id or "", "address": c.address or "", "phone": c.phone or "", "fax": c.fax or "", "email": c.email or "", "website": c.website or "", "is_default": c.is_default or False} for c in companies]
+        return [{"id": c.id, "company_name": c.company_name, "iban": c.iban or "", "tax_id": c.tax_id or "", "address": c.address or "", "phone": c.phone or "", "fax": c.fax or "", "email": c.email or "", "website": c.website or "", "is_default": c.is_default or False, "has_logo": bool(getattr(c, "logo", None))} for c in companies]
+    finally:
+        db.close()
+
+
+@app.post("/company/logo")
+def set_company_logo(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Firmenlogo (PNG/JPG als data-URL) für den PDF-Briefkopf speichern.
+    Leerer logo-Wert entfernt das Logo. Größe begrenzt (DoS/Speicher)."""
+    require_owner_or_export(user, "write")
+    logo = (body.get("logo") or "").strip()
+    if logo:
+        if not any(logo.startswith(p) for p in ("data:image/png", "data:image/jpeg", "data:image/jpg")):
+            err(400, "Nur PNG oder JPG erlaubt")
+        if len(logo) > 700_000:  # ~500 KB Bild als base64
+            err(400, "Logo zu groß (max. ~500 KB)")
+    company_id = body.get("company_id")
+    db = SessionLocal()
+    try:
+        q = db.query(UserCompany).filter(UserCompany.user_id == user["sub"])
+        comp = (q.filter(UserCompany.id == company_id).first() if company_id else None)
+        if not comp:
+            comp = q.filter(UserCompany.is_default == True).first() or q.order_by(UserCompany.id.desc()).first()
+        if not comp:
+            err(400, "Bitte zuerst eine Firma anlegen")
+        comp.logo = logo or None
+        db.commit()
+        return {"success": True, "has_logo": bool(comp.logo), "company_id": comp.id}
     finally:
         db.close()
 
