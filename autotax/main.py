@@ -10234,6 +10234,88 @@ def export_bookkeeping_csv(year: int = Query(None), user: dict = Depends(get_act
 # BOOKKEEPING: CSV IMPORT
 # ============================================================
 
+@app.post("/kasse/speedy-import")
+async def kasse_speedy_import(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """Speedy Z-/Sammel-Endabrechnung (PDF/Foto) -> OCR -> Vorschau der Umsätze.
+    KEIN Commit. Der Nutzer prüft die Beträge und bestätigt über /confirm.
+    Vorbuchhaltung: TSE + Einzelbelege bleiben in Speedy."""
+    from autotax.speedy import parse_speedy_report
+    content = await file.read()
+    if not content:
+        err(400, "Leere Datei")
+    if len(content) > MAX_FILE_SIZE:
+        err(400, "Datei zu groß")
+    await file.seek(0)
+    text = ""
+    try:
+        text = await asyncio.wait_for(
+            extract_text(file, handwriting=False, file_bytes=content), timeout=45)
+    except Exception:
+        logger.warning("Speedy OCR failed/timeout")
+    parsed = parse_speedy_report(text or "")
+    if not parsed.get("ok"):
+        return {"ok": False,
+                "message": "Keine Umsatz-Steuersätze erkannt — bitte Foto/PDF prüfen "
+                           "(Block 'Gesamtumsatz nach Steuersätzen' muss lesbar sein)."}
+    return {"ok": True, **parsed}
+
+
+@app.post("/kasse/speedy-import/confirm")
+def kasse_speedy_confirm(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Bestätigte Speedy-Umsätze als Einnahmen ins Kassenbuch buchen (je Steuersatz
+    eine Position). Dedup: gleiche (Datum, Brutto, Speedy-Import) wird übersprungen."""
+    require_owner_or_export(user, "write")
+    positions = body.get("positions") or []
+    datum = (body.get("datum") or "").strip()[:10]
+    zahlungsart = (body.get("zahlungsart") or "").strip()
+    if not isinstance(positions, list) or not positions:
+        err(400, "Keine Positionen")
+    try:
+        dval = datetime.strptime(datum, "%Y-%m-%d") if datum else datetime.now()
+    except ValueError:
+        dval = datetime.now()
+    pay_map = {"BAR": "cash", "Karte": "card"}
+    db = SessionLocal()
+    created, skipped = 0, 0
+    try:
+        for p in positions:
+            brutto = round(float(p.get("brutto") or 0), 2)
+            if brutto <= 0:
+                continue
+            steuer = round(float(p.get("steuer") or 0), 2)
+            rate = str(p.get("rate") or "").strip() or "19%"
+            dup = db.query(CashEntry).filter(
+                CashEntry.user_id == user["sub"],
+                CashEntry.reference == "Speedy-Import",
+                CashEntry.gross_amount == brutto,
+                CashEntry.vat_rate == rate,
+                CashEntry.date >= datetime(dval.year, dval.month, dval.day),
+                CashEntry.date < datetime(dval.year, dval.month, dval.day) + timedelta(days=1),
+                (CashEntry.is_deleted == False) | (CashEntry.is_deleted == None),  # noqa: E712
+            ).first()
+            if dup:
+                skipped += 1
+                continue
+            db.add(CashEntry(
+                user_id=user["sub"],
+                description=f"Speedy Tageseinnahme {rate}" + (f" ({datum})" if datum else ""),
+                vendor="Speedy Kasse", gross_amount=brutto, vat_amount=steuer, vat_rate=rate,
+                net_amount=round(brutto - steuer, 2), entry_type="income", category="kasse_income",
+                payment_method=pay_map.get(zahlungsart, ""), reference="Speedy-Import",
+                notes="Import aus Speedy Z-/Sammel-Endabrechnung", date=dval,
+                source="import", status="confirmed",
+            ))
+            created += 1
+        db.commit()
+        return {"success": True, "created": created, "skipped": skipped}
+    except Exception:
+        db.rollback()
+        logger.exception("Speedy confirm failed")
+        err(500, "Import fehlgeschlagen")
+    finally:
+        db.close()
+
+
 @app.post("/bookkeeping/import-csv")
 async def import_csv(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     import csv
