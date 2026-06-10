@@ -348,6 +348,8 @@ class Invoice(Base):
     service_date = Column(String, nullable=True)        # Leistungsdatum YYYY-MM-DD (default=Rechnungsdatum)
     service_description = Column(String, nullable=True) # §14 — Leistungsbeschreibung (was wurde geleistet)
     positions = Column(Text, nullable=True)             # §14 — Positionen JSON: [{description, amount}] (mehrzeilig)
+    doc_type = Column(String(16), nullable=True, default="rechnung")  # rechnung | angebot (Angebot zählt NICHT als Umsatz)
+    valid_until = Column(String, nullable=True)         # Angebot: "Gültig bis" YYYY-MM-DD
 
 
 class CashEntry(Base):
@@ -478,6 +480,7 @@ class UserCompany(Base):
     email = Column(String, nullable=True)
     website = Column(String, nullable=True)
     is_default = Column(Boolean, default=False, nullable=False)
+    logo = Column(Text, nullable=True)  # data-URL (base64 PNG/JPG) für PDF-Briefkopf (Rechnung+Angebot)
 
 
 class EmailConfig(Base):

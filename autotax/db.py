@@ -145,6 +145,9 @@ def init_db():
             if "is_default" not in uc_cols:
                 conn.execute(text("ALTER TABLE user_companies ADD COLUMN is_default BOOLEAN DEFAULT FALSE"))
                 logger.info("Added 'is_default' column to user_companies")
+            if "logo" not in uc_cols:
+                conn.execute(text("ALTER TABLE user_companies ADD COLUMN logo TEXT"))
+                logger.info("Added 'logo' column to user_companies (PDF-Briefkopf)")
         # --- ADDED END ---
         # --- Vendor contact columns (extracted by parser but previously not persisted) ---
         inv_cols = [c["name"] for c in insp.get_columns("invoices")]
@@ -205,6 +208,12 @@ def init_db():
             if "positions" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN positions TEXT"))
                 logger.info("Added 'positions' column to invoices (§14 Positionen)")
+            if "doc_type" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN doc_type VARCHAR(16) DEFAULT 'rechnung'"))
+                logger.info("Added 'doc_type' column to invoices (rechnung|angebot)")
+            if "valid_until" not in inv_cols:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN valid_until VARCHAR"))
+                logger.info("Added 'valid_until' column to invoices (Angebot Gültig bis)")
             # Steuerlogik v2 (2026-05-17) — 4-bolumlu juristisch sicher yapi
             if "ki_einschaetzung" not in inv_cols:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN ki_einschaetzung TEXT"))
