@@ -1139,6 +1139,8 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
         inv = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.user_id == user["sub"]).first()
         if not inv:
             raise HTTPException(status_code=404, detail="Rechnung nicht gefunden")
+        _doc = (getattr(inv, "doc_type", None) or "rechnung")
+        _is_ang = (_doc == "angebot")
 
         # --- C2: Briefkopf — vollständige Firmendaten (§14 UStG) ---
         # Standardfirma bevorzugen, sonst zuletzt angelegte (wie /company/default + Formular)
@@ -1155,6 +1157,22 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
         buf = io.BytesIO()
         c = pdf_canvas.Canvas(buf, pagesize=A4)
         w, h = A4
+
+        # Firmenlogo (optional, oben rechts) — Fehler darf PDF nicht brechen
+        _logo = getattr(comp, "logo", None) if comp else None
+        if _logo and "," in str(_logo):
+            try:
+                from reportlab.lib.utils import ImageReader
+                import base64 as _b64logo
+                _lraw = _b64logo.b64decode(str(_logo).split(",", 1)[1])
+                _limg = ImageReader(io.BytesIO(_lraw))
+                _liw, _lih = _limg.getSize()
+                _lsc = min(4.0 * cm / _liw, 2.2 * cm / _lih)
+                _ldw, _ldh = _liw * _lsc, _lih * _lsc
+                c.drawImage(_limg, w - 2 * cm - _ldw, h - 1.2 * cm - _ldh,
+                            width=_ldw, height=_ldh, mask="auto", preserveAspectRatio=True)
+            except Exception:
+                pass
 
         # Firmenname
         c.setFillColor(HexColor("#1a2d4a"))
@@ -1193,23 +1211,28 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
 
         c.setFillColor(HexColor("#1a2d4a"))
         c.setFont("Helvetica-Bold", 16)
-        typ = "RECHNUNG" if inv.invoice_type == "income" else "BELEG"
+        typ = "ANGEBOT" if _is_ang else ("RECHNUNG" if inv.invoice_type == "income" else "BELEG")
         c.drawString(2*cm, h-4.5*cm, typ)
         c.setFont("Helvetica", 11)
         c.drawString(12*cm, h-4.5*cm, f"Nr: {inv.invoice_number or '—'}")
         c.drawString(12*cm, h-5.1*cm, f"Datum: {inv.date or 'k.A.'}")
-        # §14 UStG — Leistungsdatum (Liefer-/Leistungszeitpunkt), default = Rechnungsdatum
-        _lstg = getattr(inv, "service_date", None) or inv.date
-        if inv.invoice_type == "income" and _lstg:
-            c.drawString(12*cm, h-5.7*cm, f"Leistungsdatum: {_lstg}")
+        if _is_ang:
+            _vu = getattr(inv, "valid_until", None)
+            if _vu:
+                c.drawString(12*cm, h-5.7*cm, f"Gültig bis: {_vu}")
+        else:
+            # §14 UStG — Leistungsdatum (Liefer-/Leistungszeitpunkt), default = Rechnungsdatum
+            _lstg = getattr(inv, "service_date", None) or inv.date
+            if inv.invoice_type == "income" and _lstg:
+                c.drawString(12*cm, h-5.7*cm, f"Leistungsdatum: {_lstg}")
 
         c.setFont("Helvetica-Bold", 11)
-        c.drawString(2*cm, h-6*cm, "An:" if inv.invoice_type == "income" else "Von:")
+        c.drawString(2*cm, h-6*cm, "An:" if (inv.invoice_type == "income" or _is_ang) else "Von:")
         c.setFont("Helvetica", 11)
         c.drawString(2*cm, h-6.6*cm, inv.vendor or "Unbekannt")
         # §14 UStG — Leistungsempfänger-Anschrift (max. 3 Zeilen, kein Überlauf in Tabelle)
         _raddr = getattr(inv, "recipient_address", None)
-        if inv.invoice_type == "income" and _raddr:
+        if (inv.invoice_type == "income" or _is_ang) and _raddr:
             c.setFont("Helvetica", 9)
             c.setFillColor(HexColor("#444444"))
             _ry = h - 7.1*cm
@@ -1272,7 +1295,8 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
         c.save()
         buf.seek(0)
 
-        filename = f"{typ}_{inv.invoice_number or inv.id}.pdf"
+        filename = (f"angebot-{inv.invoice_number or inv.id}.pdf" if _is_ang
+                    else f"{typ}_{inv.invoice_number or inv.id}.pdf")
         return StreamingResponse(buf, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename={filename}"})
     finally:
         db.close()
