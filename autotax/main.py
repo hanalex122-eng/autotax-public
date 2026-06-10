@@ -7363,6 +7363,58 @@ def list_angebote(user: dict = Depends(get_acting_context)):
         db.close()
 
 
+@app.post("/angebote/{angebot_id}/to-rechnung")
+def angebot_to_rechnung(angebot_id: int, user: dict = Depends(get_current_user)):
+    """Aus einem Angebot eine echte Rechnung erzeugen (neue RE-Nummer, gebucht).
+    Das Angebot bleibt erhalten. Trockenbau/Handwerker: Angebot -> Auftrag -> Rechnung.
+    """
+    require_owner_or_export(user, "write")
+    db = SessionLocal()
+    try:
+        ang = db.query(Invoice).filter(
+            Invoice.id == angebot_id, Invoice.user_id == user["sub"],
+            Invoice.doc_type == "angebot",
+        ).first()
+        if not ang:
+            err(404, "Angebot nicht gefunden")
+        today = datetime.now().date().isoformat()
+        rnr = _next_invoice_number(db, user["sub"])
+        rinv = Invoice(
+            user_id=user["sub"], filename="rechnung-aus-angebot",
+            vendor=ang.vendor, total_amount=ang.total_amount,
+            vat_amount=ang.vat_amount, vat_rate=ang.vat_rate,
+            date=today, raw_text=f"Rechnung aus Angebot {ang.invoice_number or ''}",
+            invoice_type="income", invoice_number=rnr, doc_type="rechnung",
+            category=ang.category or "service", processed=True,
+            due_date=(datetime.now().date() + timedelta(days=7)).isoformat(),
+            payment_status="unpaid", vendor_email=ang.vendor_email,
+            recipient_address=getattr(ang, "recipient_address", None),
+            service_date=today,
+            service_description=getattr(ang, "service_description", None),
+            positions=getattr(ang, "positions", None),
+        )
+        db.add(rinv)
+        db.commit()
+        db.refresh(rinv)
+        auto_create_cash_entry(rinv.id, user["sub"], {
+            "vendor": ang.vendor, "total_amount": ang.total_amount,
+            "vat_amount": ang.vat_amount, "vat_rate": ang.vat_rate,
+            "date": today, "category": ang.category or "service",
+            "invoice_type": "income",
+        })
+        logger.info("Angebot %s -> Rechnung %s (%s)", ang.invoice_number, rnr, rinv.id)
+        return {"success": True, "id": rinv.id, "invoice_number": rnr,
+                "from_angebot": ang.invoice_number}
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        logger.exception("Angebot->Rechnung failed")
+        err(500, "Umwandlung fehlgeschlagen")
+    finally:
+        db.close()
+
+
 @app.post("/account/kleinunternehmer")
 def toggle_kleinunternehmer(body: dict = Body(...), user: dict = Depends(get_current_user)):
     """Toggle Kleinunternehmerregelung §19 UStG."""
