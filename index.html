@@ -2318,6 +2318,9 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   const[editData,setEditData]=useState({});
   const[searchKB,setSearchKB]=useState("");
   const csvRef=useRef(null);
+  const[speedyPrev,setSpeedyPrev]=useState(null);const[speedyBusy,setSpeedyBusy]=useState(false);const speedyRef=useRef(null);
+  const speedyUpload=async(e)=>{const f=e.target.files&&e.target.files[0];if(!f){return;}e.target.value="";setSpeedyBusy(true);const tk=localStorage.getItem("atx_token");const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/kasse/speedy-import",{method:"POST",headers:{Authorization:"Bearer "+tk},body:fd});const d=await r.json();if(d&&d.ok){setSpeedyPrev(d);}else{alert((d&&d.message)||"Speedy-Bericht nicht erkannt");}}catch(ex){alert(ex.message);}setSpeedyBusy(false);};
+  const speedyConfirm=async()=>{if(!speedyPrev)return;try{const r=await api("/kasse/speedy-import/confirm",{method:"POST",body:JSON.stringify({positions:speedyPrev.positions,datum:speedyPrev.datum,zahlungsart:speedyPrev.zahlungsart})});if(r.success){if(showToast)showToast((r.created||0)+" "+(getLang()==="tr"?"gelir kaydı eklendi":"Einnahme(n) gebucht")+(r.skipped?" · "+r.skipped+" "+(getLang()==="tr"?"atlandı":"übersprungen"):""),"success");setSpeedyPrev(null);load();if(triggerRefresh)triggerRefresh();}}catch(e){alert(e.message);}};
   const[importing,setImporting]=useState(false);
   const importCSV=async(e)=>{const f=e.target.files?.[0];if(!f)return;setImporting(true);const fd=new FormData();fd.append("file",f);const tk=localStorage.getItem("atx_token");if(!tk){alert("Bitte zuerst einloggen");setImporting(false);return;}try{const res=await fetch(API+"/bookkeeping/import-csv",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await res.json();if(d.success)alert(d.imported+" entries imported"+(d.errors?.length?" ("+d.errors.length+" Error)":""));else alert("Error: "+_extractErr(d));load();}catch(ex){alert("Import fehlgeschlagen: "+ex.message);}setImporting(false);e.target.value="";};
   const load=()=>{api("/bookkeeping?limit=1000").then(d=>{const items=Array.isArray(d)?d:(d.items||[]);setEntries(items);if(d.summary)setSummary(d.summary);setSelected(new Set());}).catch(e=>{console.error("KASSENBUCH LOAD ERROR:",e);}).finally(()=>setLoading(false));
@@ -2365,6 +2368,31 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   const _vis=entries.filter(e=>_inPeriod(e)&&(!_sQ||(e.description||"").toLowerCase().includes(_sQ)||(e.vendor||"").toLowerCase().includes(_sQ)));
   const _agg=_vis.reduce((a,e)=>{const g=Number(e.gross_amount||0),v=Number(e.vat_amount||0);if(e.entry_type==="income"){a.ein+=g;a.vin+=v;}else{a.aus+=g;a.vex+=v;}return a;},{ein:0,aus:0,vin:0,vex:0});
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}>
+    {speedyPrev&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setSpeedyPrev(null)}>
+      <div style={{...css.card,maxWidth:560,width:"100%",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <h3 style={{fontSize:17,fontWeight:700,color:theme.text,margin:"0 0 4px"}}>📷 {getLang()==="tr"?"Speedy — Önizleme":"Speedy — Vorschau"}</h3>
+        <p style={{fontSize:12,color:theme.textMuted,margin:"0 0 12px"}}>{getLang()==="tr"?"Tutarları kontrol et, doğruysa onayla — gelir olarak Kassenbuch'a eklenir. (TSE Speedy'de kalır.)":"Beträge prüfen und bestätigen — wird als Einnahme gebucht. (TSE bleibt in Speedy.)"}</p>
+        <div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:13,marginBottom:12}}>
+          <div><span style={{color:theme.textDim}}>Datum:</span> <strong style={{color:theme.text}}>{speedyPrev.datum?formatDateEU(speedyPrev.datum):"—"}</strong></div>
+          <div><span style={{color:theme.textDim}}>Zahlung:</span> <strong style={{color:theme.text}}>{speedyPrev.zahlungsart||"—"}</strong></div>
+          {speedyPrev.zeitraum&&<div><span style={{color:theme.textDim}}>Zeitraum:</span> <strong style={{color:theme.text}}>{speedyPrev.zeitraum}</strong></div>}
+        </div>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:14}}>
+          <thead><tr style={{borderBottom:"1px solid "+theme.border}}>{["MwSt","Netto","Steuer","Brutto"].map(hh=><th key={hh} style={{padding:"6px 8px",textAlign:"right",color:theme.textDim,fontSize:11}}>{hh}</th>)}</tr></thead>
+          <tbody>{(speedyPrev.positions||[]).map((p,i)=><tr key={i} style={{borderBottom:"1px solid "+theme.border}}>
+            <td style={{padding:"6px 8px",textAlign:"right"}}>{p.rate}</td>
+            <td style={{padding:"6px 8px",textAlign:"right",fontFamily:mono}}>€{Number(p.netto||0).toFixed(2)}</td>
+            <td style={{padding:"6px 8px",textAlign:"right",fontFamily:mono,color:theme.textMuted}}>€{Number(p.steuer||0).toFixed(2)}</td>
+            <td style={{padding:"6px 8px",textAlign:"right",fontFamily:mono,fontWeight:700}}>€{Number(p.brutto||0).toFixed(2)}</td>
+          </tr>)}</tbody>
+          <tfoot><tr style={{borderTop:"2px solid "+theme.accent}}><td style={{padding:"8px",fontWeight:700,color:theme.accent}}>Gesamt</td><td style={{padding:"8px",textAlign:"right",fontFamily:mono}}>€{Number(speedyPrev.netto_total||0).toFixed(2)}</td><td style={{padding:"8px",textAlign:"right",fontFamily:mono}}>€{Number(speedyPrev.steuer_total||0).toFixed(2)}</td><td style={{padding:"8px",textAlign:"right",fontFamily:mono,fontWeight:700,color:theme.accent}}>€{Number(speedyPrev.brutto_total||0).toFixed(2)}</td></tr></tfoot>
+        </table>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <button style={css.btnOutline} onClick={()=>setSpeedyPrev(null)}>{_t("cancel")}</button>
+          <button style={css.btn()} onClick={speedyConfirm}>✓ {getLang()==="tr"?"Kassenbuch'a ekle":getLang()==="en"?"Add to cash book":"Ins Kassenbuch buchen"}</button>
+        </div>
+      </div>
+    </div>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
       <div><h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>{_t("bookkeeping")}</h2><p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{_vis.length} {_t("entries")}</p></div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -2375,6 +2403,8 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
         <button style={{...css.btn("#f59e0b"),fontSize:13}} onClick={sync} disabled={syncing}>{syncing?"⏳ Sync...":"🔄 "+_t("sync_invoices")}</button>
         <button style={{...css.btn("#10b981"),fontSize:13}} onClick={()=>onNav&&onNav("export")}>📤 Export</button>
         <button style={{...css.btn("#3b82f6"),fontSize:13}} onClick={()=>csvRef.current?.click()} disabled={importing}>{importing?"⏳ Importing...":"📥 CSV Import"}</button>
+        <button style={{...css.btn("#8b5cf6"),fontSize:13}} onClick={()=>speedyRef.current?.click()} disabled={speedyBusy} title="Speedy Z-/Sammel-Endabrechnung importieren">{speedyBusy?"⏳ OCR...":"📷 Speedy"}</button>
+        <input ref={speedyRef} type="file" accept="image/*,application/pdf" style={{display:"none"}} onChange={speedyUpload}/>
         <input ref={csvRef} type="file" accept=".csv,.txt,.CSV,text/csv,application/vnd.ms-excel" style={{display:"none"}} onChange={async(e)=>{const f=e.target.files?.[0];if(!f)return;const tk=localStorage.getItem("atx_token");if(!tk){alert("Bitte zuerst einloggen");return;}setImporting(true);const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/bookkeeping/import-csv",{method:"POST",headers:{"Authorization":"Bearer "+tk},body:fd});const d=await r.json();if(d.success){alert(d.imported+" entries imported");load();if(triggerRefresh)triggerRefresh();}else alert("Error: "+_extractErr(d));}catch(ex){alert("Import fehlgeschlagen: "+ex.message);}setImporting(false);e.target.value="";}}/>
       </div>
     </div>
