@@ -294,6 +294,7 @@ const css = {
    FIX #2: Tarih formatı — Avrupa DD.MM.YYYY
    Tüm tarihler artık DD.MM.YYYY olarak gösterilir
    ══════════════════════════════════════════ */
+let showToast = function(){};  // module-global Toast; vom App-Component zugewiesen, von allen Views nutzbar
 function formatDateEU(dateStr) {
   if (!dateStr) return "—";
   // ISO: YYYY-MM-DD
@@ -6385,7 +6386,7 @@ function App(){
   const[refreshKey,setRefreshKey]=useState(0);
   const[toasts,setToasts]=useState([]);
   const triggerRefresh=()=>setRefreshKey(k=>k+1);
-  const showToast=(message,type="success")=>setToasts(prev=>[...prev,{message,type,id:Date.now()+Math.random()}].slice(-5));
+  showToast=(message,type="success")=>setToasts(prev=>[...prev,{message,type,id:Date.now()+Math.random()}].slice(-5));
   const removeToast=(id)=>setToasts(prev=>prev.filter(t=>t.id!==id));
   const logout=()=>{localStorage.removeItem("atx_token");localStorage.removeItem("atx_refresh");setAuthed(false);};
   const[showPwChange,setShowPwChange]=useState(false);
