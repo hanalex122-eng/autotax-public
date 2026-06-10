@@ -4926,8 +4926,9 @@ def calculate_dashboard_metrics(user_id: int, year: int = None):
             Invoice.user_id == user_id,
             (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
         ).all()
-        # Same filter as dashboard: skip amount=0 and vendor=Unbekannt
-        invoices = [i for i in all_inv if safe_float(i.total_amount) > 0 and safe_vendor(i.vendor) != "Unbekannt"]
+        # Same filter as dashboard: skip amount=0, vendor=Unbekannt UND Angebote
+        # (doc_type='angebot' ist kein Umsatz -> nie in Summen/Export/EÜR).
+        invoices = [i for i in all_inv if safe_float(i.total_amount) > 0 and safe_vendor(i.vendor) != "Unbekannt" and (getattr(i, "doc_type", None) or "rechnung") != "angebot"]
 
         # Year filter
         if year:
@@ -7185,6 +7186,27 @@ def _next_invoice_number(db, uid: int) -> str:
     return f"{prefix}{seq:04d}"
 
 
+def _next_angebot_number(db, uid: int) -> str:
+    """Eigene fortlaufende Angebotsnummer: ANG-YYYY-NNNN (pro Nutzer + Jahr).
+    Getrennte Serie von Rechnungen (RE-...), damit beide nicht kollidieren.
+    """
+    year = datetime.now().year
+    prefix = f"ANG-{year}-"
+    last = (
+        db.query(Invoice)
+        .filter(Invoice.user_id == uid, Invoice.invoice_number.like(f"{prefix}%"))
+        .order_by(Invoice.invoice_number.desc())
+        .first()
+    )
+    seq = 1
+    if last and last.invoice_number:
+        try:
+            seq = int(str(last.invoice_number).split("-")[-1]) + 1
+        except (ValueError, IndexError):
+            seq = 1
+    return f"{prefix}{seq:04d}"
+
+
 @app.post("/invoices/create-rechnung")
 def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_user)):
     """Create a manual outgoing invoice (Einnahme).
@@ -7216,10 +7238,19 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
             mwst_satz = "0%"
             rate = 0.0
             mwst_betrag = 0.0
-        # Faelligkeitsdatum: body'de varsa onu kullan, yoksa Rechnungsdatum + 7 gun
+        # Belegtyp: rechnung | angebot. Angebot zählt NICHT als Umsatz (kein Cash-Entry,
+        # invoice_type='angebot' -> automatisch aus allen income/expense-Summen raus).
+        _doc_type = (body.get("doc_type") or "rechnung").strip().lower()
+        if _doc_type not in ("rechnung", "angebot"):
+            _doc_type = "rechnung"
+        _is_angebot = (_doc_type == "angebot")
+        _valid_until = ((body.get("gueltig_bis") or body.get("valid_until") or "").strip()[:10] or None)
+        # Faelligkeitsdatum: nur Rechnung (Angebot hat 'Gültig bis' statt Fälligkeit)
         datum_str = (body.get("datum") or "").strip()
         due_str = (body.get("faellig") or body.get("due_date") or "").strip()
-        if not due_str:
+        if _is_angebot:
+            due_str = None
+        elif not due_str:
             try:
                 base_d = datetime.strptime(datum_str[:10], "%Y-%m-%d").date() if datum_str else datetime.now().date()
             except ValueError:
@@ -7237,13 +7268,14 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
                 err(400, f"Rechnungsnummer '{rnr}' existiert bereits (Rechnung #{dup.id}). "
                          "§14 UStG verlangt eindeutige Nummern.")
         else:
-            rnr = _next_invoice_number(db, user["sub"])
+            rnr = _next_angebot_number(db, user["sub"]) if _is_angebot else _next_invoice_number(db, user["sub"])
         inv = Invoice(
-            user_id=user["sub"], filename="rechnung-erstellt",
+            user_id=user["sub"], filename=("angebot-erstellt" if _is_angebot else "rechnung-erstellt"),
             vendor=body.get("kunde", ""), total_amount=betrag,
             vat_amount=mwst_betrag, vat_rate=mwst_satz,
-            date=datum_str, raw_text="Manuell erstellte Rechnung",
-            invoice_type="income", invoice_number=rnr,
+            date=datum_str, raw_text=("Manuell erstelltes Angebot" if _is_angebot else "Manuell erstellte Rechnung"),
+            invoice_type=("angebot" if _is_angebot else "income"), invoice_number=rnr,
+            doc_type=_doc_type, valid_until=(_valid_until if _is_angebot else None),
             payment_method=body.get("zahlungsart", ""),
             category=body.get("kategorie", "service"), processed=True,
             due_date=due_str, payment_status="unpaid",
@@ -7257,20 +7289,52 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
         db.add(inv)
         db.commit()
         db.refresh(inv)
-        auto_create_cash_entry(inv.id, user["sub"], {
-            "vendor": body.get("kunde", ""), "total_amount": betrag,
-            "vat_amount": mwst_betrag, "vat_rate": mwst_satz,
-            "date": body.get("datum", ""), "category": "service",
-            "invoice_type": "income",
-        })
+        # Angebot ist KEIN Umsatz -> kein Cash-Entry, keine Buchung.
+        if not _is_angebot:
+            auto_create_cash_entry(inv.id, user["sub"], {
+                "vendor": body.get("kunde", ""), "total_amount": betrag,
+                "vat_amount": mwst_betrag, "vat_rate": mwst_satz,
+                "date": body.get("datum", ""), "category": "service",
+                "invoice_type": "income",
+            })
         return {"success": True, "id": inv.id, "invoice_number": inv.invoice_number,
-                "generated_invoice_number": inv.invoice_number}
+                "generated_invoice_number": inv.invoice_number, "doc_type": _doc_type}
     except HTTPException:
         raise
     except Exception:
         db.rollback()
         logger.exception("Create Rechnung failed")
         err(500, "Rechnung erstellen fehlgeschlagen")
+    finally:
+        db.close()
+
+
+@app.get("/angebote")
+def list_angebote(user: dict = Depends(get_acting_context)):
+    """Angebote (doc_type='angebot') des Nutzers — für die Angebot-Liste +
+    'Rechnung aus Angebot'. Kein Umsatz, daher getrennt von /invoices."""
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Invoice)
+            .filter(
+                Invoice.user_id == user["sub"],
+                Invoice.doc_type == "angebot",
+                (Invoice.is_deleted == False) | (Invoice.is_deleted == None),
+            )
+            .order_by(Invoice.id.desc())
+            .all()
+        )
+        return [{
+            "id": i.id,
+            "nummer": i.invoice_number or "",
+            "kunde": i.vendor or "",
+            "betrag": i.total_amount or 0,
+            "vat_rate": i.vat_rate or "",
+            "datum": i.date or "",
+            "valid_until": getattr(i, "valid_until", None) or "",
+            "beschreibung": getattr(i, "service_description", None) or "",
+        } for i in rows]
     finally:
         db.close()
 
@@ -8623,6 +8687,8 @@ def list_invoices(
         # --- ADDED: exclude soft-deleted ---
         q = q.filter((Invoice.is_deleted == False) | (Invoice.is_deleted == None))
         # --- END ---
+        # Angebote (doc_type='angebot') gehören NICHT in die Rechnungs-Liste (eigene Ansicht)
+        q = q.filter((Invoice.doc_type != "angebot") | (Invoice.doc_type.is_(None)))
 
         if search:
             # Smart multi-keyword search: split by space, ALL keywords must match
