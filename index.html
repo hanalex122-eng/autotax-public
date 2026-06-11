@@ -6871,6 +6871,8 @@ function DuplicateModalRoot() {
 /* --- ADDED END --- */
 
 ReactDOM.render(React.createElement(ErrorBoundary, null, React.createElement(Fragment, null, React.createElement(App), React.createElement(DuplicateModalRoot))), document.getElementById("root"));
+/* REPAIR MODE: frontend boot->first-render timing (includes Babel download+transpile+mount) */
+try{var __fr=Math.round(performance.now());window.__perf={firstRenderMs:__fr};console.info("[TIMING] frontend first render "+__fr+"ms (Babel+transpile+mount)");}catch(e){}
 </script>
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}</script>
 </body>

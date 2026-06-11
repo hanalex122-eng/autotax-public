@@ -138,6 +138,40 @@ app.add_middleware(
     max_age=3600,
 )
 
+# --- REPAIR MODE: performance instrumentation (additive, low-overhead, fail-soft) ---
+import autotax.profiling as _prof
+
+
+@app.middleware("http")
+async def _perf_timing_mw(request: Request, call_next):
+    import time as _pt_time
+    _t0 = _pt_time.perf_counter()
+    response = await call_next(request)
+    try:
+        _prof.record_request(request.method, request.url.path,
+                             response.status_code, (_pt_time.perf_counter() - _t0) * 1000)
+    except Exception:
+        pass
+    return response
+
+
+try:
+    from autotax.db import engine as _perf_engine
+    _prof.setup_db_profiling(_perf_engine)
+    logger.info("REPAIR MODE: DB query profiling enabled (slow > %dms)", _prof.SLOW_QUERY_MS)
+except Exception as _e:  # pragma: no cover - defensive
+    logger.warning("DB profiling not enabled: %s", _e)
+
+
+@app.get("/admin/perf")
+def admin_perf(user: dict = Depends(get_current_user)):
+    """REPAIR MODE timing evidence (admin only): p50/p95 per endpoint,
+    OCR pipeline stage breakdown, slow queries. Names resolved at call time."""
+    if not _is_admin_uid(user["sub"]):
+        err(403, "Forbidden")
+    return _prof.summary()
+
+
 # Additive, read-only tax-engine v2 router (flag-gated, default OFF).
 # Endpoints return 404 unless TAX_ENGINE_V2_ENABLED is set. Wrapped so a
 # failure here can never prevent the existing app from starting.
@@ -8031,6 +8065,9 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     if len(content) == 0:
         err(400, "Leere Datei")
 
+    _pt = _prof.PipelineTimer("upload_invoice")  # REPAIR MODE: stage timing
+    _pt.mark("upload_read")
+
     # ZIP: extract and process each file inside
     if content[:4] == b"PK\x03\x04" or (file.content_type or "").lower() in ("application/zip", "application/x-zip-compressed"):
         import zipfile
@@ -8140,6 +8177,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     except Exception as e:
         logger.warning("Tesseract pre-check failed: %s", e)
     # --- ADDED END ---
+    _pt.mark("ocr_tesseract")
 
     # PDF text-layer FIRST (source priority: PDF Text > QR > OCR). Digital PDFs
     # carry clean text — use it directly and skip OCR.space.
@@ -8159,6 +8197,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                     pass
         except Exception as _pe:
             logger.warning("PDF text-layer sync failed: %s", _pe)
+    _pt.mark("pdf_text")
 
     try:
         if not _tess_used and not _pdf_used:
@@ -8177,6 +8216,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                 logger.info("QR fallback: found data in QR-only image")
         except Exception:
             pass
+    _pt.mark("ocr_fallback_qr")
 
     # --- STEP 1: Learning rules FIRST — apply user's saved corrections ---
     # Runs BEFORE parser so learned vendor/category auto-fills immediately.
@@ -8196,6 +8236,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     except Exception:
         logger.exception("Parsing failed for %s", file.filename)
         err(500, "Invoice parsing failed")
+    _pt.mark("parser")
 
     # --- STEP 2b: Vendor identity match — kimlik parmak izi (USt-IdNr/IBAN/HRB) ---
     # parser_invoice ust_id/iban/hrb/email/domain/phone cikariyor; vendor_identities
@@ -8659,6 +8700,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     except Exception:
         pass
 
+    _pt.mark("identity_db_post")
     return {
         "id": invoice_id,
         "total_amount": safe_float(result.get("total_amount")),
@@ -8670,6 +8712,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
         "vendor_email": result.get("vendor_email", ""),
         "vendor_phone": result.get("vendor_phone", ""),
         "vendor_address": result.get("vendor_address", ""),
+        "_timings": _pt.finish(),
     }
 
 

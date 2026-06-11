@@ -100,8 +100,18 @@
 
 ---
 
-## EKSİK ÖLÇÜM — yapılacak ilk iş (P0)
-**OCR adım-adım gerçek ms süreleri ÖLÇÜLMEDİ.** `ocr.py`/`parser.py`'de timing log'u yok (`grep time.time|perf_counter` = 0). Önce enstrümantasyon:
+## ENSTRÜMANTASYON — CANLI ✅ (2026-06-11, REPAIR MODE Phase 1)
+**Tüm sisteme timing eklendi** (`autotax/profiling.py` + `main.py` middleware/marks + frontend boot→render):
+- HTTP istek süresi (her endpoint) → `[TIMING]` log + `/admin/perf`
+- OCR pipeline aşamaları → `[PIPE]` log + yanıt `_timings` alanı + `/admin/perf`
+- Yavaş DB sorguları (>200ms) → `[SLOWQ]` log + `/admin/perf`
+- Frontend ilk render → console `[TIMING] frontend first render Xms` + `window.__perf`
+
+Sayıları gör: `GET /admin/perf` (admin token) — bkz. `performance_logs.md`, `pipeline_analysis.md`, `slow_functions.md`.
+Sıradaki: gerçek trafikle bu dosyaları doldur, en baskın aşamayı bul (PHASE 2 düzeltme).
+
+### Eski enstrümantasyon notu (referans — aşama mark noktaları)
+Aşağıdaki noktalara mark/timer kondu:
 
 Şu noktalara `t=perf_counter()` … `logger.info("[TIMING] <stage> %.0fms", ...)` ekle:
 1. Dosya okuma `main.py:8028`
