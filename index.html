@@ -5331,6 +5331,7 @@ function DeclarationView(){
   const[autoDetecting,setAutoDetecting]=useState(false);
   const[locked,setLocked]=useState(null); // null|{current_plan, required_plans, message}
   const[calc,setCalc]=useState(null);
+  const[step,setStep]=useState(0); // Assistent: aktueller Schritt (0..sections.length, letzter = Abschluss)
   const calcTimerRef=useRef(null);
   const[isMobile,setIsMobile]=useState(()=>typeof window!=="undefined"&&window.innerWidth<=600);
   useEffect(()=>{
@@ -5488,7 +5489,7 @@ function DeclarationView(){
     }catch(e){setErr(e.message);}
     setLoading(false);
   };
-  useEffect(()=>{load(year);/* eslint-disable-line */},[year]);
+  useEffect(()=>{setStep(0);load(year);/* eslint-disable-line */},[year]);
 
   const fetchValidation=async(yr=year)=>{
     try{
@@ -5632,6 +5633,16 @@ function DeclarationView(){
 
   const errorCount=Object.keys(errors).length;
 
+  // — Assistent (WISO-Stil): ein Abschnitt pro Schritt, letzter Schritt = Abschluss/Export —
+  const wizSections=(decl&&schema)?schema:[];
+  const wizTotal=wizSections.length+1;                 // +1 für Abschluss-Schritt
+  const curStep=Math.max(0,Math.min(step,wizSections.length));
+  const isReview=curStep>=wizSections.length;          // letzter Schritt
+  const curSection=isReview?null:wizSections[curStep];
+  const goNext=()=>setStep(s=>Math.min(s+1,wizSections.length));
+  const goPrev=()=>setStep(s=>Math.max(s-1,0));
+  const secTitle=(s)=>s?(_l==="tr"?s.title_tr:s.title_de):tr("Abschluss & Export","Finish & Export","Bitir & Dışa Aktar");
+
   return(<div style={{padding:M.pad,maxWidth:900,margin:"0 auto"}}>
     <div style={{marginBottom:isMobile?16:24,display:"flex",flexWrap:"wrap",alignItems:"flex-start",gap:12,justifyContent:"space-between"}}>
       <div style={{flex:"1 1 240px",minWidth:0}}>
@@ -5665,6 +5676,21 @@ function DeclarationView(){
       ⚠️ {tr("Beta — bitte vor Übermittlung an ELSTER prüfen.","Beta — please verify before submitting to ELSTER.","Beta — ELSTER'e göndermeden önce kontrol edin.")}
     </div>
 
+    {decl && <div style={{marginBottom:18}}>
+      <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+        {Array.from({length:wizTotal}).map((_,i)=>(
+          <button key={i} onClick={()=>setStep(i)} title={secTitle(wizSections[i])}
+            style={{flex:"1 1 0",minWidth:16,height:8,borderRadius:4,border:"none",padding:0,cursor:"pointer",
+              background:i<curStep?"linear-gradient(90deg,#10b981,#059669)":i===curStep?"var(--accent)":"var(--border)",
+              transition:"background .2s"}}/>
+        ))}
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
+        <div style={{fontSize:isMobile?16:18,fontWeight:800,color:"var(--text)"}}>{secTitle(curSection)}</div>
+        <div style={{fontSize:12,color:"var(--text-muted)",fontWeight:600,whiteSpace:"nowrap"}}>{tr("Schritt","Step","Adım")} {curStep+1} / {wizTotal}</div>
+      </div>
+    </div>}
+
     {err && <div style={{padding:12,background:"rgba(239,68,68,0.10)",border:"1px solid #ef4444",borderRadius:8,color:"#ef4444",marginBottom:16,fontSize:13}}>{err}</div>}
 
     {!decl && <div style={{textAlign:"center",padding:"60px 20px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:12}}>
@@ -5694,25 +5720,7 @@ function DeclarationView(){
       ⚠ {errorCount} {tr("Felder benötigen Aufmerksamkeit","fields need attention","alan dikkat gerektiriyor")}
     </div>}
 
-    {decl && calc && <div style={{padding:"16px 20px",background:calc.differenz>=0?"linear-gradient(135deg,rgba(16,185,129,0.15),rgba(16,185,129,0.05))":"linear-gradient(135deg,rgba(239,68,68,0.15),rgba(239,68,68,0.05))",border:`2px solid ${calc.differenz>=0?"rgba(16,185,129,0.4)":"rgba(239,68,68,0.4)"}`,borderRadius:14,marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
-      <div>
-        <div style={{fontSize:12,color:calc.differenz>=0?"#10b981":"#ef4444",fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>
-          {calc.differenz>=0
-            ? tr("✓ Geschätzte Erstattung","✓ Estimated refund","✓ Tahmini iade")
-            : tr("⚠ Geschätzte Nachzahlung","⚠ Estimated additional tax","⚠ Tahmini ek ödeme")}
-        </div>
-        <div style={{fontSize:28,fontWeight:800,color:calc.differenz>=0?"#10b981":"#ef4444"}}>
-          {calc.differenz>=0 ? "+" : "-"}
-          {Math.abs(calc.differenz).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})} €
-        </div>
-      </div>
-      <div style={{textAlign:"right",fontSize:11,color:"var(--text-muted)",lineHeight:1.6}}>
-        <div>{tr("Gesamt-Einkommen","Total income","Toplam gelir")}: <strong>{calc.einkommen.gesamt.toLocaleString("de-DE")} €</strong></div>
-        <div>{tr("zvE","taxable income","Vergi matrahı")}: <strong>{calc.zvE.toLocaleString("de-DE")} €</strong></div>
-        <div>{tr("ESt + Soli + KiSt","Income tax + Soli + Church tax","Vergi + Soli + Kilise")}: <strong>{calc.gesamt_steuer.toLocaleString("de-DE")} €</strong></div>
-        <div>{tr("Bereits gezahlt","Already paid","Önceden ödenmiş")}: <strong>{calc.bereits_gezahlt.toLocaleString("de-DE")} €</strong></div>
-      </div>
-    </div>}
+    {/* Live-Ergebnis: jetzt als Sticky-Leiste am Seitenende (siehe unten) */}
 
     {decl && (()=>{
       const eigGdb=parseInt((decl.data||{}).eigene_gdb||0,10);
@@ -5751,7 +5759,7 @@ function DeclarationView(){
       </div>);
     })()}
 
-    {decl && schema && schema.map(section=>(
+    {decl && schema && !isReview && [curSection].filter(Boolean).map(section=>(
       section.is_repeated_array ? (
         // Dynamic children-array section
         <div key={section.key} style={{marginBottom:isMobile?14:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:isMobile?14:20}}>
@@ -5868,6 +5876,24 @@ function DeclarationView(){
       </div>
       )
     ))}
+
+    {decl && isReview && <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:isMobile?16:24,marginBottom:16}}>
+      <h3 style={{margin:"0 0 8px",fontSize:18,fontWeight:800,color:"var(--accent)"}}>✓ {tr("Fast fertig!","Almost done!","Neredeyse bitti!")}</h3>
+      <p style={{margin:0,color:"var(--text-muted)",fontSize:14,lineHeight:1.6}}>
+        {errorCount>0
+          ? tr(errorCount+" Feld(er) prüfen — tippe oben auf einen Schritt.",errorCount+" field(s) still need attention — tap a step above.",errorCount+" alan eksik — yukarıdan adıma dokun.")
+          : tr("Alle Pflichtfelder sind ausgefüllt. Du kannst jetzt exportieren.","All required fields are complete. You can export now.","Tüm zorunlu alanlar dolu. Şimdi dışa aktarabilirsin.")}
+      </p>
+    </div>}
+
+    {decl && <div style={{display:"flex",justifyContent:"space-between",gap:12,marginTop:8,marginBottom:8}}>
+      <button onClick={goPrev} disabled={curStep===0} style={{padding:M.btnPad,background:"transparent",color:"var(--text-muted)",border:"1px solid var(--border)",borderRadius:10,fontWeight:600,fontSize:M.btnSize,cursor:curStep===0?"not-allowed":"pointer",opacity:curStep===0?0.4:1,minHeight:isMobile?48:"auto"}}>
+        ← {tr("Zurück","Back","Geri")}
+      </button>
+      {!isReview && <button onClick={goNext} style={{padding:M.btnPad,background:"linear-gradient(135deg,#8b5cf6,#6366f1)",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:M.btnSize+1,cursor:"pointer",minHeight:isMobile?48:"auto",boxShadow:"0 6px 16px rgba(139,92,246,0.3)"}}>
+        {curStep===wizSections.length-1?tr("Zum Abschluss","To finish","Bitire git"):tr("Weiter","Next","İleri")} →
+      </button>}
+    </div>}
 
     {showEur && <EurDetailModal year={year} onClose={()=>setShowEur(false)} tr={tr}/>}
 
@@ -5987,7 +6013,7 @@ function DeclarationView(){
       </div>
     </div>}
 
-    {decl && <div style={{display:"flex",gap:12,marginTop:24,flexWrap:"wrap",alignItems:"center"}}>
+    {decl && isReview && <div style={{display:"flex",gap:12,marginTop:8,flexWrap:"wrap",alignItems:"center"}}>
       <button onClick={downloadPDF} style={{padding:M.btnPad,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,fontWeight:600,cursor:"pointer",fontSize:M.btnSize,minHeight:isMobile?48:"auto"}}>
         📄 {tr("PDF herunterladen","Download PDF","PDF indir")}
       </button>
@@ -6003,6 +6029,22 @@ function DeclarationView(){
       {errorCount===0 && decl.status!=="finalized" && <div style={{padding:"10px 14px",background:"rgba(16,185,129,0.10)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:8,fontSize:12,color:"#10b981",fontWeight:600}}>
         ✓ {tr("Alle Felder gültig","All fields valid","Tüm alanlar geçerli")}
       </div>}
+    </div>}
+
+    {decl && calc && <div style={{position:"sticky",bottom:0,zIndex:40,marginTop:20,padding:"12px 18px",background:calc.differenz>=0?"linear-gradient(135deg,rgba(16,185,129,0.97),rgba(5,150,105,0.97))":"linear-gradient(135deg,rgba(239,68,68,0.97),rgba(220,38,38,0.97))",borderRadius:14,boxShadow:"0 -6px 24px rgba(0,0,0,0.18)",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+      <div style={{color:"#fff"}}>
+        <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,opacity:0.92}}>
+          {calc.differenz>=0?tr("Geschätzte Erstattung","Estimated refund","Tahmini iade"):tr("Geschätzte Nachzahlung","Estimated additional tax","Tahmini ek ödeme")}
+        </div>
+        <div style={{fontSize:26,fontWeight:800,lineHeight:1.1}}>
+          {calc.differenz>=0?"+":"-"}{Math.abs(calc.differenz).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})} €
+        </div>
+      </div>
+      <div style={{textAlign:"right",fontSize:11,color:"rgba(255,255,255,0.92)",lineHeight:1.6}}>
+        <div>{tr("zvE","taxable income","Matrah")}: <strong>{calc.zvE.toLocaleString("de-DE")} €</strong></div>
+        <div>{tr("Steuer ges.","Total tax","Toplam vergi")}: <strong>{calc.gesamt_steuer.toLocaleString("de-DE")} €</strong></div>
+        <div>{tr("Bereits gezahlt","Already paid","Ödenmiş")}: <strong>{calc.bereits_gezahlt.toLocaleString("de-DE")} €</strong></div>
+      </div>
     </div>}
   </div>);
 }
