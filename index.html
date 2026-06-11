@@ -5679,17 +5679,23 @@ function DeclarationView(){
     </div>
 
     {decl && <div style={{marginBottom:18}}>
-      <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-        {Array.from({length:wizTotal}).map((_,i)=>(
-          <button key={i} onClick={()=>setStep(i)} title={secTitle(wizSections[i])}
-            style={{flex:"1 1 0",minWidth:16,height:8,borderRadius:4,border:"none",padding:0,cursor:"pointer",
-              background:i<curStep?"linear-gradient(90deg,#10b981,#059669)":i===curStep?"var(--accent)":"var(--border)",
-              transition:"background .2s"}}/>
-        ))}
+      <div style={{display:"flex",gap:8,marginBottom:14,overflowX:"auto",paddingBottom:6,WebkitOverflowScrolling:"touch"}}>
+        {Array.from({length:wizTotal}).map((_,i)=>{
+          const done=i<curStep, active=i===curStep, isLast=i===wizSections.length;
+          return(<button key={i} onClick={()=>setStep(i)} title={secTitle(wizSections[i])}
+            style={{flexShrink:0,width:active?46:40,height:active?46:40,borderRadius:14,cursor:"pointer",
+              border:active?"2px solid var(--accent)":"1.5px solid var(--border)",
+              background:done?"linear-gradient(135deg,#10b981,#059669)":active?"var(--accent)":"var(--card)",
+              color:(done||active)?"#fff":"var(--text-muted)",fontSize:16,fontWeight:800,
+              display:"flex",alignItems:"center",justifyContent:"center",transition:"all .2s",
+              boxShadow:active?"0 4px 14px rgba(99,102,241,0.35)":"none"}}>
+            {done?"✓":(isLast?"★":i+1)}
+          </button>);
+        })}
       </div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
-        <div style={{fontSize:isMobile?16:18,fontWeight:800,color:"var(--text)"}}>{secTitle(curSection)}</div>
-        <div style={{fontSize:12,color:"var(--text-muted)",fontWeight:600,whiteSpace:"nowrap"}}>{tr("Schritt","Step","Adım")} {curStep+1} / {wizTotal}</div>
+        <div style={{fontSize:isMobile?20:24,fontWeight:800,color:"var(--text)",lineHeight:1.2}}>{secTitle(curSection)}</div>
+        <div style={{fontSize:13,color:"var(--text-muted)",fontWeight:600,whiteSpace:"nowrap"}}>{tr("Schritt","Step","Adım")} {curStep+1} / {wizTotal}</div>
       </div>
     </div>}
 
@@ -5842,37 +5848,50 @@ function DeclarationView(){
             {uploading?tr("Analyse…","Analyzing…","Analiz…"):"💝 "+tr("Spendenbescheinigung hochladen","Upload donation receipt","Bağış belgesi yükle")}
           </button>}
         </div>
-        <div style={{display:"grid",gap:14}}>
+        <div style={{display:"grid",gap:isMobile?12:14}}>
           {section.fields.map(f=>{
             const fieldErr=errors[f.key];
             const hasError=!!fieldErr;
             const hint=_l==="tr"?f.hint_tr:f.hint_de;
             const fLabel=_l==="tr"?f.label_tr:f.label_de;
-            return(<div key={f.key} style={{display:"flex",flexDirection:"column",gap:4}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                <label style={{fontSize:12,color:hasError?"#ef4444":"var(--text-muted)",fontWeight:500,display:"flex",alignItems:"center",gap:6}}>
-                  {f.zeile_de && <span style={{display:"inline-block",padding:"2px 6px",background:"rgba(99,102,241,0.15)",border:"1px solid rgba(99,102,241,0.3)",borderRadius:4,fontSize:10,fontWeight:700,color:"#8b5cf6"}}>{f.zeile_de}</span>}
-                  {fLabel}
-                  {f.required && <span style={{color:"#ef4444",marginLeft:4}}>*</span>}
+            const fval=(decl.data||{})[f.key]||"";
+            const opts=f.options||[];
+            const asPills=f.type==="select"&&opts.length>0&&opts.length<=4;  // wenige Optionen -> große Auswahl-Buttons (WISO-Stil)
+            return(<div key={f.key} style={{background:"var(--surface)",border:`1.5px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:16,padding:isMobile?16:20,display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+                <label style={{fontSize:isMobile?15:16,color:hasError?"#ef4444":"var(--text)",fontWeight:600,lineHeight:1.35,flex:"1 1 auto"}}>
+                  {fLabel}{f.required && <span style={{color:"#ef4444",marginLeft:4}}>*</span>}
                 </label>
-                <button onClick={(e)=>{e.preventDefault();setAskField({key:f.key,label:fLabel});setAskQuestion("");setAskAnswer("");}} type="button" title={tr("KI-Hilfe zu diesem Feld","Ask AI about this field","Bu alan için KI sor")} style={{background:"transparent",border:"1px solid var(--border)",color:"var(--text-muted)",padding:"2px 8px",borderRadius:6,fontSize:11,cursor:"pointer",lineHeight:1}}>
-                  🤖 {tr("KI fragen","Ask AI","KI sor")}
+                <button onClick={(e)=>{e.preventDefault();setAskField({key:f.key,label:fLabel});setAskQuestion("");setAskAnswer("");}} type="button" title={tr("KI-Hilfe zu diesem Feld","Ask AI about this field","Bu alan için KI sor")} style={{background:"transparent",border:"1px solid var(--border)",color:"var(--text-muted)",padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",lineHeight:1,whiteSpace:"nowrap",flexShrink:0}}>
+                  ? {tr("Hilfe","Help","Yardım")}
                 </button>
               </div>
-              {f.type==="select" ? (
-                <select value={(decl.data||{})[f.key]||""} onChange={e=>updateField(f.key,e.target.value)} style={{padding:M.inputPad,background:"var(--surface)",border:`1px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:8,color:"var(--text)",fontSize:M.inputSize,minHeight:isMobile?48:"auto"}}>
+              {asPills ? (
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {opts.map(o=>{
+                    const sel=fval===o.v;
+                    return(<button key={o.v} type="button" onClick={()=>updateField(f.key,o.v)}
+                      style={{flex:opts.length<=3?"1 1 0":"1 1 calc(50% - 4px)",minWidth:isMobile?"calc(50% - 4px)":120,padding:isMobile?"14px 14px":"15px 20px",borderRadius:14,
+                        border:`1.5px solid ${sel?"var(--accent)":"var(--border)"}`,background:sel?"var(--accent)":"var(--card)",color:sel?"#fff":"var(--text)",
+                        fontSize:15,fontWeight:600,cursor:"pointer",transition:"all .15s",minHeight:52,boxShadow:sel?"0 4px 14px rgba(99,102,241,0.30)":"none"}}>
+                      {_l==="tr"?o.tr:o.de}
+                    </button>);
+                  })}
+                </div>
+              ) : f.type==="select" ? (
+                <select value={fval} onChange={e=>updateField(f.key,e.target.value)} disabled={decl.status==="finalized"} style={{padding:isMobile?"15px 14px":"16px 16px",background:"var(--card)",border:`1.5px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:14,color:"var(--text)",fontSize:16,minHeight:54,cursor:"pointer"}}>
                   <option value="">—</option>
-                  {(f.options||[]).map(o=><option key={o.v} value={o.v}>{_l==="tr"?o.tr:o.de}</option>)}
+                  {opts.map(o=><option key={o.v} value={o.v}>{_l==="tr"?o.tr:o.de}</option>)}
                 </select>
               ) : (
                 <input type={f.type==="number"?"number":f.type==="date"?"date":"text"}
-                       value={(decl.data||{})[f.key]||""}
+                       value={fval}
                        onChange={e=>updateField(f.key,e.target.value)}
                        disabled={decl.status==="finalized"}
-                       style={{padding:M.inputPad,background:"var(--surface)",border:`1px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:8,color:"var(--text)",fontSize:M.inputSize,fontFamily:"inherit",minHeight:isMobile?48:"auto"}}/>
+                       style={{padding:isMobile?"15px 14px":"16px 16px",background:"var(--card)",border:`1.5px solid ${hasError?"#ef4444":"var(--border)"}`,borderRadius:14,color:"var(--text)",fontSize:16,fontFamily:"inherit",minHeight:54,boxSizing:"border-box"}}/>
               )}
-              {hint && <div style={{fontSize:12,color:"var(--text-muted)",marginTop:6,padding:"6px 10px",background:"rgba(99,102,241,0.06)",border:"1px solid rgba(99,102,241,0.15)",borderRadius:6,lineHeight:1.5}}>💡 {hint}</div>}
-              {hasError && <div style={{fontSize:11,color:"#ef4444",marginTop:2,fontWeight:600}}>⚠ {fieldErr}</div>}
+              {hint && <div style={{fontSize:13,color:"var(--text-muted)",padding:"8px 12px",background:"rgba(99,102,241,0.06)",border:"1px solid rgba(99,102,241,0.15)",borderRadius:10,lineHeight:1.5}}>💡 {hint}</div>}
+              {hasError && <div style={{fontSize:12,color:"#ef4444",fontWeight:600}}>⚠ {fieldErr}</div>}
             </div>);
           })}
         </div>
