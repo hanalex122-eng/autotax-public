@@ -69,6 +69,8 @@ input[type="date"].date-force-dark::-webkit-calendar-picker-indicator { filter: 
 @keyframes aiPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(139,92,246,0.45), 0 4px 16px rgba(139,92,246,0.3); } 50% { box-shadow: 0 0 0 8px rgba(139,92,246,0), 0 4px 22px rgba(139,92,246,0.45); } }
 @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 @keyframes barFill { from { width: 0; } }
+@keyframes cardSlideIn { from { opacity:0; transform:translateX(30px) scale(0.98); } to { opacity:1; transform:translateX(0) scale(1); } }
+@keyframes cardPop { from { opacity:0; transform:translateY(14px) scale(0.96); } to { opacity:1; transform:translateY(0) scale(1); } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; transition-delay: 0ms !important; }
 }
@@ -5759,10 +5761,11 @@ function DeclarationView(){
       </div>);
     })()}
 
-    {decl && schema && !isReview && [curSection].filter(Boolean).map(section=>(
+    {decl && schema && !isReview && <div key={"step-"+curStep} style={{animation:"cardSlideIn .34s cubic-bezier(.22,1,.36,1)"}}>
+    {[curSection].filter(Boolean).map(section=>(
       section.is_repeated_array ? (
         // Dynamic children-array section
-        <div key={section.key} style={{marginBottom:isMobile?14:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:isMobile?14:20}}>
+        <div key={section.key} style={{marginBottom:isMobile?14:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:18,padding:isMobile?18:28,boxShadow:"0 8px 30px rgba(0,0,0,0.10)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
             <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"var(--accent)"}}>
               {_l==="tr"?section.title_tr:section.title_de}
@@ -5821,7 +5824,7 @@ function DeclarationView(){
           )}
         </div>
       ) : (
-      <div key={section.key} style={{marginBottom:isMobile?14:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:isMobile?14:20}}>
+      <div key={section.key} style={{marginBottom:isMobile?14:20,background:"var(--card)",border:"1px solid var(--border)",borderRadius:18,padding:isMobile?18:28,boxShadow:"0 8px 30px rgba(0,0,0,0.10)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
           <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"var(--accent)"}}>
             {_l==="tr"?section.title_tr:section.title_de}
@@ -5876,8 +5879,9 @@ function DeclarationView(){
       </div>
       )
     ))}
+    </div>}
 
-    {decl && isReview && <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:isMobile?16:24,marginBottom:16}}>
+    {decl && isReview && <div key={"step-review"} style={{animation:"cardPop .34s cubic-bezier(.22,1,.36,1)",background:"var(--card)",border:"1px solid var(--border)",borderRadius:18,padding:isMobile?20:28,marginBottom:16,boxShadow:"0 8px 30px rgba(0,0,0,0.10)"}}>
       <h3 style={{margin:"0 0 8px",fontSize:18,fontWeight:800,color:"var(--accent)"}}>✓ {tr("Fast fertig!","Almost done!","Neredeyse bitti!")}</h3>
       <p style={{margin:0,color:"var(--text-muted)",fontSize:14,lineHeight:1.6}}>
         {errorCount>0
