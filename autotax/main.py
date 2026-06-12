@@ -10,7 +10,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import io
 
 from autotax.ocr import extract_text, extract_text_and_qr
@@ -8949,6 +8949,49 @@ class InvoiceUpdate(BaseModel):
     invoice_number: Optional[str] = None
     payment_method: Optional[str] = None
     processed: Optional[bool] = None
+
+    # F3: backend validation — rejects bad data even on direct API calls.
+    @field_validator("total_amount", "vat_amount")
+    @classmethod
+    def _v_amount(cls, v, info):
+        if v is None:
+            return v
+        if v < 0:
+            raise ValueError(f"{info.field_name} darf nicht negativ sein")
+        if v > 10_000_000:
+            raise ValueError(f"{info.field_name} unrealistisch hoch (max 10.000.000)")
+        return v
+
+    @field_validator("vat_rate")
+    @classmethod
+    def _v_vat_rate(cls, v):
+        if v in (None, ""):
+            return v
+        _allowed = {"0%", "5%", "5.5%", "7%", "10%", "16%", "19%", "20%"}
+        if v not in _allowed:
+            raise ValueError(f"Ungültiger MwSt-Satz: {v}")
+        return v
+
+    @field_validator("invoice_type")
+    @classmethod
+    def _v_invoice_type(cls, v):
+        if v in (None, ""):
+            return v
+        if v not in ("expense", "income"):
+            raise ValueError(f"Ungültiger Typ: {v}")
+        return v
+
+    @field_validator("vendor")
+    @classmethod
+    def _v_vendor(cls, v):
+        if v is None:
+            return v
+        s = v.strip()
+        if not s:
+            raise ValueError("Firmenname darf nicht leer sein")
+        if "<" in s or ">" in s:
+            raise ValueError("Firmenname enthält ungültige Zeichen (< >)")
+        return s
 
 
 def _sane_invoice_date(v):

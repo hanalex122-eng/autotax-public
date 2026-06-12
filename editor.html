@@ -497,7 +497,9 @@ async function save() {
       } else if (res.status === 403) {
         alert("Kein Schreibrecht: " + (d.detail || "403") + "\n(Falls im Steuerberater-/Ansichtsmodus: zurück zum eigenen Konto wechseln.)");
       } else {
-        alert("Fehler: " + (d.detail || ("HTTP " + res.status)));
+        let msg = d.detail;
+        if (Array.isArray(msg)) msg = msg.map(function(e){return (e && e.msg) ? String(e.msg).replace(/^Value error,\s*/,"") : JSON.stringify(e);}).join("; ");
+        alert("Fehler: " + (msg || ("HTTP " + res.status)));
       }
     }
   } catch(e) { alert("Fehler: " + e.message); }
