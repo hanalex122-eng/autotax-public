@@ -230,6 +230,8 @@ body{font-family:'DM Sans',sans-serif;background:#050a12;color:#f1f5f9;height:10
 <script>
 const API = window.location.origin;
 const token = localStorage.getItem("atx_token");
+// F2: HTML-escape user/OCR data before any innerHTML sink (XSS hardening).
+function escHtml(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
 let invoices = [];
 let currentIdx = 0;
 let currentZoom = 1;
@@ -336,7 +338,7 @@ function loadInvoice(inv) {
       var isDatev = /datev/i.test(fn);
       var icon = isImg ? "\uD83D\uDCF7" : isPdf ? "\uD83D\uDCC4" : isCsv ? "\uD83D\uDCC3" : isXlsx ? "\uD83D\uDCCA" : isDatev ? "\uD83C\uDDE9\uD83C\uDDEA" : "\uD83D\uDCC1";
       var label = getLang() === "de" ? "Quelle" : "Source";
-      srcRef.innerHTML = icon + " " + label + ": <strong>" + fn + "</strong>";
+      srcRef.innerHTML = icon + " " + label + ": <strong>" + escHtml(fn) + "</strong>";
       // Color by type
       if (isImg || isPdf) {
         srcRef.style.background = "rgba(16,185,129,0.08)";
@@ -418,9 +420,9 @@ async function loadImage(id) {
         card.innerHTML = '<div style="text-align:center;padding:20px 16px 12px">'
           + '<div style="font-size:40px;margin-bottom:8px">' + icon + '</div>'
           + '<div style="font-size:16px;font-weight:700;color:#3b82f6;margin-bottom:4px">' + typeLabel + '</div>'
-          + '<div style="font-size:12px;color:#94a3b8;margin-bottom:16px">' + (inv.filename || "") + '</div>'
+          + '<div style="font-size:12px;color:#94a3b8;margin-bottom:16px">' + escHtml(inv.filename || "") + '</div>'
           + '<table style="width:100%;max-width:340px;margin:0 auto;text-align:left;font-size:13px;border-collapse:collapse">'
-          + rows.map(function(r){return '<tr><td style="padding:6px 10px;color:#94a3b8;font-weight:500;white-space:nowrap;border-bottom:1px solid rgba(148,163,184,0.1)">' + r[0] + '</td><td style="padding:6px 10px;color:#e2e8f0;font-weight:600;border-bottom:1px solid rgba(148,163,184,0.1)">' + r[1] + '</td></tr>';}).join("")
+          + rows.map(function(r){return '<tr><td style="padding:6px 10px;color:#94a3b8;font-weight:500;white-space:nowrap;border-bottom:1px solid rgba(148,163,184,0.1)">' + escHtml(r[0]) + '</td><td style="padding:6px 10px;color:#e2e8f0;font-weight:600;border-bottom:1px solid rgba(148,163,184,0.1)">' + escHtml(r[1]) + '</td></tr>';}).join("")
           + '</table></div>';
         card.style.cssText = "background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(139,92,246,0.06));border:1px solid rgba(59,130,246,0.15);border-radius:12px;height:100%;display:flex;align-items:center;justify-content:center;min-height:400px";
         container.appendChild(card);
