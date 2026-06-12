@@ -172,6 +172,106 @@ def admin_perf(user: dict = Depends(get_current_user)):
     return _prof.summary()
 
 
+@app.get("/admin/db-audit")
+def admin_db_audit(user: dict = Depends(get_current_user)):
+    """REPAIR MODE — read-only DB audit (admin only). SELECT-only.
+    Connection, alembic/pending migrations, table counts, last-20-invoice
+    validator compatibility, bookkeeping referential integrity, schema
+    (model vs DB columns). Names resolved at call time."""
+    if not _is_admin_uid(user["sub"]):
+        err(403, "Forbidden")
+    from sqlalchemy import text as _sql
+    import re as _re_db
+    out = {}
+    db = SessionLocal()
+    try:
+        # 1) DB connection
+        try:
+            v = db.execute(_sql("SELECT version()")).scalar()
+            out["1_db_connection"] = {"ok": True, "version": str(v)[:70]}
+        except Exception as e:
+            out["1_db_connection"] = {"ok": False, "error": str(e)[:200]}
+        # 2) Alembic / pending migrations
+        try:
+            cur = db.execute(_sql("SELECT version_num FROM alembic_version")).scalar()
+        except Exception:
+            cur = None
+        out["2_alembic"] = {"current_revision": cur, "head_expected": "003", "pending": cur != "003"}
+        # 3) Table counts
+        cnt = {}
+        for t in ("users", "invoices", "cash_entries"):
+            try:
+                cnt[t] = db.execute(_sql("SELECT count(*) FROM " + t)).scalar()
+            except Exception as e:
+                cnt[t] = "ERR: " + str(e)[:120]
+        out["3_table_counts"] = cnt
+        # 4) Last 20 invoices vs NEW validators (F1/F3 compatibility)
+        VAT_OK = {"0%", "5%", "5.5%", "7%", "10%", "16%", "19%", "20%"}
+        _yr = datetime.now().year
+        rows = db.execute(_sql(
+            "SELECT id, date, total_amount, vat_amount, vat_rate, vendor, invoice_type "
+            "FROM invoices ORDER BY id DESC LIMIT 20")).fetchall()
+        bad = []
+        for r in rows:
+            m = r._mapping
+            iss = []
+            d = m["date"] or ""
+            if d:
+                mm = _re_db.match(r"^(\d{4})-(\d{2})-(\d{2})$", str(d)[:10])
+                if not mm:
+                    iss.append("date_format=" + repr(d))
+                else:
+                    try:
+                        datetime(int(mm.group(1)), int(mm.group(2)), int(mm.group(3)))
+                        if not (2020 <= int(mm.group(1)) <= _yr):
+                            iss.append("date_year=" + str(d))
+                    except ValueError:
+                        iss.append("date_calendar=" + str(d))
+            for f in ("total_amount", "vat_amount"):
+                val = m[f]
+                if val is not None and (val < 0 or val > 10_000_000):
+                    iss.append(f + "=" + str(val))
+            if m["vat_rate"] and m["vat_rate"] not in VAT_OK:
+                iss.append("vat_rate=" + repr(m["vat_rate"]))
+            if m["vendor"] and ("<" in m["vendor"] or ">" in m["vendor"]):
+                iss.append("vendor_html")
+            if m["invoice_type"] and m["invoice_type"] not in ("expense", "income"):
+                iss.append("invoice_type=" + repr(m["invoice_type"]))
+            if iss:
+                bad.append({"id": m["id"], "issues": iss})
+        out["4_last20_invoice_validator_compat"] = {
+            "checked": len(rows), "incompatible_count": len(bad), "incompatible": bad}
+        # 5) Bookkeeping referential integrity
+        try:
+            orphan = db.execute(_sql(
+                "SELECT count(*) FROM cash_entries c LEFT JOIN invoices i ON c.invoice_id = i.id "
+                "WHERE c.invoice_id IS NOT NULL AND i.id IS NULL")).scalar()
+            null_link = db.execute(_sql("SELECT count(*) FROM cash_entries WHERE invoice_id IS NULL")).scalar()
+            out["5_bookkeeping"] = {
+                "orphan_cash_entries_dangling_invoice_id": orphan,
+                "cash_entries_without_invoice_link": null_link,
+                "note": "_create_bookkeeping creates linked Invoice<->CashEntry; Invoice.date stored RAW on create (no _sane_invoice_date) — create-path gap",
+            }
+        except Exception as e:
+            out["5_bookkeeping"] = {"error": str(e)[:200]}
+        # 6) Schema mismatch — model columns vs actual DB columns
+        sm = {}
+        for model, tbl in ((Invoice, "invoices"), (CashEntry, "cash_entries"), (User, "users")):
+            try:
+                dbcols = {row[0] for row in db.execute(_sql(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name=:t"),
+                    {"t": tbl}).fetchall()}
+                mcols = {c.name for c in model.__table__.columns}
+                sm[tbl] = {"model_cols_missing_in_db": sorted(mcols - dbcols),
+                           "db_cols_not_in_model": sorted(dbcols - mcols)}
+            except Exception as e:
+                sm[tbl] = {"error": str(e)[:200]}
+        out["6_schema_mismatch"] = sm
+        return out
+    finally:
+        db.close()
+
+
 # Additive, read-only tax-engine v2 router (flag-gated, default OFF).
 # Endpoints return 404 unless TAX_ENGINE_V2_ENABLED is set. Wrapped so a
 # failure here can never prevent the existing app from starting.
