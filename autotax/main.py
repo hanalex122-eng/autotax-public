@@ -194,23 +194,30 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
         # 2) Alembic / pending migrations
         try:
             cur = db.execute(_sql("SELECT version_num FROM alembic_version")).scalar()
-        except Exception:
-            cur = None
-        out["2_alembic"] = {"current_revision": cur, "head_expected": "003", "pending": cur != "003"}
+            out["2_alembic"] = {"current_revision": cur, "head_expected": "003", "pending": cur != "003"}
+        except Exception as e:
+            db.rollback()  # a failed probe aborts the PG tx — recover before next query
+            out["2_alembic"] = {"current_revision": None, "head_expected": "003", "error": str(e)[:200]}
         # 3) Table counts
         cnt = {}
         for t in ("users", "invoices", "cash_entries"):
             try:
                 cnt[t] = db.execute(_sql("SELECT count(*) FROM " + t)).scalar()
             except Exception as e:
+                db.rollback()
                 cnt[t] = "ERR: " + str(e)[:120]
         out["3_table_counts"] = cnt
         # 4) Last 20 invoices vs NEW validators (F1/F3 compatibility)
         VAT_OK = {"0%", "5%", "5.5%", "7%", "10%", "16%", "19%", "20%"}
         _yr = datetime.now().year
-        rows = db.execute(_sql(
-            "SELECT id, date, total_amount, vat_amount, vat_rate, vendor, invoice_type "
-            "FROM invoices ORDER BY id DESC LIMIT 20")).fetchall()
+        try:
+            rows = db.execute(_sql(
+                "SELECT id, date, total_amount, vat_amount, vat_rate, vendor, invoice_type "
+                "FROM invoices ORDER BY id DESC LIMIT 20")).fetchall()
+        except Exception as e:
+            db.rollback()
+            rows = []
+            out["4_query_error"] = str(e)[:300]
         bad = []
         for r in rows:
             m = r._mapping
@@ -253,6 +260,7 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
                 "note": "_create_bookkeeping creates linked Invoice<->CashEntry; Invoice.date stored RAW on create (no _sane_invoice_date) — create-path gap",
             }
         except Exception as e:
+            db.rollback()
             out["5_bookkeeping"] = {"error": str(e)[:200]}
         # 6) Schema mismatch — model columns vs actual DB columns
         sm = {}
@@ -265,6 +273,7 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
                 sm[tbl] = {"model_cols_missing_in_db": sorted(mcols - dbcols),
                            "db_cols_not_in_model": sorted(dbcols - mcols)}
             except Exception as e:
+                db.rollback()
                 sm[tbl] = {"error": str(e)[:200]}
         out["6_schema_mismatch"] = sm
         return out
@@ -290,8 +299,8 @@ button.g{background:#1e293b}pre{white-space:pre-wrap;word-break:break-word;backg
 var t = localStorage.getItem('atx_token');
 if(!t){document.getElementById('out').textContent='Kein Login gefunden. Bitte zuerst auf autotax.cloud/app einloggen, dann diese Seite neu laden.';}
 else{fetch('/admin/db-audit',{headers:{Authorization:'Bearer '+t}})
-  .then(function(r){return r.json().then(function(j){return {s:r.status,j:j};});})
-  .then(function(o){document.getElementById('out').textContent = (o.s!==200? '[HTTP '+o.s+'] ':'') + JSON.stringify(o.j,null,2);})
+  .then(function(r){return r.text().then(function(tx){return {s:r.status,tx:tx};});})
+  .then(function(o){var disp;try{disp=JSON.stringify(JSON.parse(o.tx),null,2);}catch(_){disp=o.tx;}document.getElementById('out').textContent=(o.s!==200?'[HTTP '+o.s+'] ':'')+disp;})
   .catch(function(e){document.getElementById('out').textContent='Fehler: '+e.message;});}
 function copyOut(){var x=document.getElementById('out');navigator.clipboard.writeText(x.textContent).then(function(){alert('Kopiert! Hier einfügen.');},function(){var r=document.createRange();r.selectNode(x);getSelection().removeAllRanges();getSelection().addRange(r);});}
 </script></body></html>"""
