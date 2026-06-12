@@ -8964,7 +8964,11 @@ def _sane_invoice_date(v):
         err(400, "Ungültiges Datum — bitte Format JJJJ-MM-TT verwenden.")
     y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
     _ymax = datetime.now().year  # dynamic — 2027 only allowed once it is 2027
-    if not (2020 <= y <= _ymax) or not (1 <= mo <= 12) or not (1 <= d <= 31):
+    try:
+        datetime(y, mo, d)  # F1: REAL calendar check — rejects 30.02, 31.04, month 13, day 32, ...
+    except ValueError:
+        err(400, f"Ungültiges Datum: {s} — kein gültiger Kalendertag.")
+    if not (2020 <= y <= _ymax):
         err(400, f"Ungültiges Datum: {s}. Jahr muss zwischen 2020 und {_ymax} liegen.")
     return s
 
