@@ -8951,6 +8951,24 @@ class InvoiceUpdate(BaseModel):
     processed: Optional[bool] = None
 
 
+def _sane_invoice_date(v):
+    """Validate/normalize an invoice date string. Accepts ISO YYYY-MM-DD with a
+    plausible year (2000..current+1). Rejects absurd values such as a 6-digit
+    year typed into <input type=date> (e.g. 275760-12-31). Empty stays empty.
+    Raises HTTP 400 with a clear message on garbage."""
+    s = (v or "").strip()[:10]
+    if not s:
+        return ""
+    m = _re_global.match(r"^(\d{4})-(\d{2})-(\d{2})$", s)
+    if not m:
+        err(400, "Ungültiges Datum — bitte Format JJJJ-MM-TT verwenden.")
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    _ymax = datetime.now().year + 1
+    if not (2000 <= y <= _ymax) or not (1 <= mo <= 12) or not (1 <= d <= 31):
+        err(400, f"Ungültiges Datum: {s}. Jahr muss zwischen 2000 und {_ymax} liegen.")
+    return s
+
+
 def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
     db = SessionLocal()
     try:
@@ -9075,6 +9093,8 @@ def _do_update_invoice(invoice_id: int, body: InvoiceUpdate, user: dict):
 @app.patch("/invoices/{invoice_id}")
 def patch_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: dict = Depends(get_acting_context)):
     require_owner_or_export(user, "write")
+    if body.date is not None:
+        body.date = _sane_invoice_date(body.date)  # reject absurd years (e.g. 275760) before save
     result = _do_update_invoice(invoice_id, body, user)
     audit("invoice.update", user_id=user["sub"], resource_type="invoice",
           resource_id=invoice_id,
@@ -9215,6 +9235,8 @@ async def invoice_ai_extract(
 @app.put("/invoices/{invoice_id}")
 def put_invoice(invoice_id: int, body: InvoiceUpdate, request: Request, user: dict = Depends(get_acting_context)):
     require_owner_or_export(user, "write")
+    if body.date is not None:
+        body.date = _sane_invoice_date(body.date)  # reject absurd years (e.g. 275760) before save
     result = _do_update_invoice(invoice_id, body, user)
     audit("invoice.update", user_id=user["sub"], resource_type="invoice",
           resource_id=invoice_id,
