@@ -11951,10 +11951,31 @@ def download_vault_file(invoice_id: int, mode: str = Query("inline"), user: dict
             if not storage.file_exists(inv.file_path):
                 err(404, "File missing on disk")
             data = storage.read_file(inv.file_path)
-            return StreamingResponse(io.BytesIO(data), media_type=ct, headers={"Content-Disposition": f"{disposition}; filename={fname}"})
-        if inv.file_data:
-            return StreamingResponse(io.BytesIO(inv.file_data), media_type=ct, headers={"Content-Disposition": f"{disposition}; filename={fname}"})
-        err(404, "Kein Original gespeichert")
+        elif inv.file_data:
+            data = inv.file_data
+        else:
+            err(404, "Kein Original gespeichert")
+
+        _headers = {
+            "Content-Disposition": f"{disposition}; filename={fname}",
+            "Cache-Control": "private, max-age=86400",  # editor re-opens instantly
+        }
+        # Inline PREVIEW of an image: downscale to <=1600px so the editor loads
+        # in ~1s instead of pulling a 5-10MB full-res phone photo (was minutes).
+        # Full resolution is still served for mode=attachment (download). Fail-soft.
+        if mode != "attachment" and ct.startswith("image/"):
+            try:
+                from PIL import Image, ImageOps
+                _im = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
+                if max(_im.size) > 1600:
+                    _im.thumbnail((1600, 1600))
+                _buf = io.BytesIO()
+                _im.convert("RGB").save(_buf, format="JPEG", quality=82, optimize=True)
+                _buf.seek(0)
+                return StreamingResponse(_buf, media_type="image/jpeg", headers=_headers)
+            except Exception as _pe:
+                logger.debug("preview resize failed, serving original: %s", _pe)
+        return StreamingResponse(io.BytesIO(data), media_type=ct, headers=_headers)
     finally:
         db.close()
 

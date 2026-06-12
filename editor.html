@@ -469,7 +469,7 @@ async function save() {
   try {
     const res = await fetch(API + "/invoices/" + inv.id, {
       method: "PATCH",
-      headers: {"Content-Type": "application/json", Authorization: "Bearer " + token},
+      headers: {"Content-Type": "application/json", Authorization: "Bearer " + (localStorage.getItem("atx_token") || token)},
       body: JSON.stringify(body),
     });
     if (res.ok) {
@@ -487,8 +487,15 @@ async function save() {
         setTimeout(() => navigate(1), 800);
       }
     } else {
-      const d = await res.json();
-      alert("Fehler: " + (d.detail || "Unbekannt"));
+      let d = {}; try { d = await res.json(); } catch(_) {}
+      if (res.status === 401) {
+        alert("Sitzung abgelaufen — bitte neu anmelden, dann erneut speichern.");
+        window.location.href = "/";
+      } else if (res.status === 403) {
+        alert("Kein Schreibrecht: " + (d.detail || "403") + "\n(Falls im Steuerberater-/Ansichtsmodus: zurück zum eigenen Konto wechseln.)");
+      } else {
+        alert("Fehler: " + (d.detail || ("HTTP " + res.status)));
+      }
     }
   } catch(e) { alert("Fehler: " + e.message); }
   document.getElementById("btnSave").disabled = false;
