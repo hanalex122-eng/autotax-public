@@ -183,7 +183,7 @@ body{font-family:'DM Sans',sans-serif;background:#050a12;color:#f1f5f9;height:10
         </div>
       </div>
       <div class="field-row">
-        <div class="field" id="f_date"><label>Date</label><input id="date" type="date" min="2000-01-01" max="2099-12-31"></div>
+        <div class="field" id="f_date"><label>Date</label><input id="date" type="date" min="2020-01-01"></div>
         <div class="field"><label>Invoice No.</label><input id="invoice_number" placeholder="RE-2026-001"></div>
       </div>
       <div class="field-row">
@@ -290,6 +290,7 @@ function loadInvoice(inv) {
   document.getElementById("amount").value = inv.total_amount || "";
   document.getElementById("vat_rate").value = inv.vat_rate || "19%";
   document.getElementById("date").value = inv.date || "";
+  document.getElementById("date").max = (new Date().getFullYear()) + "-12-31";  // güncel yıl — 2027 gelince otomatik artar
   document.getElementById("invoice_number").value = inv.invoice_number || "";
   document.getElementById("category").value = inv.category || "other";
   document.getElementById("invoice_type").value = inv.invoice_type || "expense";

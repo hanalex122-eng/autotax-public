@@ -15,6 +15,14 @@ Bu üç cümle tüm UI yön kararının çıpasıdır: **büyük buton-bloklar, 
 
 ---
 
+## BACKLOG — Rechnung/Kassenbuch UX (2026-06-12 kullanıcı testi)
+> Phase 3 (UI/UX). REPAIR MODE'da performans+correctness'tan sonra.
+- **P1 (correctness, REPAIR MODE'a uygun):** Arama tutara (amount) bakmıyor — "total 23.09" bulmuyor. Backend `/invoices` + `/bookkeeping` aramasına amount eşleşmesi ekle.
+- **P1 (performans):** "Belege bearbeiten" foto hâlâ geç yükleniyor — resize fix canlı (4dk→sn). Kalıcı çözüm: **sunucuda thumbnail'i bir kez üret + sakla** (anlık açılış, her istekte PIL decode etme).
+- **P2 (UI):** Rechnung listesinde **satır başına çöp-tenekesi** (tekli hızlı silme). Şu an seçim → toplu silme.
+- **P2 (UI):** **Löschen/silme butonu listenin ÜSTÜNDE** olsun (şu an çok üstte/uzakta kalıyor — scroll gerektiriyor).
+- **✅ Tarih:** 275760 yıl bug'ı düzeltildi (backend guard PATCH+PUT + editör takvim min/max).
+
 ## 1. WISO neyi doğru yapıyor (referans analizi)
 
 | Öğe | WISO |
