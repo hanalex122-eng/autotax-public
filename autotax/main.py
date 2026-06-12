@@ -7520,7 +7520,7 @@ def create_rechnung(body: dict = Body(...), user: dict = Depends(get_current_use
         _is_angebot = (_doc_type == "angebot")
         _valid_until = ((body.get("gueltig_bis") or body.get("valid_until") or "").strip()[:10] or None)
         # Faelligkeitsdatum: nur Rechnung (Angebot hat 'Gültig bis' statt Fälligkeit)
-        datum_str = (body.get("datum") or "").strip()
+        datum_str = _sane_invoice_date(body.get("datum"))  # F1 on create path (same as PATCH/PUT)
         due_str = (body.get("faellig") or body.get("due_date") or "").strip()
         if _is_angebot:
             due_str = None
@@ -9968,9 +9968,10 @@ def list_kassenbuch(skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=
 def _create_bookkeeping(body: CashEntryCreate, user: dict):
     if body.entry_type not in ("income", "expense"):
         err(400, "entry_type must be 'income' or 'expense'")
+    _safe_date = _sane_invoice_date(body.date)  # F1 on create path (same as PATCH/PUT)
     db = SessionLocal()
     try:
-        entry_date = parse_date_str_to_datetime(body.date)
+        entry_date = parse_date_str_to_datetime(_safe_date)
         vat_amount = calc_vat(body.gross_amount, body.vat_rate)
         entry = CashEntry(
             user_id=user["sub"],
@@ -9994,7 +9995,7 @@ def _create_bookkeeping(body: CashEntryCreate, user: dict):
             total_amount=body.gross_amount or 0.0,
             vat_amount=vat_amount,
             vat_rate=body.vat_rate or "0%",
-            date=body.date or "",
+            date=_safe_date,
             raw_text=f"manual entry: {body.description}",
             invoice_type=body.entry_type,
             invoice_number="",
