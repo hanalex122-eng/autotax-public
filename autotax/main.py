@@ -248,15 +248,59 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
                 bad.append({"id": m["id"], "issues": iss})
         out["4_last20_invoice_validator_compat"] = {
             "checked": len(rows), "incompatible_count": len(bad), "incompatible": bad}
+        # 4b) FULL-TABLE scan with CORRECTED validators (post-hotfix) by category
+        try:
+            allrows = db.execute(_sql(
+                "SELECT id, date, total_amount, vat_amount, vat_rate, vendor, invoice_type FROM invoices")).fetchall()
+            cats = {"date_format": [], "date_calendar": [], "date_year": [],
+                    "amount_magnitude": [], "vat_rate_bad": [], "vendor_html": [], "invoice_type_bad": []}
+            for r in allrows:
+                m2 = r._mapping
+                d = m2["date"] or ""
+                if d:
+                    dm = _re_db.match(r"^(\d{4})-(\d{2})-(\d{2})$", str(d)[:10])
+                    if not dm:
+                        cats["date_format"].append(m2["id"])
+                    else:
+                        try:
+                            datetime(int(dm.group(1)), int(dm.group(2)), int(dm.group(3)))
+                            if not (2020 <= int(dm.group(1)) <= _yr):
+                                cats["date_year"].append(m2["id"])
+                        except ValueError:
+                            cats["date_calendar"].append(m2["id"])
+                for f in ("total_amount", "vat_amount"):
+                    val = m2[f]
+                    if val is not None and abs(val) > 10_000_000:
+                        cats["amount_magnitude"].append(m2["id"])
+                vr = m2["vat_rate"]
+                if vr:
+                    rm = _re_db.match(r"^\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*%?\s*$", str(vr))
+                    if not rm or not (0 <= float(rm.group(1).replace(",", ".")) <= 30):
+                        cats["vat_rate_bad"].append(m2["id"])
+                if m2["vendor"] and ("<" in m2["vendor"] or ">" in m2["vendor"]):
+                    cats["vendor_html"].append(m2["id"])
+                if m2["invoice_type"] and m2["invoice_type"] not in ("expense", "income"):
+                    cats["invoice_type_bad"].append(m2["id"])
+            out["4b_fulltable_scan_corrected"] = {
+                "total_invoices": len(allrows),
+                "counts": {k: len(v) for k, v in cats.items()},
+                "sample_ids": {k: v[:50] for k, v in cats.items() if v}}
+        except Exception as e:
+            db.rollback()
+            out["4b_fulltable_scan_corrected"] = {"error": str(e)[:300]}
         # 5) Bookkeeping referential integrity
         try:
             orphan = db.execute(_sql(
                 "SELECT count(*) FROM cash_entries c LEFT JOIN invoices i ON c.invoice_id = i.id "
                 "WHERE c.invoice_id IS NOT NULL AND i.id IS NULL")).scalar()
             null_link = db.execute(_sql("SELECT count(*) FROM cash_entries WHERE invoice_id IS NULL")).scalar()
+            orphan_inv = db.execute(_sql(
+                "SELECT count(*) FROM invoices i WHERE i.raw_text LIKE 'manual entry:%' "
+                "AND NOT EXISTS (SELECT 1 FROM cash_entries c WHERE c.invoice_id = i.id)")).scalar()
             out["5_bookkeeping"] = {
                 "orphan_cash_entries_dangling_invoice_id": orphan,
                 "cash_entries_without_invoice_link": null_link,
+                "orphan_manual_invoices_without_cash_entry": orphan_inv,
                 "note": "_create_bookkeeping creates linked Invoice<->CashEntry; Invoice.date stored RAW on create (no _sane_invoice_date) — create-path gap",
             }
         except Exception as e:
@@ -9128,10 +9172,10 @@ class InvoiceUpdate(BaseModel):
     def _v_amount(cls, v, info):
         if v is None:
             return v
-        if v < 0:
-            raise ValueError(f"{info.field_name} darf nicht negativ sein")
-        if v > 10_000_000:
-            raise ValueError(f"{info.field_name} unrealistisch hoch (max 10.000.000)")
+        # Negative amounts are legitimate (Gutschrift/Storno/Erstattung) — DB has
+        # real cases (e.g. invoice 831 = -55.35). Only cap absurd MAGNITUDE.
+        if abs(v) > 10_000_000:
+            raise ValueError(f"{info.field_name} unrealistisch (|Betrag| > 10 Mio.)")
         return v
 
     @field_validator("vat_rate")
@@ -9139,9 +9183,15 @@ class InvoiceUpdate(BaseModel):
     def _v_vat_rate(cls, v):
         if v in (None, ""):
             return v
-        _allowed = {"0%", "5%", "5.5%", "7%", "10%", "16%", "19%", "20%"}
-        if v not in _allowed:
+        # Numeric range, NOT a string whitelist — DB stores "19.0%", "8.1%",
+        # "4.4%" etc. (decimals + foreign rates). Parse the number, allow 0–30%.
+        import re as _re_vr
+        m = _re_vr.match(r"^\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*%?\s*$", str(v))
+        if not m:
             raise ValueError(f"Ungültiger MwSt-Satz: {v}")
+        rate = float(m.group(1).replace(",", "."))
+        if not (0 <= rate <= 30):
+            raise ValueError(f"MwSt-Satz außerhalb 0–30%: {v}")
         return v
 
     @field_validator("invoice_type")
