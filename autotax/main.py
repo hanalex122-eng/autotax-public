@@ -272,6 +272,32 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
         db.close()
 
 
+@app.get("/db-audit-view", response_class=HTMLResponse)
+def db_audit_view():
+    """One-URL viewer for /admin/db-audit so non-technical admins skip DevTools.
+    Public HTML; the audit fetch itself stays admin-gated (token from localStorage)."""
+    html = """<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DB Audit</title>
+<style>body{background:#0a0e17;color:#e2e8f0;font-family:ui-monospace,Menlo,Consolas,monospace;padding:18px;margin:0}
+h2{margin:0 0 12px;font-size:18px}button{padding:11px 18px;background:#10b981;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;margin:0 8px 12px 0}
+button.g{background:#1e293b}pre{white-space:pre-wrap;word-break:break-word;background:#111827;padding:16px;border-radius:10px;border:1px solid #1e293b;font-size:12px;line-height:1.5}</style>
+</head><body>
+<h2>🗄️ DB Audit (read-only)</h2>
+<button onclick="copyOut()">📋 Kopyala / Copy</button><button class="g" onclick="location.reload()">↻ Yenile</button>
+<pre id="out">Lädt… (als Admin eingeloggt sein)</pre>
+<script>
+var t = localStorage.getItem('atx_token');
+if(!t){document.getElementById('out').textContent='Kein Login gefunden. Bitte zuerst auf autotax.cloud/app einloggen, dann diese Seite neu laden.';}
+else{fetch('/admin/db-audit',{headers:{Authorization:'Bearer '+t}})
+  .then(function(r){return r.json().then(function(j){return {s:r.status,j:j};});})
+  .then(function(o){document.getElementById('out').textContent = (o.s!==200? '[HTTP '+o.s+'] ':'') + JSON.stringify(o.j,null,2);})
+  .catch(function(e){document.getElementById('out').textContent='Fehler: '+e.message;});}
+function copyOut(){var x=document.getElementById('out');navigator.clipboard.writeText(x.textContent).then(function(){alert('Kopiert! Hier einfügen.');},function(){var r=document.createRange();r.selectNode(x);getSelection().removeAllRanges();getSelection().addRange(r);});}
+</script></body></html>"""
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
+
+
 # Additive, read-only tax-engine v2 router (flag-gated, default OFF).
 # Endpoints return 404 unless TAX_ENGINE_V2_ENABLED is set. Wrapped so a
 # failure here can never prevent the existing app from starting.
@@ -1819,6 +1845,17 @@ def admin_page():
   <div id="smResult"></div>
 </div>
 
+<div style="margin-top:28px">
+  <h1 style="font-size:18px">🗄️ DB Audit</h1>
+  <p class="sub" style="margin-bottom:14px">DB baglantisi, migration durumu, tablo sayilari, son 20 invoice validator uyumu, bookkeeping butunlugu, schema. Sadece OKUMA (SELECT) — hicbir sey degismez.</p>
+  <div class="toolbar">
+    <button onclick="loadDbAudit()">🗄️ DB-Audit Calistir</button>
+    <button class="ghost" onclick="copyDbAudit()">📋 Sonucu Kopyala (Claude'a gonder)</button>
+    <span id="dbaStatus" class="small" style="align-self:center"></span>
+  </div>
+  <pre id="dbaResult" style="white-space:pre-wrap;word-break:break-word;background:#111827;padding:14px;border-radius:8px;border:1px solid #1e293b;font-size:12px;display:none;max-height:480px;overflow:auto"></pre>
+</div>
+
 </div>
 
 <script>
@@ -1935,6 +1972,32 @@ function copyVendorAudit() {
   } else {
     alert("Tarayici kopyalamayi desteklemiyor; tabloyu elle sec-kopyala.");
   }
+}
+let _dbaData = null;
+async function loadDbAudit() {
+  const st = document.getElementById("dbaStatus");
+  const box = document.getElementById("dbaResult");
+  st.textContent = "Yukleniyor...";
+  box.style.display = "block";
+  box.textContent = "";
+  try {
+    const d = await api("/admin/db-audit");
+    _dbaData = d;
+    const bad = (d["4_last20_invoice_validator_compat"] || {}).incompatible_count;
+    const pend = (d["2_alembic"] || {}).pending;
+    st.textContent = "OK" + (bad != null ? " — " + bad + " uyumsuz invoice" : "") + (pend ? " · migration BEKLIYOR" : " · migration guncel");
+    box.textContent = JSON.stringify(d, null, 2);
+  } catch (e) {
+    st.textContent = "";
+    box.textContent = "Hata: " + e.message;
+  }
+}
+function copyDbAudit() {
+  if (!_dbaData) { alert("Once '🗄️ DB-Audit Calistir' butonuna bas."); return; }
+  const txt = JSON.stringify(_dbaData, null, 2);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(function(){document.getElementById("dbaStatus").textContent="✓ Kopyalandi — Claude'a yapistir";}, function(){alert("Kopyalanamadi; metni elle sec-kopyala.");});
+  } else { alert("Tarayici kopyalamayi desteklemiyor; metni elle sec-kopyala."); }
 }
 
 if (!token) {
