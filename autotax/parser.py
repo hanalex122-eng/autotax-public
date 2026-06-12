@@ -2540,6 +2540,35 @@ def parse_invoice(raw_text: str) -> dict:
                 vendor = _name.capitalize() if _name.islower() else _name
                 vendor_source = "email_domain"
 
+    # P1-1: known-brand-in-header override. The extractor sometimes picks a
+    # header line that MISSES the brand sitting on a different line (OCR split
+    # "Bauhaus Gesellschaft" / "Bau und Hausbedarf mbH" -> picked the 2nd, so
+    # neither the brand boost nor canonicalize fired). If a known brand appears
+    # in the header AND the current vendor is weak (and isn't already a known
+    # brand), prefer the brand. Header-only scan avoids matching branded items
+    # in the body. Fail-soft.
+    try:
+        _cur_v = str(vendor or "").strip().lower()
+        _weak = (vendor in ("Unbekannt", "", None)) or (vendor_source in ("guess", "primary", "email_domain"))
+        _already_brand = any(re.search(r"\b" + re.escape(_k) + r"\b", _cur_v)
+                             for _k in VENDOR_CATEGORY_MAP if len(_k) >= 4)
+        _generic_brand_skip = {
+            "netto", "total", "penny", "tankstelle", "taxi", "apotheke",
+            "pharmacy", "pharmacie", "hit", "basic", "combi", "star",
+            "real", "coop", "alex", "jet",
+        }
+        if _weak and not _already_brand:
+            _head = " ".join((raw_text or "").split("\n")[:6]).lower()
+            for _k in sorted(VENDOR_CATEGORY_MAP.keys(), key=len, reverse=True):
+                if len(_k) < 4 or _k in _generic_brand_skip:
+                    continue
+                if re.search(r"\b" + re.escape(_k) + r"\b", _head):
+                    vendor = _k.upper() if len(_k) <= 5 else _k.title()
+                    vendor_source = "brand_ocr"
+                    break
+    except Exception:
+        pass
+
     # Garbage choke-point (vendor only): the 'guess'/email paths bypass
     # _clean_vendor_name, so a nonsense logo line could still reach here with a
     # source-based confidence (e.g. 'er en DR ar | ae' as 'guess'). Reject it ->

@@ -4,6 +4,15 @@
 > Kural: **Varsayım yok, kanıt var.** Ölçülemeyen yerler açıkça "ÖLÇÜLMEDİ" diye işaretlendi.
 > Öncelik etiketleri: **P0 = Kritik · P1 = Yüksek · P2 = Orta · P3 = Düşük**
 
+## DEĞİŞİKLİK GÜNLÜĞÜ
+- **2026-06-12 — OCR doğruluk+hız fix (ocr.py):**
+  - ✅ **P0-1 OSD orientation** — `pytesseract.image_to_osd` ile OCR'dan önce yön tespiti+düzeltme (180°/90° dönük taramalar artık düzeliyor) + `[TIMING] osd` log.
+  - ✅ **P0-2 kalite kapısı** — `is_ocr_valid` artık "herhangi metin" değil, `_header_garbage_score` ile **≥3 gerçek kelime** ister; çöp → OCR.space fallback. Rotasyon denemesi de artık **kaliteye göre** (uzunluğa değil) en iyi açıyı seçiyor.
+  - ✅ **P0-3 downscale** — en uzun kenar >2000px ise OCR öncesi küçültülüyor.
+  - ✅ **OCR.space `detectOrientation=true`** — paid engine de dönük belgeyi otomatik çeviriyor (Grup 1 PDF).
+  - ✅ **P1-1 vendor** — header'da bilinen marka varsa zayıf vendor onunla değiştiriliyor (parser.py, BAUHAUS düzeldi).
+  - 📋 P1-2 (Steuernr/USt-IdNr fingerprint) ve P1-3 (ZIP/batch dedup kaçağı) → bkz. TECHNICAL_DEBT.md.
+
 ---
 
 ## 0. Özet — "Uygulama neden yavaş hissediliyor?"

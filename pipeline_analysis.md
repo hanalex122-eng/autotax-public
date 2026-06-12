@@ -37,6 +37,11 @@
 | `parser` | regex/heuristik (~15 alt-extractor) | düşük-orta |
 | `identity_db_post` | vendor match + 5 DB session + audit + ai-reviewer | orta |
 
+## 2026-06-12 güncelleme (REPAIR MODE fix'leri)
+- `ocr_tesseract` mark'ının İÇİNDE artık ayrı `[TIMING] osd` ve `[TIMING] ocr` logları var (OSD yön tespiti + saf Tesseract süresi ayrışıyor).
+- OSD orientation + downscale(2000px) + kaliteye-göre rotasyon eklendi → dönük belge düzeliyor, 12MP foto küçülüyor.
+- `is_ocr_valid` kalite kapısı → çöp header `ocr_fallback_qr` (OCR.space, `detectOrientation=true`) yoluna düşüyor.
+
 ## Bilinen mimari sorunlar (PERFORMANCE_AUDIT ile bağ)
 - **P0-2:** Tüm bu hat `async def` içinde **bloklayıcı** → event-loop'u dondurur.
 - **P0-3:** `ocr_tesseract` ana yolda downscale yok (`ocr.py:789`).

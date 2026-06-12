@@ -2,6 +2,7 @@ import os
 import io
 import logging
 import re
+import time
 import httpx
 from fastapi import UploadFile
 
@@ -185,7 +186,7 @@ async def _ocr_api_call(client, filename: str, content: bytes, engine: str = "1"
     """Single OCR API call with given engine."""
     resp = await client.post(
         OCR_API_URL,
-        data={"apikey": OCR_API_KEY, "OCREngine": engine},
+        data={"apikey": OCR_API_KEY, "OCREngine": engine, "detectOrientation": "true", "scale": "true"},
         files={"file": (filename, content)},
     )
     resp.raise_for_status()
@@ -282,7 +283,7 @@ async def extract_image_text(content: bytes, filename: str) -> str:
                 try:
                     retry_resp = await client.post(
                         OCR_API_URL,
-                        data={"apikey": OCR_API_KEY, "OCREngine": engine},
+                        data={"apikey": OCR_API_KEY, "OCREngine": engine, "detectOrientation": "true", "scale": "true"},
                         files={"file": (filename, content)}
                     )
                     retry_data = retry_resp.json()
@@ -315,7 +316,7 @@ async def extract_handwriting_text(content: bytes, filename: str) -> str:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 OCR_API_URL,
-                data={"apikey": OCR_API_KEY, "OCREngine": "2"},
+                data={"apikey": OCR_API_KEY, "OCREngine": "2", "detectOrientation": "true", "scale": "true"},
                 files={"file": (filename, processed)},
             )
             resp.raise_for_status()
@@ -588,8 +589,22 @@ async def extract_pdf_smart(content: bytes, filename: str = "doc.pdf") -> str:
 
 # --- ADDED START: OCR fallback strategy — local first, paid as backup ---
 def is_ocr_valid(text: str) -> bool:
-    """Validate OCR result quality. Returns True if text is non-empty."""
-    return bool(text and text.strip())
+    """Validate OCR result QUALITY (P0-2), not just presence.
+
+    Old behaviour (`bool(text and text.strip())`) accepted garbage — a rotated
+    or noisy scan produces many junk chars and was stored as-is. Now we require
+    a readable header (vendor area): >= 3 real words in the first ~250 chars.
+    A garbage/empty header returns False so the caller falls back to OCR.space
+    (better engine + detectOrientation) instead of storing junk.
+    """
+    t = (text or "").strip()
+    if len(t) < 15:
+        return False
+    try:
+        _, real_words = _header_garbage_score(t)
+    except Exception:
+        real_words = 0
+    return real_words >= 3
 
 
 def try_local_ocr(content: bytes, lang: str = "deu+eng") -> str:
@@ -786,24 +801,53 @@ def local_ocr_tesseract(image):
         # Modern phone fishler are 1200-3000px wide and don't gain accuracy
         # from upscaling, but Tesseract is ~4x slower on a 4x area image.
         # Threshold 1500: covers iPhone Portrait (1290), legacy 720p, etc.
+        # Downscale cap (P0-3): 12MP phone photos OCR ~4x slower with no
+        # accuracy gain. Cap the longest side to 2000px before OCR.
+        if max(h, w) > 2000:
+            _ds = 2000.0 / float(max(h, w))
+            gray = cv2.resize(gray, (max(1, int(w * _ds)), max(1, int(h * _ds))), interpolation=cv2.INTER_AREA)
+            h, w = gray.shape[:2]
         if w < 1500:
             work = cv2.resize(gray, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
             _scale_note = "2x"
         else:
             work = gray
             _scale_note = "1x"
+
+        # P0-1: OSD orientation detection BEFORE OCR. A 180°/90°-rotated scan
+        # produces junk the old char-count gate accepted. image_to_osd detects
+        # the true page orientation; we rotate once and OCR upright.
+        # Fail-soft: if osd.traineddata is missing or OSD is unsure, skip.
+        _t_osd = time.perf_counter()
+        try:
+            _osd = pytesseract.image_to_osd(work, output_type=pytesseract.Output.DICT)
+            _rot = int(_osd.get("rotate", 0) or 0)
+            _oconf = float(_osd.get("orientation_conf", 0) or 0)
+            if _rot in (90, 180, 270) and _oconf >= 1.0:
+                _osd_map = {90: cv2.ROTATE_90_COUNTERCLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_CLOCKWISE}
+                work = cv2.rotate(work, _osd_map[_rot])
+                logger.info("[OCR] OSD rotate=%d conf=%.1f applied", _rot, _oconf)
+        except Exception as _oe:
+            logger.debug("[OCR] OSD skipped: %s", _oe)
+        logger.info("[TIMING] osd %.0fms", (time.perf_counter() - _t_osd) * 1000)
+
         tess_cfg = "--oem 3 --psm 6"
+        _t_ocr = time.perf_counter()
         text = pytesseract.image_to_string(work, lang="deu+eng", config=tess_cfg)
         text = text.strip() if text else ""
-        logger.info("[OCR] tesseract rot=0 length=%d scale=%s wh=%dx%d", len(text), _scale_note, w, h)
+        logger.info("[OCR] tesseract rot=0 length=%d scale=%s wh=%dx%d [TIMING] ocr %.0fms",
+                    len(text), _scale_note, w, h, (time.perf_counter() - _t_ocr) * 1000)
 
-        # Safe retry only when first pass returned almost no text (clearly
-        # rotated 90/180/270). Threshold lowered 80 -> 30: 30+ chars means
-        # Tesseract is reading SOMETHING — multi-rotation is 3x extra OCR
-        # passes and rarely helps when the body is already partially readable.
-        # Rotation passes use the SAME image (no extra upscaling) for speed.
-        if len(text) < 30:
-            best_text, best_rot = text, 0
+        # P0-2: quality-based rotation retry. Trigger when text is missing OR
+        # whole-doc quality is low (garbage / still mis-oriented after OSD).
+        # Choose the best rotation by REAL-WORD quality, not raw length — junk
+        # rotations win on length but lose on quality.
+        try:
+            _, _q0 = _header_garbage_score(text, sample_chars=100000)
+        except Exception:
+            _q0 = 99
+        if len(text) < 30 or _q0 < 5:
+            best_text, best_rot, best_q = text, 0, _q0
             for rot_code, rot_deg in (
                 (cv2.ROTATE_90_CLOCKWISE, 90),
                 (cv2.ROTATE_180, 180),
@@ -813,13 +857,17 @@ def local_ocr_tesseract(image):
                     rot_img = cv2.rotate(work, rot_code)
                     t = pytesseract.image_to_string(rot_img, lang="deu+eng", config=tess_cfg)
                     t = t.strip() if t else ""
-                    logger.info("[OCR] tesseract rot=%d length=%d", rot_deg, len(t))
-                    if len(t) > len(best_text):
-                        best_text, best_rot = t, rot_deg
+                    try:
+                        _, q = _header_garbage_score(t, sample_chars=100000)
+                    except Exception:
+                        q = 0
+                    logger.info("[OCR] tesseract rot=%d length=%d quality=%d", rot_deg, len(t), q)
+                    if (q, len(t)) > (best_q, len(best_text)):
+                        best_text, best_rot, best_q = t, rot_deg, q
                 except Exception as e:
                     logger.debug("[OCR] tesseract rot=%d failed: %s", rot_deg, e)
             if best_rot != 0:
-                logger.info("[OCR] tesseract using rot=%d (length=%d)", best_rot, len(best_text))
+                logger.info("[OCR] tesseract using rot=%d (length=%d quality=%d)", best_rot, len(best_text), best_q)
             text = best_text
 
         return text

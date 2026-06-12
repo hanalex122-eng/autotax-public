@@ -18,6 +18,13 @@
 
 ---
 
+## DEĞİŞİKLİK GÜNLÜĞÜ (2026-06-12 REPAIR MODE)
+- ✅ OCR: OSD orientation (`image_to_osd`), kalite kapısı (`is_ocr_valid`+`_header_garbage_score`), downscale 2000px, OCR.space `detectOrientation` — `ocr.py`.
+- ✅ Vendor (P1-1): header'da bilinen marka → zayıf vendor override (`parser.py`, "brand_ocr" source).
+- 📋 Aşağıda P1-2 (fingerprint) ve P1-3 (dedup kaçağı) yeni bölümleri.
+
+---
+
 ## 2. OCR pipeline
 
 | # | Borç | Kanıt | Öncelik |
@@ -74,6 +81,19 @@
 **Sebep:** "By design" denmiş (CLAUDE.md anti-pattern: "Babel in-browser by design") — ama bu performansı en çok yiyen karar. **Çözüm:** Build step (esbuild) ile Babel'i kaldır; uzun vadede component'leri dosyalara böl (gerekirse). RED LINE: TypeScript/Next.js rewrite YOK.
 
 ---
+
+## 6. Vendor fingerprint (P1-2) — RAPOR + ÖNERİ
+**Durum:** Parser `vendor_ust_id` VE `vendor_steuernr` çıkarıyor (`parser.py` return). Ama `match_vendor` yalnız `ust_id/iban/hrb/email/domain/phone` ile eşleştiriyor — **`steuernr` kullanılmıyor** (`vendor_identity.py:190`).
+**Kanıt:** BAUHAUS fişleri (id 824/832) "Steuernummer: DE143764502" taşıyor (USt-IdNr formatı), ikisinde de `fingerprint:null`. İlk kez görülen vendor → VendorIdentity kaydı yok → eşleşme yok.
+**Öneri (uygulanmadı, riskli auto-learn):**
+1. `match_vendor` anahtarlarına **`steuernr`** ekle (model'de kolon varsa; yoksa migration).
+2. **Opsiyonel auto-learn:** güvenli vendor (brand_ocr/legal-suffix, conf ≥88) + ust_id/steuernr varsa VendorIdentity upsert → SONRAKİ fiş otomatik eşleşir. DİKKAT: kullanıcı-teyitsiz öğrenme öğrenme havuzunu kirletebilir (mevcut sistem düzeltmeden öğreniyor). Auto-learn'i flag'li/teyitli yap.
+**Öncelik:** P1.
+
+## 7. Duplicate detection kaçağı (P1-3) — RAPOR
+**Kanıt:** Aynı PDF (Scan2026-06-05_170051.pdf) **3 kez** işlenmiş (id 770/781/793).
+**Kök sebep:** md5 hard-dup yalnız 3 yolda var: sync upload (`main.py:8132`), async (`9264`), email (`email_sync.py:544`). **ZIP/batch yolları (`main.py:8044, 8114, 8766, 9295, 9337`) `save_invoice`'u dedup KONTROLÜ olmadan VE `file_hash` SAKLAMADAN çağırıyor** → o yolla gelen dosya ne o an kontrol edilir ne de sonraki yüklemede eşleşir (hash'i yok).
+**Çözüm (uygulanmadı):** (a) `save_invoice` her zaman `file_hash` hesaplayıp saklasın; (b) ZIP/batch döngülerine `find_hard_duplicate` ekle. **Öncelik:** P1.
 
 ## Borç kapatma sırası (özet)
 1. **P0** Frontend build step (Babel kaldır) — `index.html:18`
