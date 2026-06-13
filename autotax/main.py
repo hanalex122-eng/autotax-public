@@ -339,6 +339,53 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
                 db.rollback()
                 sm[tbl] = {"error": str(e)[:200]}
         out["6_schema_mismatch"] = sm
+        # 7) Duplicate investigation for flagged date groups (READ-ONLY)
+        try:
+            import hashlib as _hl
+            groups = {"A_DATE_FORMAT": [751, 582, 594, 570, 737],
+                      "B_DATE_CALENDAR": [559, 380, 583, 571, 726, 740]}
+            dup = {}
+            for gname, ids in groups.items():
+                idlist = ",".join(str(int(i)) for i in ids)
+                grows = db.execute(_sql(
+                    "SELECT id,user_id,vendor,total_amount,vat_amount,vat_rate,category,invoice_number,"
+                    "date,created_at,filename,file_path,file_size,file_content_type,file_hash,"
+                    "possible_duplicate,raw_text FROM invoices WHERE id IN (" + idlist + ")")).fetchall()
+                recs = []
+                for r in grows:
+                    gmm = r._mapping
+                    rt = gmm["raw_text"] or ""
+                    recs.append({
+                        "id": gmm["id"], "user_id": gmm["user_id"], "vendor": (gmm["vendor"] or "")[:50],
+                        "total_amount": gmm["total_amount"], "vat_rate": gmm["vat_rate"],
+                        "category": gmm["category"], "invoice_number": gmm["invoice_number"],
+                        "date": gmm["date"], "created_at": str(gmm["created_at"]),
+                        "filename": gmm["filename"], "file_path": gmm["file_path"],
+                        "file_size": gmm["file_size"], "file_content_type": gmm["file_content_type"],
+                        "file_hash": gmm["file_hash"], "possible_duplicate": gmm["possible_duplicate"],
+                        "ocr_len": len(rt),
+                        "ocr_md5": (_hl.md5(rt.encode("utf-8", "ignore")).hexdigest() if rt else None),
+                    })
+                sim = {}
+                for key in ("file_hash", "ocr_md5", "vendor", "total_amount", "vat_rate", "category", "file_size", "ocr_len", "created_at"):
+                    vals = [x[key] for x in recs]
+                    sim[key] = {"all_same": (len(set(vals)) <= 1), "value": (vals[0] if vals else None)}
+                if sim["file_hash"]["all_same"] and sim["file_hash"]["value"]:
+                    cls = "CONFIRMED_DUPLICATE"
+                elif sim["ocr_md5"]["all_same"] and sim["ocr_md5"]["value"]:
+                    cls = "CONFIRMED_DUPLICATE"
+                elif sim["vendor"]["all_same"] and sim["total_amount"]["all_same"] and sim["ocr_len"]["all_same"]:
+                    cls = "PROBABLE_DUPLICATE"
+                elif sim["vendor"]["all_same"] and sim["total_amount"]["all_same"]:
+                    cls = "POSSIBLE_DUPLICATE"
+                else:
+                    cls = "NOT_DUPLICATE"
+                dup[gname] = {"count": len(recs), "classification": cls, "similarity": sim, "records": recs}
+            dup["_note"] = "READ-ONLY. Schema hat keine source/upload_id Spalten."
+            out["7_duplicate_investigation"] = dup
+        except Exception as e:
+            db.rollback()
+            out["7_duplicate_investigation"] = {"error": str(e)[:300]}
         return out
     finally:
         db.close()
