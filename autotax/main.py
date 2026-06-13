@@ -260,14 +260,14 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
                 if d:
                     dm = _re_db.match(r"^(\d{4})-(\d{2})-(\d{2})$", str(d)[:10])
                     if not dm:
-                        cats["date_format"].append(m2["id"])
+                        cats["date_format"].append({"id": m2["id"], "date": str(d)})
                     else:
                         try:
                             datetime(int(dm.group(1)), int(dm.group(2)), int(dm.group(3)))
                             if not (2020 <= int(dm.group(1)) <= _yr):
-                                cats["date_year"].append(m2["id"])
+                                cats["date_year"].append({"id": m2["id"], "date": str(d)})
                         except ValueError:
-                            cats["date_calendar"].append(m2["id"])
+                            cats["date_calendar"].append({"id": m2["id"], "date": str(d)})
                 for f in ("total_amount", "vat_amount"):
                     val = m2[f]
                     if val is not None and abs(val) > 10_000_000:
@@ -278,13 +278,13 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
                     if not rm or not (0 <= float(rm.group(1).replace(",", ".")) <= 30):
                         cats["vat_rate_bad"].append(m2["id"])
                 if m2["vendor"] and ("<" in m2["vendor"] or ">" in m2["vendor"]):
-                    cats["vendor_html"].append(m2["id"])
+                    cats["vendor_html"].append({"id": m2["id"], "vendor": str(m2["vendor"])[:80]})
                 if m2["invoice_type"] and m2["invoice_type"] not in ("expense", "income"):
                     cats["invoice_type_bad"].append(m2["id"])
             out["4b_fulltable_scan_corrected"] = {
                 "total_invoices": len(allrows),
                 "counts": {k: len(v) for k, v in cats.items()},
-                "sample_ids": {k: v[:50] for k, v in cats.items() if v}}
+                "details": {k: v[:50] for k, v in cats.items() if v}}
         except Exception as e:
             db.rollback()
             out["4b_fulltable_scan_corrected"] = {"error": str(e)[:300]}

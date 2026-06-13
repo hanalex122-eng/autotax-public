@@ -84,4 +84,12 @@ WHERE date IS NOT NULL AND date <> ''
 - **Alembic:** app çalışmasını etkilemiyor (create_all şemayı tutuyor); risk yalnız gelecekteki migration'lar için → `stamp head` ile hizalanmalı.
 - **Bütünlük:** Tüm sorgular `user_id` izolasyonlu; audit ucu read-only (SELECT). Yazma/silme yok.
 
-> Tam-tablo (832) kesin kategori sayıları: `/db-audit-view` yeniden çalıştırılınca `4b_fulltable_scan_corrected.counts` alanında gelir — bu rapora işlenecek.
+## Tam-tablo sonucu (832 invoice, düzeltilmiş validatör — 2026-06-13)
+`4b_fulltable_scan_corrected.counts`:
+- ✅ `vat_rate_bad=0`, `amount_magnitude=0`, `invoice_type_bad=0`, `date_year=0` → **F3-hotfix doğrulandı; vat/amount temiz, temizlik gerekmez**
+- 🔴 `date_format=5` → id **751, 582, 594, 570, 737** (tarih YYYY-MM-DD değil)
+- 🔴 `date_calendar=6` → id **559, 380, 583, 571, 726, 740** (takvim-geçersiz gün)
+- 🟠 `vendor_html=1` → id **661** (vendor'da `<`/`>`)
+
+**Aksiyon (YARIN):** 12 kayıt — bozuk tarihler editörde elle düzeltilecek (artık kısıtlı takvim) ya da flag/NULL; id 661 vendor'ı incele (XSS payload mı, stray char mı) + temizle. vat_rate/amount için işlem YOK.
+`5_bookkeeping`: 0 dangling, 0 orphan manual invoice, 52 invoice'suz cash_entry (incele — muhtemelen meşru nakit).
