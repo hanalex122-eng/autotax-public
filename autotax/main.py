@@ -191,13 +191,21 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
             out["1_db_connection"] = {"ok": True, "version": str(v)[:70]}
         except Exception as e:
             out["1_db_connection"] = {"ok": False, "error": str(e)[:200]}
-        # 2) Alembic / pending migrations
+        # 2) Alembic / pending migrations — check table existence FIRST (to_regclass
+        # returns NULL, no error) so a missing alembic_version never aborts the tx.
         try:
-            cur = db.execute(_sql("SELECT version_num FROM alembic_version")).scalar()
-            out["2_alembic"] = {"current_revision": cur, "head_expected": "003", "pending": cur != "003"}
+            _has = db.execute(_sql("SELECT to_regclass('alembic_version')")).scalar()
+            if _has:
+                cur = db.execute(_sql("SELECT version_num FROM alembic_version")).scalar()
+                out["2_alembic"] = {"current_revision": cur, "head_expected": "003",
+                                    "pending": cur != "003", "stamped": True}
+            else:
+                out["2_alembic"] = {"current_revision": None, "head_expected": "003", "pending": True,
+                                    "stamped": False,
+                                    "note": "alembic_version fehlt — Schema via create_all verwaltet; 'alembic stamp head' zum Angleichen"}
         except Exception as e:
-            db.rollback()  # a failed probe aborts the PG tx — recover before next query
-            out["2_alembic"] = {"current_revision": None, "head_expected": "003", "error": str(e)[:200]}
+            db.rollback()
+            out["2_alembic"] = {"current_revision": None, "head_expected": "003", "pending": True, "error": str(e)[:200]}
         # 3) Table counts
         cnt = {}
         for t in ("users", "invoices", "cash_entries"):
