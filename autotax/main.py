@@ -251,23 +251,41 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
         # 4b) FULL-TABLE scan with CORRECTED validators (post-hotfix) by category
         try:
             allrows = db.execute(_sql(
-                "SELECT id, date, total_amount, vat_amount, vat_rate, vendor, invoice_type FROM invoices")).fetchall()
-            cats = {"date_format": [], "date_calendar": [], "date_year": [],
+                "SELECT id, date, total_amount, vat_amount, vat_rate, vendor, invoice_type, "
+                "invoice_number, category FROM invoices")).fetchall()
+            cats = {"DATE_FORMAT": [], "DATE_CALENDAR": [], "DATE_OUT_OF_RANGE": [], "EMPTY_DATE": [],
                     "amount_magnitude": [], "vat_rate_bad": [], "vendor_html": [], "invoice_type_bad": []}
             for r in allrows:
                 m2 = r._mapping
-                d = m2["date"] or ""
-                if d:
-                    dm = _re_db.match(r"^(\d{4})-(\d{2})-(\d{2})$", str(d)[:10])
+                # German-format DD.MM.YYYY is RECOVERABLE -> deterministic ISO (SAFE);
+                # everything else unrecoverable -> NULL+flag (MANUAL). No auto day fabrication.
+                def _rec(extra):
+                    return {"id": m2["id"], "date": (None if m2["date"] is None else str(m2["date"])),
+                            "vendor": (str(m2["vendor"])[:60] if m2["vendor"] else None),
+                            "invoice_number": m2["invoice_number"], "category": m2["category"], **extra}
+                d = (str(m2["date"]).strip() if m2["date"] is not None else "")
+                if not d:
+                    cats["EMPTY_DATE"].append(_rec({"risk": "DO_NOT_TOUCH", "proposed": "kein Eingriff (leer != korrupt)"}))
+                else:
+                    dm = _re_db.match(r"^(\d{4})-(\d{2})-(\d{2})$", d[:10])
                     if not dm:
-                        cats["date_format"].append({"id": m2["id"], "date": str(d)})
+                        gm = _re_db.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", d[:10])
+                        if gm:
+                            try:
+                                datetime(int(gm.group(3)), int(gm.group(2)), int(gm.group(1)))
+                                iso = f"{gm.group(3)}-{gm.group(2)}-{gm.group(1)}"
+                                cats["DATE_FORMAT"].append(_rec({"risk": "SAFE_AUTO_FIX", "proposed": iso, "kind": "german_format"}))
+                            except ValueError:
+                                cats["DATE_FORMAT"].append(_rec({"risk": "MANUAL_REVIEW", "proposed": "NULL + flag_invalid_date", "kind": "garbage"}))
+                        else:
+                            cats["DATE_FORMAT"].append(_rec({"risk": "MANUAL_REVIEW", "proposed": "NULL + flag_invalid_date", "kind": "garbage"}))
                     else:
                         try:
                             datetime(int(dm.group(1)), int(dm.group(2)), int(dm.group(3)))
                             if not (2020 <= int(dm.group(1)) <= _yr):
-                                cats["date_year"].append({"id": m2["id"], "date": str(d)})
+                                cats["DATE_OUT_OF_RANGE"].append(_rec({"risk": "MANUAL_REVIEW", "proposed": "NULL + flag_invalid_date"}))
                         except ValueError:
-                            cats["date_calendar"].append({"id": m2["id"], "date": str(d)})
+                            cats["DATE_CALENDAR"].append(_rec({"risk": "MANUAL_REVIEW", "proposed": "NULL + flag_invalid_date (kein auto-Tag)"}))
                 for f in ("total_amount", "vat_amount"):
                     val = m2[f]
                     if val is not None and abs(val) > 10_000_000:
@@ -284,7 +302,8 @@ def admin_db_audit(user: dict = Depends(get_current_user)):
             out["4b_fulltable_scan_corrected"] = {
                 "total_invoices": len(allrows),
                 "counts": {k: len(v) for k, v in cats.items()},
-                "details": {k: v[:50] for k, v in cats.items() if v}}
+                "details": {k: v[:60] for k, v in cats.items() if v and k != "EMPTY_DATE"},
+                "empty_date_sample": cats["EMPTY_DATE"][:15]}
         except Exception as e:
             db.rollback()
             out["4b_fulltable_scan_corrected"] = {"error": str(e)[:300]}
