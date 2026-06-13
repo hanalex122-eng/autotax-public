@@ -2247,6 +2247,14 @@ def extract_vat_info(raw_text: str, total: float, country: str) -> tuple[list[fl
     text = normalize(raw_text)
     text = normalize_amount_text(text)
 
+    # 0. German tax-class summary table ("Typ Netto USt Brutto" + "A 16,81 3,19
+    #    20,00"), common on fuel/POS receipts. Most reliable signal WHEN present
+    #    and fully guarded (netto+steuer≈brutto, rate snaps to a known DE rate,
+    #    brutto≈total). Returns None — never fabricates — when unvalidated.
+    _tbl = _extract_vat_from_tax_table(text, total)
+    if _tbl is not None:
+        return _tbl
+
     # 1. Try to find explicit VAT amount on receipt
     vat_amount = _extract_explicit_vat_amount(text)
 
@@ -2296,23 +2304,85 @@ def extract_vat_info(raw_text: str, total: float, country: str) -> tuple[list[fl
     return [default_rate], 0.0
 
 
+# German tax-class summary table (fuel/POS receipts). Header order Netto→Steuer
+# →Brutto; the steuer token is OCR-noisy (USt / MwSt / Hust / Nust / Mst / MST).
+_VAT_TABLE_HEADER_RE = re.compile(
+    r"netto[^|]{0,25}(?:u\.?st|mwst|hust|nust|tust|mst|steuer)[^|]{0,25}brutto",
+    re.IGNORECASE,
+)
+# A data row: tax-class letter (A-D), optional garbled rate, then the
+# Netto / Steuer / Brutto triple (already dot-normalized by normalize_amount_text).
+_VAT_TABLE_ROW_RE = re.compile(
+    r"\b([a-d])\b[^|]{0,12}?"
+    r"(\d{1,4}\.\d{2})\s+(\d{1,4}\.\d{2})\s+(\d{1,4}\.\d{2})",
+    re.IGNORECASE,
+)
+_KNOWN_DE_VAT_RATES = (19.0, 7.0, 16.0, 5.0)
+
+
+def _extract_vat_from_tax_table(text: str, total: float):
+    """Parse a German 'Typ Netto USt Brutto' tax-class summary table.
+
+    Returns (vat_rates, vat_amount) or None. CONSERVATIVE / guard-first — it
+    only returns a value when EVERY check passes, otherwise None so the caller
+    keeps its existing behaviour. Never fabricates VAT.
+
+    Guards:
+      R4  netto + steuer ≈ brutto (arithmetic identity, ±0.02)
+      R3  steuer/netto snaps to a known DE rate (±1.0) — else reject the row
+      R4  parsed brutto(s) reconcile with the receipt total (±max(0.05, 1%))
+    """
+    if not text or total is None:
+        return None
+    if not _VAT_TABLE_HEADER_RE.search(text):
+        return None
+    rows = []
+    for m in _VAT_TABLE_ROW_RE.finditer(text):
+        try:
+            netto, steuer, brutto = float(m.group(2)), float(m.group(3)), float(m.group(4))
+        except (TypeError, ValueError):
+            continue
+        if netto <= 0 or brutto <= 0 or steuer < 0:
+            continue
+        if abs(netto + steuer - brutto) > 0.02:          # R4: identity
+            continue
+        implied = (steuer / netto) * 100 if netto else 0
+        rate = next((r for r in _KNOWN_DE_VAT_RATES if abs(implied - r) <= 1.0), None)
+        if rate is None:                                  # R3: known-rate only
+            continue
+        rows.append((rate, round(steuer, 2), round(brutto, 2)))
+    if not rows:
+        return None
+    sum_brutto = round(sum(r[2] for r in rows), 2)
+    if total > 0 and abs(sum_brutto - total) > max(0.05, total * 0.01):
+        return None                                       # R4: reconcile w/ total
+    vat_amount = round(sum(r[1] for r in rows), 2)
+    vat_rates = sorted({r[0] for r in rows}, reverse=True)
+    return vat_rates, vat_amount
+
+
 def _extract_explicit_vat_amount(text: str) -> float | None:
-    """Try to find an explicitly stated VAT/MwSt amount."""
+    """Try to find an explicitly stated VAT/MwSt amount.
+
+    R1: accept both dot and comma decimals ([.,]) as a safety net. Primary text
+    is already dot-normalized by normalize_amount_text, but a stray comma (e.g.
+    'MwSt 19% 3,19' before normalization, or a thousands edge case) is recovered.
+    """
     patterns = [
-        r"(?:mwst|ust|mehrwertsteuer|umsatzsteuer)\s*(?:\d+\s*%\s*)?:?\s*(\d+\.\d{2})",
-        r"(?:tva|taxe)\s*(?:\d+[\.,]\d+\s*%\s*)?:?\s*(\d+\.\d{2})",
-        r"(?:vat|tax)\s*(?:\d+\s*%\s*)?:?\s*(\d+\.\d{2})",
-        r"(?:steuer|imposta|iva)\s*:?\s*(\d+\.\d{2})",
-        r"davon\s*mwst\s*:?\s*(\d+\.\d{2})",
-        r"(?:enth(?:\.|ält)|incl(?:\.|uding)?)\s*(?:mwst|ust|vat)\s*(?:\d+\s*%\s*)?:?\s*(\d+\.\d{2})",
-        r"mwst[-\s]*betrag\s*:?\s*(\d+\.\d{2})",
-        r"ust[-\s]*betrag\s*:?\s*(\d+\.\d{2})",
+        r"(?:mwst|ust|mehrwertsteuer|umsatzsteuer)\s*(?:\d+\s*%\s*)?:?\s*(\d+[.,]\d{2})",
+        r"(?:tva|taxe)\s*(?:\d+[\.,]\d+\s*%\s*)?:?\s*(\d+[.,]\d{2})",
+        r"(?:vat|tax)\s*(?:\d+\s*%\s*)?:?\s*(\d+[.,]\d{2})",
+        r"(?:steuer|imposta|iva)\s*:?\s*(\d+[.,]\d{2})",
+        r"davon\s*mwst\s*:?\s*(\d+[.,]\d{2})",
+        r"(?:enth(?:\.|ält)|incl(?:\.|uding)?)\s*(?:mwst|ust|vat)\s*(?:\d+\s*%\s*)?:?\s*(\d+[.,]\d{2})",
+        r"mwst[-\s]*betrag\s*:?\s*(\d+[.,]\d{2})",
+        r"ust[-\s]*betrag\s*:?\s*(\d+[.,]\d{2})",
     ]
     for pat in patterns:
         match = re.search(pat, text, re.IGNORECASE)
         if match:
             try:
-                return float(match.group(1))
+                return float(match.group(1).replace(",", "."))
             except ValueError:
                 continue
     return None
