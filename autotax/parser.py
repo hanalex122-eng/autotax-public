@@ -1125,6 +1125,48 @@ def _is_garbage_vendor(name: str) -> bool:
     return False
 
 
+# Generic scanner / camera / document default filename words. A filename made of
+# only these + digits/date separators is NOT a vendor.
+_GENERIC_FNAME_WORDS = (
+    "scan", "img", "image", "photo", "bild", "foto", "doc", "document",
+    "dokument", "page", "seite", "untitled", "kopie", "copy", "neu", "neue",
+    "test", "rechnung", "invoice", "fatura", "fis", "file", "whatsapp",
+    "screenshot",
+)
+
+
+def filename_vendor_guess(filename: str) -> str | None:
+    """Derive a vendor name from an upload filename, or None when the filename
+    is a generic scanner/camera/doc default ('Scan2026-06-05_170051.pdf',
+    'IMG_1234.jpg', 'WhatsApp Image 2026-...', 'document.pdf').
+
+    Returns None for junk so the caller keeps 'Unbekannt' + needs_review instead
+    of storing a fake vendor like 'Scan2026 06 05'. Real shop names embedded in a
+    filename survive. KNOWN-vendor matching is the caller's job, BEFORE this.
+
+    Fix (2026-06-14): the old check only flagged SHORT generic names
+    (len <= prefix+5), so date-suffixed scan names slipped through. Now a name is
+    rejected whenever nothing but generic words + digits/separators remains —
+    regardless of length.
+    """
+    if not filename:
+        return None
+    base = re.sub(r"\.[a-z0-9]+$", "", filename, flags=re.IGNORECASE)
+    base = re.sub(r"[-_\s]+\d{1,5}[.,]?\d{0,2}\s*$", "", base)
+    base = re.sub(r"[-_]+", " ", base)
+    base = re.sub(r"\s+", " ", base).strip()
+    if not base or len(base) < 3:
+        return None
+    # Strip digits first (so 'scan2026' -> 'scan'), then remove generic words.
+    # If <3 real letters remain, the filename was scanner/date junk, not a vendor.
+    residue = re.sub(r"\d+", " ", base.lower())
+    for _w in _GENERIC_FNAME_WORDS:
+        residue = re.sub(rf"\b{_w}\b", " ", residue)
+    if len(re.sub(r"[^a-zäöüß]", "", residue)) < 3:
+        return None
+    return base if base == base.upper() else base.title()
+
+
 def _clean_vendor_name(name: str) -> str:
     """Clean up vendor name: remove trailing punctuation, asterisks, OCR corrections.
     Also canonicalize: if a long legal name contains a known brand

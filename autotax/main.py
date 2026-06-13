@@ -886,21 +886,11 @@ def apply_filename_overrides(parsed: dict, filename: str, raw_text: str = "") ->
                 break
 
     if not _file_vendor:
-        _base = _re_fn.sub(r"\.[a-z0-9]+$", "", _fname, flags=_re_fn.IGNORECASE)
-        _base = _re_fn.sub(r"[-_\s]+\d{1,5}[.,]?\d{0,2}\s*$", "", _base)
-        _base = _re_fn.sub(r"[-_]+", " ", _base)
-        _base = _re_fn.sub(r"\s+", " ", _base).strip()
-        _GENERIC_FNAME_PREFIXES = ("scan", "img", "image", "photo", "doc",
-                                   "page", "untitled", "kopie", "copy",
-                                   "neu", "neue", "test", "rechnung",
-                                   "invoice", "fatura", "fis")
-        _is_generic = (
-            not _base or len(_base) < 3 or
-            any(_base.lower().startswith(p) and len(_base) <= len(p) + 5
-                for p in _GENERIC_FNAME_PREFIXES)
-        )
-        if not _is_generic:
-            _file_vendor = _base if _base == _base.upper() else _base.title()
+        # Generic scanner/camera/doc filenames ("Scan2026-06-05", "IMG_1234",
+        # "document.pdf") must NOT become the vendor — returns None so vendor
+        # stays Unbekannt + needs_review. Real shop names survive.
+        from autotax.parser import filename_vendor_guess
+        _file_vendor = filename_vendor_guess(_fname)
 
     # 2) Filename'den tutar cikar
     _file_amount = None
@@ -8713,26 +8703,10 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
             # 'kebabhaus 12.50.pdf'        -> 'Kebabhaus'
             # 'scan001.pdf'                -> None (scanner default name)
             if not _file_vendor:
-                _base = _re_v_chk.sub(r"\.[a-z0-9]+$", "", _fname, flags=_re_v_chk.IGNORECASE)
-                _base = _re_v_chk.sub(r"[-_\s]+\d{1,5}[.,]?\d{0,2}\s*$", "", _base)
-                _base = _re_v_chk.sub(r"[-_]+", " ", _base)
-                _base = _re_v_chk.sub(r"\s+", " ", _base).strip()
-                # Generic scanner default names — bunlar vendor degil
-                _GENERIC_FNAME_PREFIXES = ("scan", "img", "image", "photo", "doc",
-                                           "page", "untitled", "kopie", "copy",
-                                           "neu", "neue", "test", "rechnung",
-                                           "invoice", "fatura", "fis")
-                _base_lower = _base.lower()
-                _is_generic = (
-                    not _base or len(_base) < 3 or
-                    any(_base_lower.startswith(p) and len(_base) <= len(p) + 5
-                        for p in _GENERIC_FNAME_PREFIXES)
-                )
-                if not _is_generic:
-                    if _base == _base.upper():
-                        _file_vendor = _base
-                    else:
-                        _file_vendor = _base.title()
+                # Generic scanner/camera/doc filenames must NOT become the vendor
+                # (shared guard; see filename_vendor_guess docstring).
+                from autotax.parser import filename_vendor_guess
+                _file_vendor = filename_vendor_guess(_fname)
 
             # FILENAME AMOUNT — kullanici '...-22.43.pdf' / '... 63.47.pdf' formatinda
             # toplam tutari dosya adina yaziyor. Parser'in bulduguyla farkliysa
