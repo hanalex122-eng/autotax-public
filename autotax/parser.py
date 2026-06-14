@@ -2327,13 +2327,15 @@ def extract_vat_info(raw_text: str, total: float, country: str) -> tuple[list[fl
     # Aksi halde KDV uydurmus olursunuz (ABD/UK/Isvicre disi A4 fatura
     # KDV'siz olabilir; Verdent gibi USD aboneliklerde 'Subtotal $19,
     # Total $19' var, KDV yok). Bu durumda 0/0% donmek dogru cevap.
+    # A real explicit percentage is already captured as a rate in Branch 4; a bare
+    # '%' left in OCR garbage (id 828: 'age 4 %', '0%') is NOT a reliable VAT signal
+    # and must not fabricate a default-rate VAT. Require an actual tax keyword.
     has_vat_signal = bool(
         re.search(
             r"\b(?:mwst|ust|mehrwertsteuer|umsatzsteuer|steuer|"
             r"vat|tva|iva|gst|hst|impuesto|tax)\b",
             text, re.IGNORECASE,
         )
-        or "%" in text
     )
     if not has_vat_signal:
         return [0.0], 0.0
@@ -2431,21 +2433,38 @@ def _extract_explicit_vat_amount(text: str) -> float | None:
 
 
 def _extract_vat_rates(text: str, country: str) -> list[float]:
-    """Extract VAT percentage rates from text."""
+    """Extract VAT percentage rates from text.
+
+    Only rates VALID for `country` are accepted. OCR garbage routinely contains a
+    stray 'N %' — e.g. id 828 had '4 %' in pure word-salad. 4% is not a German rate
+    (valid DE: 19/7) but it IS valid for IT/ES, so the filter is per-country, not a
+    regex tightening. Without it, extract_vat_info Branch 4 fabricates a bogus VAT.
+    When the country has no known rate table, fall back to the broad sanity bound.
+    """
     rates = set()
     known = KNOWN_VAT_RATES.get(country, [])
 
+    def _accept(raw: str):
+        val = float(raw.replace(",", "."))
+        if known:
+            # snap to a known rate within OCR tolerance; reject everything else
+            for kr in known:
+                if abs(val - kr) < 0.6:
+                    return kr
+            return None
+        return val if 0 < val <= 30 else None
+
     # Find all percentage mentions
     for m in re.findall(r"(\d{1,2}(?:[.,]\d{1,2})?)\s*%", text):
-        val = float(m.replace(",", "."))
-        if 0 < val <= 30:
-            rates.add(val)
+        kr = _accept(m)
+        if kr is not None:
+            rates.add(kr)
 
     # Look for MwSt/USt specific patterns
     for m in re.findall(r"(?:mwst|ust|tva|vat|iva|btw|kdv)\s*:?\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*%?", text, re.IGNORECASE):
-        val = float(m.replace(",", "."))
-        if 0 < val <= 30:
-            rates.add(val)
+        kr = _accept(m)
+        if kr is not None:
+            rates.add(kr)
 
     return sorted(rates, reverse=True)
 
