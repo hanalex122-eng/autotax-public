@@ -8279,6 +8279,7 @@ async def upload_zip(request: Request, file: UploadFile = File(...), invoice_typ
     if not content[:4] == b"PK\x03\x04":
         err(400, "Keine gültige ZIP-Datei")
     results = []
+    seen_hashes = set()  # content-md5 dedup within this ZIP
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
             for name in zf.namelist():
@@ -8295,6 +8296,21 @@ async def upload_zip(request: Request, file: UploadFile = File(...), invoice_typ
                     if len(file_data) > MAX_FILE_SIZE:
                         results.append({"filename": name, "status": "error", "message": "Datei zu groß"})
                         continue
+                    # --- Hard duplicate check (content md5) ---
+                    file_hash = generate_file_hash(file_data)
+                    if file_hash in seen_hashes:
+                        results.append({"filename": name, "status": "duplicate", "message": "Duplikat (gleiche Datei im ZIP)"})
+                        continue
+                    db_hdup = SessionLocal()
+                    try:
+                        hdup = find_hard_duplicate(db_hdup, user["sub"], file_hash)
+                    finally:
+                        db_hdup.close()
+                    if hdup:
+                        results.append({"filename": name, "status": "duplicate", "message": "Bereits hochgeladen", "id": hdup.id})
+                        continue
+                    seen_hashes.add(file_hash)
+                    # --- End hard duplicate check ---
                     # Determine content type from extension
                     if name_lower.endswith(".pdf"):
                         ct = "application/pdf"
@@ -8321,7 +8337,7 @@ async def upload_zip(request: Request, file: UploadFile = File(...), invoice_typ
                         continue
                     if invoice_type in ("income", "expense"):
                         parsed["invoice_type"] = invoice_type
-                    invoice_id = save_invoice(parsed, user_id=user["sub"], filename=name)
+                    invoice_id = save_invoice(parsed, user_id=user["sub"], filename=name, file_data=file_data, file_content_type=ct, file_hash=file_hash)
                     auto_create_cash_entry(invoice_id, user["sub"], parsed)
                     results.append({"filename": name, "status": "ok", "id": invoice_id, "vendor": parsed.get("vendor", ""), "total": parsed.get("total_amount", 0)})
                 except Exception as e:
@@ -8352,6 +8368,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     if content[:4] == b"PK\x03\x04" or (file.content_type or "").lower() in ("application/zip", "application/x-zip-compressed"):
         import zipfile
         zip_results = []
+        seen_hashes = set()  # content-md5 dedup within this ZIP
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                 for name in zf.namelist():
@@ -8364,6 +8381,21 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                         fd = zf.read(name)
                         if not fd or len(fd) > MAX_FILE_SIZE:
                             continue
+                        # --- Hard duplicate check (content md5) ---
+                        file_hash = generate_file_hash(fd)
+                        if file_hash in seen_hashes:
+                            zip_results.append({"filename": name, "status": "duplicate"})
+                            continue
+                        db_hdup = SessionLocal()
+                        try:
+                            hdup = find_hard_duplicate(db_hdup, user["sub"], file_hash)
+                        finally:
+                            db_hdup.close()
+                        if hdup:
+                            zip_results.append({"filename": name, "status": "duplicate", "id": hdup.id})
+                            continue
+                        seen_hashes.add(file_hash)
+                        # --- End hard duplicate check ---
                         ct = "application/pdf" if nl.endswith(".pdf") else "image/jpeg" if nl.endswith((".jpg",".jpeg")) else "image/png"
                         from starlette.datastructures import Headers as _Headers
                         fake = UploadFile(filename=name, file=io.BytesIO(fd), headers=_Headers({"content-type": ct}))
@@ -8391,7 +8423,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
                                 parsed["date"] = _qr["date"]
                         if invoice_type in ("income", "expense"):
                             parsed["invoice_type"] = invoice_type
-                        inv_id = save_invoice(parsed, user_id=user["sub"], filename=name)
+                        inv_id = save_invoice(parsed, user_id=user["sub"], filename=name, file_data=fd, file_content_type=ct, file_hash=file_hash)
                         auto_create_cash_entry(inv_id, user["sub"], parsed)
                         zip_results.append({"filename": name, "status": "ok", "id": inv_id})
                     except Exception:
@@ -8984,6 +9016,7 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
 async def upload_batch(files: List[UploadFile] = File(...), invoice_type: str = "expense", user: dict = Depends(get_current_user)):
     import gc
     results = []
+    seen_hashes = set()  # content-md5 dedup within this batch call
     for file in files:
         try:
             if file.content_type not in ALLOWED_TYPES:
@@ -9001,6 +9034,21 @@ async def upload_batch(files: List[UploadFile] = File(...), invoice_type: str = 
                 continue
             await file.seek(0)
             _batch_file_data = content  # save reference before OCR
+            # --- Hard duplicate check (content md5) — same shape as sync /upload ---
+            file_hash = generate_file_hash(content)
+            if file_hash in seen_hashes:
+                results.append({"filename": file.filename, "status": "duplicate", "message": "Duplikat (gleiche Datei in diesem Batch)"})
+                continue
+            db_hdup = SessionLocal()
+            try:
+                hdup = find_hard_duplicate(db_hdup, user["sub"], file_hash)
+            finally:
+                db_hdup.close()
+            if hdup:
+                results.append({"filename": file.filename, "status": "duplicate", "message": "Bereits hochgeladen", "id": hdup.id})
+                continue
+            seen_hashes.add(file_hash)
+            # --- End hard duplicate check ---
             raw_text = ""
             try:
                 raw_text = await asyncio.wait_for(extract_text(file, handwriting=False, file_bytes=content), timeout=45)
@@ -9027,7 +9075,7 @@ async def upload_batch(files: List[UploadFile] = File(...), invoice_type: str = 
                 continue
             if invoice_type in ("income", "expense"):
                 parsed["invoice_type"] = invoice_type
-            invoice_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=_batch_file_data, file_content_type=file.content_type or "")
+            invoice_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=_batch_file_data, file_content_type=file.content_type or "", file_hash=file_hash)
             auto_create_cash_entry(invoice_id, user["sub"], parsed)
             results.append({
                 "filename": file.filename,
@@ -9631,7 +9679,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                 parsed = apply_filename_overrides(parsed, file.filename or "", raw_text=_tess_text)
                 if invoice_type in ("income", "expense"):
                     parsed["invoice_type"] = invoice_type
-                inv_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "")
+                inv_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "", file_hash=file_hash)
                 auto_create_cash_entry(inv_id, user["sub"], parsed)
                 try:
                     audit("invoice.create", user_id=user["sub"], resource_type="invoice",
@@ -9673,7 +9721,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                 if safe_float(parsed.get("total_amount")) > 0:
                     if invoice_type in ("income", "expense"):
                         parsed["invoice_type"] = invoice_type
-                    inv_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "application/pdf")
+                    inv_id = save_invoice(parsed, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "application/pdf", file_hash=file_hash)
                     auto_create_cash_entry(inv_id, user["sub"], parsed)
                     try:
                         audit("invoice.create", user_id=user["sub"], resource_type="invoice",
@@ -9708,7 +9756,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
             placeholder["invoice_type"] = invoice_type
     else:
         placeholder = {"vendor": "Processing...", "total_amount": 0.0, "date": "", "raw_text": "", "invoice_type": invoice_type, "vat_amount": 0.0, "vat_rate": "0%", "category": "other", "invoice_number": "", "payment_method": ""}
-    inv_id = save_invoice(placeholder, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "")
+    inv_id = save_invoice(placeholder, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "", file_hash=file_hash)
     logger.info("Async OCR started: invoice %d (%s)", inv_id, file.filename)
 
     async def _bg_ocr(inv_id, content, filename, ct, handwriting, user_sub, invoice_type):
