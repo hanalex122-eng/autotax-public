@@ -2367,7 +2367,12 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   const _inPeriod=(en)=>{if(!en.date)return false;const p=String(en.date).slice(0,10).split("-");if(p.length<3)return false;const d=new Date(+p[0],+p[1]-1,+p[2]);return d>=_pB[0]&&d<_pB[1];};
   // C3: TEK KAYNAK — KPI + liste + footer hep aynı (dönem + arama) filtreli kümeden hesaplanır.
   const _sQ=(searchKB||"").toLowerCase();
-  const _vis=entries.filter(e=>_inPeriod(e)&&(!_sQ||(e.description||"").toLowerCase().includes(_sQ)||(e.vendor||"").toLowerCase().includes(_sQ)));
+  // Search matches description, vendor, DATE (so "2023" / "2023-01" finds entries
+  // by year/date) and notes. When searching, look across ALL periods — a year in
+  // the query must not be hidden by the current period filter; without a query the
+  // period filter applies as before.
+  const _matchQ=e=>(e.description||"").toLowerCase().includes(_sQ)||(e.vendor||"").toLowerCase().includes(_sQ)||String(e.date||"").toLowerCase().includes(_sQ)||(e.notes||"").toLowerCase().includes(_sQ);
+  const _vis=entries.filter(e=>_sQ?_matchQ(e):_inPeriod(e));
   const _agg=_vis.reduce((a,e)=>{const g=Number(e.gross_amount||0),v=Number(e.vat_amount||0);if(e.entry_type==="income"){a.ein+=g;a.vin+=v;}else{a.aus+=g;a.vex+=v;}return a;},{ein:0,aus:0,vin:0,vex:0});
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}>
     {speedyPrev&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setSpeedyPrev(null)}>
