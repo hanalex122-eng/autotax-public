@@ -3025,9 +3025,14 @@ function TableImportView({triggerRefresh,showToast,onNav}){
   const saveRows=async()=>{
     if(!rows.length)return;
     if(!isTable){setErrorMsg("Single receipt — please use Upload. Table Import is for cash book tables (multiple entries).");return;}
-    const validRows=rows.filter(r=>!r.is_uncertain);
-    const uncertainCount=rows.length-validRows.length;
-    if(!validRows.length){setErrorMsg("No valid entries — please check amounts (⚠ markierte Zeilen).");return;}
+    // Save EVERY row that has an amount (income OR expense) — including ⚠ uncertain
+    // ones: their amount is usually right; the flag just means "glance & verify".
+    // Only rows with NO amount at all cannot be saved and stay for manual entry.
+    const _hasAmt=r=>(Number(r.income)>0||Number(r.expense)>0);
+    const validRows=rows.filter(_hasAmt);
+    const noAmountRows=rows.filter(r=>!_hasAmt(r));
+    const uncertainSaved=validRows.filter(r=>r.is_uncertain).length;
+    if(!validRows.length){setErrorMsg("Keine Beträge erkannt — bitte Beträge der ⚠ Zeilen eintragen.");return;}
     setSaving(true);setStep("Einträge werden gespeichert...");setErrorMsg("");
     const tk=localStorage.getItem("atx_token");
     let ok=0;
@@ -3056,7 +3061,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
       for(const r of toSave){
         const amount=r.income>0?r.income:r.expense;
         const entryType=r.income>0?"income":"expense";
-        const body={description:r.description||"Import",vendor:(r.description||"Import").substring(0,50),gross_amount:amount,entry_type:entryType,vat_rate:"19%",category:"other",payment_method:"",reference:"",notes:"Tabelle Import",date:r.date||""};
+        const body={description:r.description||"Import",vendor:(r.description||"Import").substring(0,50),gross_amount:amount,entry_type:entryType,vat_rate:"19%",category:"other",payment_method:"",reference:"",notes:(r.is_uncertain?"Tabelle Import ⚠ Betrag prüfen":"Tabelle Import"),date:r.date||""};
         const res=await fetch(API+"/bookkeeping",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+tk},body:JSON.stringify(body)});
         if(res.ok){ok++;try{const d=await res.json();if(d.invoice_id)createdInvIds.push(d.invoice_id);}catch(ex){}}
       }
@@ -3067,11 +3072,12 @@ function TableImportView({triggerRefresh,showToast,onNav}){
         }
       }
       setSaved(ok);
-      const remaining=rows.filter(r=>r.is_uncertain);
+      const remaining=noAmountRows;
       setRows(remaining);
       if(!remaining.length)setShowTable(false);
-      if(showToast)showToast(ok+" entries saved to Cash Book","success");
-      if(uncertainCount>0)setErrorMsg(uncertainCount+" Einträge mit ⚠ wurden nicht gespeichert — bitte Beträge prüfen und erneut speichern.");
+      if(showToast)showToast(ok+" Einträge gespeichert"+(uncertainSaved?" · "+uncertainSaved+" ⚠ zur Prüfung markiert":""),"success");
+      if(remaining.length>0)setErrorMsg(remaining.length+" Zeile(n) ohne erkannten Betrag — bitte Betrag ergänzen und speichern.");
+      else setErrorMsg("");
       if(triggerRefresh)triggerRefresh();
       if(!remaining.length){setShowTable(false);}
     }catch(e){setErrorMsg("Verbindungsfehler — "+ok+" of "+validRows.length+" gespeichert.");}
@@ -3149,8 +3155,8 @@ function TableImportView({triggerRefresh,showToast,onNav}){
     </div>}
 
     {file&&!loading&&!rows.length&&!saved&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-      <button style={{background:"linear-gradient(135deg,#10b981,#3b82f6)",color:"#fff",border:"none",borderRadius:12,padding:"14px 28px",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 20px rgba(16,185,129,0.3)",transition:"all 0.3s",flex:mode==="image"?1:"1 1 100%"}} onClick={analyze} onMouseOver={e=>e.currentTarget.style.transform="scale(1.03)"} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}>{mode==="image"?"🔍 Tabelle erkennen":"📥 Jetzt importieren"}</button>
-      {mode==="image"&&<button title="Smart-Erkennung — Tabelle direkt aus dem Bild (Alternative, falls die normale Erkennung schlecht ist)" style={{background:"rgba(168,85,247,0.10)",color:"#a855f7",border:"1.5px solid rgba(168,85,247,0.55)",borderRadius:12,padding:"14px 22px",fontSize:15,fontWeight:700,cursor:"pointer",transition:"all 0.3s"}} onClick={analyzeKi} onMouseOver={e=>{e.currentTarget.style.background="rgba(168,85,247,0.20)";e.currentTarget.style.transform="scale(1.03)";}} onMouseOut={e=>{e.currentTarget.style.background="rgba(168,85,247,0.10)";e.currentTarget.style.transform="scale(1)";}}>🪄 Smart-Erkennung</button>}
+      <button style={{background:"linear-gradient(135deg,#10b981,#3b82f6)",color:"#fff",border:"none",borderRadius:12,padding:"14px 28px",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 20px rgba(16,185,129,0.3)",transition:"all 0.3s",flex:mode==="image"?1:"1 1 100%"}} onClick={mode==="image"?analyzeKi:analyze} onMouseOver={e=>e.currentTarget.style.transform="scale(1.03)"} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}>{mode==="image"?"🪄 Tabelle lesen (KI)":"📥 Jetzt importieren"}</button>
+      {mode==="image"&&<button title="Standard-OCR — nur falls die KI-Erkennung mal nicht passt (für gedruckte Tabellen)" style={{background:"rgba(168,85,247,0.10)",color:"#a855f7",border:"1.5px solid rgba(168,85,247,0.55)",borderRadius:12,padding:"14px 22px",fontSize:15,fontWeight:700,cursor:"pointer",transition:"all 0.3s"}} onClick={analyze} onMouseOver={e=>{e.currentTarget.style.background="rgba(168,85,247,0.20)";e.currentTarget.style.transform="scale(1.03)";}} onMouseOut={e=>{e.currentTarget.style.background="rgba(168,85,247,0.10)";e.currentTarget.style.transform="scale(1)";}}>🔍 Standard-OCR</button>}
     </div>}
 
     {loading&&<div style={{...css.card,textAlign:"center",padding:32,background:"rgba(16,185,129,0.05)",border:"1px solid rgba(16,185,129,0.15)"}}>
