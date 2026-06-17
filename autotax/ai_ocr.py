@@ -754,3 +754,110 @@ def merge_ai_into_parsed(parsed: dict, ai_result: dict) -> dict:
         parsed["ai_fallback_used"] = True
         parsed["ai_fields_filled"] = changed
     return parsed
+
+
+# ── Vision fallback: escalate ONLY weak/suspicious cheap-OCR results ──────────
+# Tesseract + OCR.space are kept for clean (mostly German printed) receipts —
+# fast and free. When their result is weak or clearly broken, re-read with Claude
+# vision (proven far better on French/thermal/handwritten: e.g. receipt 882
+# 1610,13 → 12,95; 845 3,00 → 19,51). Trigger is precise so clean receipts never
+# escalate (vision is NOT always better — on a clean LIDL it misread 19,78→74,63,
+# but that receipt does not fire). Cost: Haiku ~1¢, only on the weak fraction.
+
+def vision_should_fire(parsed: dict) -> tuple:
+    """Return (fire, reason) — whether the cheap-OCR result is weak/suspicious
+    enough to warrant a Claude-vision re-read."""
+    if not parsed or not isinstance(parsed, dict):
+        return True, "no_parse"
+    try:
+        total = float(parsed.get("total_amount") or 0)
+    except (TypeError, ValueError):
+        total = 0.0
+    vendor = (parsed.get("vendor") or "").strip()
+    date = (parsed.get("date") or "").strip()
+    reasons = []
+    if total == 0:
+        reasons.append("total=0")
+    if total > 800:                       # outlier — likely a phantom/garbage amount
+        reasons.append("suspicious_total")
+    if not date:
+        reasons.append("date_empty")
+    if vendor in ("", "Unbekannt"):
+        reasons.append("vendor_missing")
+    return (bool(reasons), ",".join(reasons))
+
+
+def _vision_date_ok(date_str: str) -> bool:
+    """Accept a vision date only if it is a plausible receipt date — guards
+    against vision's DD/MM↔MM/DD swaps that produce future/garbage dates
+    (e.g. receipt 851 '10.06.2026' misread as 2026-10-06)."""
+    import re as _re
+    from datetime import date as _date
+    m = _re.match(r"^(\d{4})-(\d{2})-(\d{2})$", (date_str or "").strip())
+    if not m:
+        return False
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    try:
+        dt = _date(y, mo, d)
+    except ValueError:
+        return False
+    today = _date.today()
+    if not (2020 <= y <= today.year + 1):
+        return False
+    if (dt - today).days > 2:             # receipts are not in the future
+        return False
+    return True
+
+
+async def maybe_vision_enhance(parsed: dict, image_bytes: bytes,
+                               content_type: str = "image/jpeg",
+                               filename: str = "receipt.jpg",
+                               raw_text: str = "") -> dict:
+    """If the cheap-OCR result is weak/suspicious, re-read with Claude vision and
+    merge the better fields. Never raises — on any failure returns `parsed`
+    unchanged (so a vision hiccup never blocks a save).
+
+    Merge policy (regression-bounded — only fires on already-weak results, and
+    evidence shows vision ≥ cheap on firing receipts):
+      - total: take vision when present > 0 (matches a correct cheap total,
+        fixes a wrong/zero one).
+      - vendor: take vision when present.
+      - date: fill only if cheap was empty AND vision date passes _vision_date_ok.
+      - other fields (vat, iban, ust_id, address, …): gap-fill only.
+    """
+    try:
+        fire, reason = vision_should_fire(parsed)
+        if not fire or not image_bytes:
+            return parsed
+        vis = await ai_extract_invoice(
+            image_bytes=image_bytes, content_type=content_type,
+            filename=filename, ocr_text=raw_text or "",
+        )
+        if not vis or not isinstance(vis, dict):
+            return parsed  # vision failed/disabled → keep cheap result
+        out = dict(parsed or {})
+        try:
+            vt = float(vis.get("total_amount") or 0)
+        except (TypeError, ValueError):
+            vt = 0.0
+        if vt > 0:
+            out["total_amount"] = vis.get("total_amount")
+        vv = (vis.get("vendor") or "").strip()
+        if vv:
+            out["vendor"] = vv
+        if not (parsed.get("date") or "").strip() and _vision_date_ok(vis.get("date") or ""):
+            out["date"] = vis.get("date")
+        for k in ("vat_amount", "vat_rate", "invoice_number", "currency",
+                  "vendor_email", "vendor_iban", "vendor_ust_id",
+                  "vendor_address", "category"):
+            if (out.get(k) in _EMPTY_VALUES) and (vis.get(k) not in _EMPTY_VALUES):
+                out[k] = vis.get(k)
+        out["vision_fallback_used"] = True
+        out["vision_fallback_reason"] = reason
+        logger.info("[VISION_FALLBACK] %s → vendor=%r total=%s date=%r (reason=%s)",
+                    filename, out.get("vendor"), out.get("total_amount"),
+                    out.get("date"), reason)
+        return out
+    except Exception:
+        logger.warning("[VISION_FALLBACK] failed for %s — keeping OCR result", filename, exc_info=True)
+        return parsed

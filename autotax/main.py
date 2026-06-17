@@ -8907,6 +8907,15 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
     if invoice_type in ("income", "expense"):
         result["invoice_type"] = invoice_type
 
+    # Vision fallback — escalate ONLY weak/suspicious OCR to Claude vision before
+    # saving (clean German receipts stay on the fast/free Tesseract+OCR.space path).
+    try:
+        if (file.content_type or "").lower().startswith("image/"):
+            from autotax.ai_ocr import maybe_vision_enhance
+            result = await maybe_vision_enhance(result, content, file.content_type or "image/jpeg", file.filename or "receipt.jpg", raw_text)
+    except Exception:
+        logger.warning("vision fallback (sync) failed — keeping OCR result", exc_info=True)
+
     try:
         invoice_id = save_invoice(result, user_id=user["sub"], filename=file.filename, file_data=_file_data, file_content_type=_file_ct, file_hash=file_hash, possible_duplicate=is_soft_dup)
     except Exception:
@@ -9808,6 +9817,14 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
                         parsed["vendor_iban"] = qr_data["iban"]
             except Exception:
                 pass
+            # Vision fallback — escalate ONLY weak/suspicious results (after QR, which
+            # is authoritative) to Claude vision. Clean receipts never escalate.
+            try:
+                if (ct or "").lower().startswith("image/"):
+                    from autotax.ai_ocr import maybe_vision_enhance
+                    parsed = await maybe_vision_enhance(parsed, content, ct or "image/jpeg", filename or "receipt.jpg", raw_text)
+            except Exception:
+                logger.warning("vision fallback (async) failed — keeping OCR result", exc_info=True)
             parsed = apply_filename_overrides(parsed, filename or "", raw_text=raw_text)
             if invoice_type in ("income", "expense"):
                 parsed["invoice_type"] = invoice_type
