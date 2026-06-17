@@ -2822,7 +2822,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
   const[modelUsed,setModelUsed]=useState("");
   // Gelir/gider tipi override — el yazisi tablolarda sutun belirsizligini cozer.
   // 'expense' (Ausgaben, varsayilan) | 'income' (Einnahmen) | 'auto' (model karar verir)
-  const[forceType,setForceType]=useState("expense");
+  const[forceType,setForceType]=useState("auto");
   useEffect(()=>{
     const goOn=()=>setOnline(true);
     const goOff=()=>setOnline(false);
