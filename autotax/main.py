@@ -4228,29 +4228,17 @@ async def vision_reocr_invoice(invoice_id: int, request: Request,
                 logger.exception("PDF->image conversion failed")
                 err(500, f"PDF Konvertierung fehlgeschlagen: {e}")
 
-        # Base64 encode
-        import base64 as _b64
-        img_b64 = _b64.b64encode(file_bytes).decode()
-
-        # AI service URL
-        ai_base = (os.environ.get("AI_REVIEWER_WEBHOOK_URL") or "").strip()
-        if not ai_base:
-            err(503, "AI reviewer not configured")
-        vision_url = ai_base.rsplit("/", 1)[0] + "/vision-reocr"
-
-        payload = {"image_b64": img_b64, "media_type": media_type}
-        import json as _json
-        payload_bytes = _json.dumps(payload).encode()
-        sig = _ai_reviewer_sign(payload_bytes)
-
-        import httpx as _httpx
-        async with _httpx.AsyncClient(timeout=60) as client:
-            r = await client.post(vision_url, content=payload_bytes,
-                                   headers={"X-Sig": sig, "Content-Type": "application/json"})
-            if r.status_code != 200:
-                logger.warning("Vision re-OCR failed: %s %s", r.status_code, r.text[:300])
-                err(502, f"AI vision service returned {r.status_code}")
-            ai_result = r.json().get("data") or {}
+        # Direct Claude vision (ai_extract_invoice) — the same proven engine the
+        # upload vision-fallback uses (845 3,00→19,51; 882 1610,13→12,95). No
+        # external AI-reviewer service dependency. Replaces the wrong fields below.
+        from autotax.ai_ocr import ai_extract_invoice
+        ai_result = await ai_extract_invoice(
+            image_bytes=file_bytes,
+            content_type=media_type,
+            filename=(inv.filename or "receipt.jpg"),
+        )
+        if not ai_result or not isinstance(ai_result, dict):
+            err(502, "KI konnte den Beleg nicht lesen — bitte erneut versuchen")
 
         # Update invoice fields with AI-extracted data
         updated_fields = {}
