@@ -1978,7 +1978,7 @@ function UploadView({triggerRefresh,onNav,showToast}){
         if(userConfirmed){
           const fd2=new FormData();fd2.append("file",files[0]);fd2.append("invoice_type",invoiceType);fd2.append("force_upload","true");
           const res2=await fetch(API+"/invoices/upload",{method:"POST",headers:{Authorization:"Bearer "+token},body:fd2});const d2=await res2.json();
-          setResults([{filename:files[0].name,status:res2.ok?"ok":"error",message:res2.ok?"OK (Force) — €"+(d2.total_amount?.toFixed(2)||"0.00"):d2.detail}]);if(res2.ok){okCount=1;if(d2.warning&&showToast)showToast(d2.warning,"warn");}
+          setResults([{filename:files[0].name,status:res2.ok?"ok":"error",message:res2.ok?"OK (Force) — €"+(d2.total_amount?.toFixed(2)||"0.00"):d2.detail,id:d2.id}]);if(res2.ok){okCount=1;if(d2.warning&&showToast)showToast(d2.warning,"warn");}
         }else{setResults([{filename:files[0].name,status:"skipped",message:"Duplicate — skipped"}]);}
       }
       /* --- ADDED END --- */
@@ -1986,12 +1986,12 @@ function UploadView({triggerRefresh,onNav,showToast}){
       else if(d.duplicate_deleted&&d.id){
         if(confirm(getLang()==="de"?"Diese Rechnung wurde zuvor gelöscht. Wiederherstellen?":"This invoice was previously deleted. Restore?")){
           await fetch(API+"/invoices/"+d.id+"/restore",{method:"POST",headers:{Authorization:"Bearer "+token}});
-          setResults([{filename:files[0].name,status:"ok",message:"Wiederhergestellt — €"+(d.total_amount?.toFixed(2)||"0.00")}]);okCount=1;
+          setResults([{filename:files[0].name,status:"ok",message:"Wiederhergestellt — €"+(d.total_amount?.toFixed(2)||"0.00"),id:d.id}]);okCount=1;
           if(showToast)showToast("Rechnung wiederhergestellt","success");
         }else{setResults([{filename:files[0].name,status:"skipped",message:"Gelöschtes Duplikat — skipped"}]);}
       }
       /* --- ADDED END --- */
-      else{setResults([{filename:files[0].name,status:res.ok?"ok":"error",message:res.ok?"OK — €"+(d.total_amount?.toFixed(2)||"0.00"):_extractErr(d)}]);if(res.ok){okCount=1;if(d.warning&&showToast)showToast(d.warning,"warn");}}}
+      else{setResults([{filename:files[0].name,status:res.ok?"ok":"error",message:res.ok?"OK — €"+(d.total_amount?.toFixed(2)||"0.00"):_extractErr(d),id:d.id}]);if(res.ok){okCount=1;if(d.warning&&showToast)showToast(d.warning,"warn");}}}
     else{
       /* Upload files one by one with auto token refresh + live progress */
       const allResults=[];
