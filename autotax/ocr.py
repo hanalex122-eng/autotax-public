@@ -182,6 +182,49 @@ def extract_pdf_page_as_image(content: bytes) -> bytes:
     return b""
 
 
+def pdf_page_count(content: bytes) -> int:
+    """Number of pages in a PDF (0 on failure)."""
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            return len(pdf.pages)
+    except Exception as e:
+        logger.warning("pdf_page_count failed: %s", e)
+        return 0
+
+
+def pdf_render_page(content: bytes, page_index: int, target_px: int = 3000) -> bytes:
+    """Render ONE PDF page to a JPEG sized so the long side ≈ target_px.
+
+    Unlike extract_pdf_page_as_image (first 3 pages, stitched, capped at 2000px —
+    unusable for a 100-page handwritten Kassenbuch), this renders a single page at
+    a resolution good enough for handwriting and streams one page at a time, so a
+    100-page book stays within memory. Returns b"" on failure / out-of-range.
+    """
+    try:
+        import pdfplumber
+        from PIL import Image
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            n = len(pdf.pages)
+            if page_index < 0 or page_index >= n:
+                return b""
+            page = pdf.pages[page_index]
+            long_pts = max(float(page.width or 0), float(page.height or 0)) or 595.0
+            dpi = int(target_px / (long_pts / 72.0))
+            dpi = max(120, min(300, dpi))
+            img = page.to_image(resolution=dpi).original.convert("RGB")
+            if max(img.width, img.height) > target_px:
+                img.thumbnail((target_px, target_px), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=90)
+            logger.info("pdf_render_page %d/%d dpi=%d %dx%d %dKB",
+                        page_index + 1, n, dpi, img.width, img.height, len(buf.getvalue()) // 1024)
+            return buf.getvalue()
+    except Exception as e:
+        logger.warning("pdf_render_page(%d) failed: %s", page_index, e)
+        return b""
+
+
 async def _ocr_api_call(client, filename: str, content: bytes, engine: str = "1") -> str:
     """Single OCR API call with given engine."""
     resp = await client.post(
