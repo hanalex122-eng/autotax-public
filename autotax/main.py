@@ -12146,7 +12146,7 @@ async def import_image_table(file: UploadFile = File(...), save: bool = False, u
 # ============================================================
 
 @app.post("/api/import-image-ki")
-async def import_image_table_ki(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+async def import_image_table_ki(file: UploadFile = File(...), page: int = Query(-1), user: dict = Depends(get_current_user)):
     """KI tabanli tablo parse — Anthropic Claude Vision direkt image'i okur.
 
     Bu endpoint mevcut /api/import-image'a paraleldir; opt-in olarak
@@ -12166,15 +12166,25 @@ async def import_image_table_ki(file: UploadFile = File(...), user: dict = Depen
     filename = (file.filename or "table.jpg")
     fn_lower = filename.lower()
     content_type = (file.content_type or "").lower()
+    page_count = 1
     if "pdf" in content_type or fn_lower.endswith(".pdf"):
         try:
-            from autotax.ocr import extract_pdf_page_as_image
-            img_bytes = extract_pdf_page_as_image(content)
+            from autotax.ocr import pdf_page_count, pdf_render_page, extract_pdf_page_as_image
+            page_count = pdf_page_count(content) or 1
+            # Per-page render (no 3-page cap, no stitch, full resolution) so a
+            # 100-page Kassenbuch is read page by page. page<0 → first page +
+            # page_count, so the frontend can then loop page=0..page_count-1.
+            _pi = page if page >= 0 else 0
+            img_bytes = pdf_render_page(content, _pi, target_px=3000)
+            if not img_bytes and _pi == 0:
+                img_bytes = extract_pdf_page_as_image(content)  # legacy fallback
             if img_bytes:
                 content = img_bytes
-                filename = (filename.rsplit(".", 1)[0] if "." in filename else filename) + ".png"
+                filename = (filename.rsplit(".", 1)[0] if "." in filename else filename) + ".jpg"
             else:
-                err(400, "PDF konnte nicht in Bild umgewandelt werden")
+                err(400, "PDF-Seite konnte nicht gelesen werden")
+        except HTTPException:
+            raise
         except Exception as _e:
             logger.exception("KI import: PDF->image failed: %s", _e)
             err(500, "PDF Konvertierung fehlgeschlagen")
@@ -12188,7 +12198,8 @@ async def import_image_table_ki(file: UploadFile = File(...), user: dict = Depen
     if rows is None:
         err(502, "KI hat keine Antwort geliefert")
     if not isinstance(rows, list) or not rows:
-        return {"success": False, "rows": [], "csv": "", "raw_rows": [], "error": "Keine Zeilen erkannt"}
+        return {"success": False, "rows": [], "csv": "", "raw_rows": [], "error": "Keine Zeilen erkannt",
+                "page_count": page_count, "page": page, "found_rows": 0, "expected_rows": 0}
 
     # Meta extraction (model + uncertain count from first row)
     meta_model = "claude-haiku-4-5-20251001"
@@ -12233,6 +12244,10 @@ async def import_image_table_ki(file: UploadFile = File(...), user: dict = Depen
         "warnings": (
             ["Einige Zeilen sind unsicher — bitte prüfen."] if meta_uncertain > 0 else []
         ),
+        "page_count": page_count,
+        "page": page,
+        "found_rows": len(rows),
+        "expected_rows": max((r.get("row_no") or 0) for r in rows),
     }
 
 
