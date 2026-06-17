@@ -680,6 +680,34 @@ def pick_best_ocr(tess_text: str, other_text: str, margin: int = 6) -> str:
     return o if ocr_quality_score(o) >= ocr_quality_score(t) + margin else t
 
 
+# Receipt keywords + date + amounts survive ONLY when the page is the right way
+# up. A 180°/90° scan reverses words ("Datum"->"mutaD") so these vanish — which
+# makes this a reliable orientation signal, unlike raw word count (a mirrored
+# scan still has ~as many letter-blobs). Used to pick the correct rotation.
+_RECEIPT_KW_RE = re.compile(
+    r"\b(eur|euro|summe|gesamt|betrag|brutto|netto|mwst|ust|datum|uhr|rechnung|"
+    r"beleg|zahlen|kasse|bar|karte|visa|mastercard|girocard|terminal|filiale|"
+    r"markt|gmbh|total|menge|preis|stk|tel)\b", re.I)
+_DATE_HINT_RE = re.compile(r"\b\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}\b")
+
+
+def _orientation_score(text: str) -> int:
+    """Score how much OCR text looks like an upright German receipt.
+
+    keywords*5 + amounts*2 (capped) + date*6. Higher = more likely correct
+    orientation. Used to choose among 0/90/180/270 instead of trusting OSD,
+    which misfires on receipts (a logo can read as rotate=180 at high conf and
+    flip a perfectly good scan into garbage — see receipt 882).
+    """
+    t = (text or "").strip()
+    if len(t) < 10:
+        return 0
+    kw = len(_RECEIPT_KW_RE.findall(t))
+    amounts = len(_AMOUNT_RE.findall(t))
+    has_date = 1 if _DATE_HINT_RE.search(t) else 0
+    return kw * 5 + min(amounts, 6) * 2 + has_date * 6
+
+
 def try_local_ocr(content: bytes, lang: str = "deu+eng") -> str:
     """Run local Tesseract OCR. Returns text or empty string if unavailable/failed."""
     try:
@@ -887,60 +915,41 @@ def local_ocr_tesseract(image):
             work = gray
             _scale_note = "1x"
 
-        # P0-1: OSD orientation detection BEFORE OCR. A 180°/90°-rotated scan
-        # produces junk the old char-count gate accepted. image_to_osd detects
-        # the true page orientation; we rotate once and OCR upright.
-        # Fail-soft: if osd.traineddata is missing or OSD is unsure, skip.
-        _t_osd = time.perf_counter()
-        try:
-            _osd = pytesseract.image_to_osd(work, output_type=pytesseract.Output.DICT)
-            _rot = int(_osd.get("rotate", 0) or 0)
-            _oconf = float(_osd.get("orientation_conf", 0) or 0)
-            if _rot in (90, 180, 270) and _oconf >= 1.0:
-                _osd_map = {90: cv2.ROTATE_90_COUNTERCLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_CLOCKWISE}
-                work = cv2.rotate(work, _osd_map[_rot])
-                logger.info("[OCR] OSD rotate=%d conf=%.1f applied", _rot, _oconf)
-        except Exception as _oe:
-            logger.debug("[OCR] OSD skipped: %s", _oe)
-        logger.info("[TIMING] osd %.0fms", (time.perf_counter() - _t_osd) * 1000)
-
         tess_cfg = "--oem 3 --psm 6"
         _t_ocr = time.perf_counter()
         text = pytesseract.image_to_string(work, lang="deu+eng", config=tess_cfg)
         text = text.strip() if text else ""
-        logger.info("[OCR] tesseract rot=0 length=%d scale=%s wh=%dx%d [TIMING] ocr %.0fms",
-                    len(text), _scale_note, w, h, (time.perf_counter() - _t_ocr) * 1000)
+        _score0 = _orientation_score(text)
+        logger.info("[OCR] tesseract rot=0 length=%d score=%d scale=%s wh=%dx%d [TIMING] ocr %.0fms",
+                    len(text), _score0, _scale_note, w, h, (time.perf_counter() - _t_ocr) * 1000)
 
-        # P0-2: quality-based rotation retry. Trigger when text is missing OR
-        # whole-doc quality is low (garbage / still mis-oriented after OSD).
-        # Choose the best rotation by REAL-WORD quality, not raw length — junk
-        # rotations win on length but lose on quality.
-        try:
-            _, _q0 = _header_garbage_score(text, sample_chars=100000)
-        except Exception:
-            _q0 = 99
-        if len(text) < 30 or _q0 < 5:
-            best_text, best_rot, best_q = text, 0, _q0
+        # Orientation by CONTENT, not OSD. We used to trust pytesseract.image_to_osd
+        # and rotate once before OCR — but OSD misfires on receipts (sparse text +
+        # logos): on receipt 882 it returned rotate=180 conf=1.1 and flipped a
+        # perfectly upright dm receipt into mirrored garbage ("ARAL", total 1610,13).
+        # Reversed text still passes a word-count gate, so the old retry could not
+        # veto it. Now: if 0° already looks like an upright receipt we keep it
+        # (1 OCR pass, fast); only when it does NOT do we try the other rotations
+        # and pick the one scoring highest on real receipt content (keywords/date/
+        # amounts) — which a mirrored scan cannot fake.
+        if _score0 < 10 or len(text) < 30:
+            best_text, best_rot, best_score = text, 0, _score0
             for rot_code, rot_deg in (
                 (cv2.ROTATE_90_CLOCKWISE, 90),
                 (cv2.ROTATE_180, 180),
                 (cv2.ROTATE_90_COUNTERCLOCKWISE, 270),
             ):
                 try:
-                    rot_img = cv2.rotate(work, rot_code)
-                    t = pytesseract.image_to_string(rot_img, lang="deu+eng", config=tess_cfg)
+                    t = pytesseract.image_to_string(cv2.rotate(work, rot_code), lang="deu+eng", config=tess_cfg)
                     t = t.strip() if t else ""
-                    try:
-                        _, q = _header_garbage_score(t, sample_chars=100000)
-                    except Exception:
-                        q = 0
-                    logger.info("[OCR] tesseract rot=%d length=%d quality=%d", rot_deg, len(t), q)
-                    if (q, len(t)) > (best_q, len(best_text)):
-                        best_text, best_rot, best_q = t, rot_deg, q
+                    s = _orientation_score(t)
+                    logger.info("[OCR] tesseract rot=%d length=%d score=%d", rot_deg, len(t), s)
+                    if s > best_score:
+                        best_text, best_rot, best_score = t, rot_deg, s
                 except Exception as e:
                     logger.debug("[OCR] tesseract rot=%d failed: %s", rot_deg, e)
             if best_rot != 0:
-                logger.info("[OCR] tesseract using rot=%d (length=%d quality=%d)", best_rot, len(best_text), best_q)
+                logger.info("[OCR] tesseract using rot=%d (score=%d)", best_rot, best_score)
             text = best_text
 
         return text

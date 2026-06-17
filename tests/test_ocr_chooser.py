@@ -11,6 +11,18 @@ from autotax.ocr import (
     tesseract_trusted,
     pick_best_ocr,
     is_ocr_valid,
+    _orientation_score,
+)
+
+# Upright German receipt — keywords + date + amount all readable.
+UPRIGHT_RECEIPT = (
+    "dm-drogerie markt\nFiliale 123\nUSB Stick 12,95\n"
+    "SUMME EUR 12,95\nMwSt 19% 2,07\nDatum 17.06.2026 14:06\nKarte\n"
+)
+# Same receipt photographed/processed 180° — mirrored garbage (real id-882 fragment).
+GARBAGE_180 = (
+    "1 y Ar La\nM ER\n. pe 1610,13 Auntyez +++ ER\n"
+    "Jun Sp:Sl gz'oo'Li unyeg WM\n{nu WOVGAVd Fb mr\n"
 )
 
 # A real receipt Tesseract read well: vendor header + price present.
@@ -80,3 +92,26 @@ def test_pick_returns_other_when_tess_empty():
 def test_pick_keeps_tess_on_tie_within_margin():
     # Identical text -> no margin advantage -> keep Tesseract (already in hand, free).
     assert pick_best_ocr(GOOD_TESS, GOOD_TESS) == GOOD_TESS
+
+
+# --- orientation scoring (Step 3: OSD misfire fix) ---
+
+def test_orientation_upright_beats_mirrored():
+    # The core 882 bug: upright must score clearly higher than 180° garbage,
+    # so the pipeline keeps the upright read instead of OSD's wrong flip.
+    assert _orientation_score(UPRIGHT_RECEIPT) > _orientation_score(GARBAGE_180)
+
+
+def test_orientation_upright_is_strong():
+    # An upright receipt clears the "good enough, skip rotation search" bar (>=10).
+    assert _orientation_score(UPRIGHT_RECEIPT) >= 10
+
+
+def test_orientation_garbage_is_weak():
+    # Mirrored garbage stays under the bar -> triggers the rotation search.
+    assert _orientation_score(GARBAGE_180) < 10
+
+
+def test_orientation_empty():
+    assert _orientation_score("") == 0
+    assert _orientation_score("ab cd") == 0
