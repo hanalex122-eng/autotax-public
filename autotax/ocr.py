@@ -607,6 +607,79 @@ def is_ocr_valid(text: str) -> bool:
     return real_words >= 3
 
 
+# --- Fix 1: amount-aware OCR trust + engine chooser ---------------------------
+# Problem: is_ocr_valid() only needs >=3 real words in the header, so a scan
+# whose ONLY readable text is the store logo (e.g. "Aral Tankstelle" + noise,
+# no prices, no date) passed the gate. The upload path then USED that garbage
+# and never called the stronger OCR.space engine — which on the same photo
+# reads the full receipt (date, address, line items). These helpers add a
+# stricter "trust" check (skip paid OCR only when Tesseract clearly worked) and
+# a score-based chooser so the better of two OCR results wins.
+
+# Monetary amount like 12,99 / 1.234,56-style cents. A real receipt almost
+# always carries at least one — its absence is the strongest "garbage" signal.
+_AMOUNT_RE = re.compile(r"(?<!\d)\d{1,4}[.,]\d{2}(?!\d)")
+
+
+def ocr_quality_score(text: str) -> int:
+    """Composite OCR quality score (higher = better).
+
+    Used (a) to decide whether Tesseract is good enough to skip the paid
+    OCR.space call, and (b) to pick the better of two OCR results. Signals:
+    readable vendor header, overall real-word count, and monetary amounts.
+    """
+    t = (text or "").strip()
+    if len(t) < 15:
+        return 0
+    try:
+        _, header_words = _header_garbage_score(t)
+    except Exception:
+        header_words = 0
+    real = 0
+    for tok in re.split(r"\s+", t):
+        c = re.sub(r"^[^\w]+|[^\w]+$", "", tok)
+        n = len(c)
+        if 3 <= n <= 30 and sum(ch.isalpha() for ch in c) >= n * 0.6:
+            real += 1
+    amounts = len(_AMOUNT_RE.findall(t))
+    score = 0
+    score += min(header_words, 5) * 2     # 0..10  vendor area readable
+    score += min(real, 20)                # 0..20  overall readable words
+    score += min(amounts, 4) * 4          # 0..16  prices = strong receipt signal
+    if len(t) >= 300:
+        score += 4
+    return score
+
+
+def tesseract_trusted(text: str) -> bool:
+    """True when the local Tesseract result is good enough to use directly and
+    skip the paid OCR.space fallback.
+
+    Stricter than is_ocr_valid(): requires a readable header AND at least one
+    monetary amount. A logo-only garbage scan (no price) returns False, so the
+    caller falls back to OCR.space instead of storing junk.
+    """
+    if not is_ocr_valid(text):
+        return False
+    return bool(_AMOUNT_RE.search(text or ""))
+
+
+def pick_best_ocr(tess_text: str, other_text: str, margin: int = 6) -> str:
+    """Return the better of two OCR texts by quality score.
+
+    The alternative (OCR.space) must beat Tesseract by `margin` to win, so a
+    clearly-better result is chosen while a marginal/worse fallback never
+    discards a decent local read. Empty inputs degrade gracefully.
+    """
+    t = tess_text or ""
+    o = other_text or ""
+    if not o.strip():
+        return t
+    if not t.strip():
+        return o
+    return o if ocr_quality_score(o) >= ocr_quality_score(t) + margin else t
+
+
 def try_local_ocr(content: bytes, lang: str = "deu+eng") -> str:
     """Run local Tesseract OCR. Returns text or empty string if unavailable/failed."""
     try:

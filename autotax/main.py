@@ -7193,9 +7193,9 @@ async def ocr_extract_only(request: Request, file: UploadFile = File(...), handw
     qr_data = {}
     try:
         if (file.content_type or "").lower().startswith("image/"):
-            from autotax.ocr import local_ocr_tesseract, is_ocr_valid
+            from autotax.ocr import local_ocr_tesseract, is_ocr_valid, tesseract_trusted
             _tt = local_ocr_tesseract(content)
-            if is_ocr_valid(_tt):
+            if tesseract_trusted(_tt):
                 raw_text = _tt
                 try:
                     from autotax.qr_reader import extract_qr_data
@@ -8470,11 +8470,12 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
 
     # --- ADDED START: Try Tesseract first, skip paid OCR if valid ---
     _tess_used = False
+    _tess_text = ""
     try:
         if (file.content_type or "").lower().startswith("image/"):
-            from autotax.ocr import local_ocr_tesseract, is_ocr_valid
+            from autotax.ocr import local_ocr_tesseract, is_ocr_valid, tesseract_trusted, pick_best_ocr
             _tess_text = local_ocr_tesseract(content)
-            if is_ocr_valid(_tess_text):
+            if tesseract_trusted(_tess_text):
                 logger.info("Using local OCR (Tesseract): %s (%d chars)", file.filename, len(_tess_text))
                 raw_text = _tess_text
                 _tess_used = True
@@ -8518,6 +8519,19 @@ async def upload_invoice(request: Request, file: UploadFile = File(...), handwri
         logger.warning("OCR timeout — saving with empty text")
     except Exception:
         logger.warning("OCR failed — saving with empty text")
+
+    # Fix 1: Tesseract was not trusted → OCR.space ran. Keep whichever OCR result
+    # scores higher (so a logo-only Tesseract read can't beat a full OCR.space read).
+    if _tess_text and not _tess_used and not _pdf_used:
+        try:
+            from autotax.ocr import pick_best_ocr
+            _picked = pick_best_ocr(_tess_text, raw_text)
+            if _picked != raw_text:
+                logger.info("Fix1 pick_best_ocr: switched engine for %s (tess=%d -> chosen=%d chars)",
+                            file.filename, len(_tess_text or ""), len(_picked or ""))
+            raw_text = _picked
+        except Exception as _pe:
+            logger.warning("pick_best_ocr failed: %s", _pe)
 
     # If OCR returned nothing, try QR-only (pure QR code images)
     if len(raw_text.strip()) < 10 and not qr_data:
@@ -9669,11 +9683,12 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
     # Both are local + fast; avoids the async OCR.space round-trip that
     # frontends can time out on (>30s polling).
     _ct = (file.content_type or "").lower()
+    _tess_text = ""
     if _ct.startswith("image/"):
         try:
-            from autotax.ocr import local_ocr_tesseract, is_ocr_valid
+            from autotax.ocr import local_ocr_tesseract, is_ocr_valid, tesseract_trusted
             _tess_text = local_ocr_tesseract(content)
-            if is_ocr_valid(_tess_text):
+            if tesseract_trusted(_tess_text):
                 logger.info("Using local OCR (Tesseract) sync: %s (%d chars)", file.filename, len(_tess_text))
                 parsed = parse_invoice(_tess_text)
                 parsed = apply_filename_overrides(parsed, file.filename or "", raw_text=_tess_text)
@@ -9759,13 +9774,25 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
     inv_id = save_invoice(placeholder, user_id=user["sub"], filename=file.filename, file_data=content, file_content_type=file.content_type or "", file_hash=file_hash)
     logger.info("Async OCR started: invoice %d (%s)", inv_id, file.filename)
 
-    async def _bg_ocr(inv_id, content, filename, ct, handwriting, user_sub, invoice_type):
+    async def _bg_ocr(inv_id, content, filename, ct, handwriting, user_sub, invoice_type, tess_hint=""):
         try:
             from fastapi import UploadFile as _UF
             from starlette.datastructures import Headers as _Headers
             import io as _io
             fake = _UF(filename=filename, file=_io.BytesIO(content), headers=_Headers({"content-type": ct or "application/octet-stream"}))
             raw_text, qr_data = await _asyncio.wait_for(extract_text_and_qr(fake, handwriting=handwriting, file_bytes=content), timeout=60)
+            # Fix 1: fast-path Tesseract was not trusted → OCR.space ran here. Keep
+            # whichever OCR result scores higher (logo-only Tesseract must not win).
+            if tess_hint:
+                try:
+                    from autotax.ocr import pick_best_ocr
+                    _picked = pick_best_ocr(tess_hint, raw_text)
+                    if _picked != raw_text:
+                        logger.info("Fix1 pick_best_ocr async: switched engine for inv %s (tess=%d -> chosen=%d chars)",
+                                    inv_id, len(tess_hint or ""), len(_picked or ""))
+                    raw_text = _picked
+                except Exception:
+                    pass
             parsed = parse_invoice(raw_text)
             # QR fallback (TSE / EPC / Swiss / generic) — fill ONLY fields the OCR
             # text missed; never overwrites a value the parser already found.
@@ -9861,7 +9888,7 @@ async def upload_invoice_async(request: Request, file: UploadFile = File(...), h
         except Exception as e:
             logger.warning("Async OCR failed for invoice %d: %s", inv_id, e)
 
-    task = _asyncio.create_task(_bg_ocr(inv_id, content, file.filename, file.content_type or "", handwriting, user["sub"], invoice_type))
+    task = _asyncio.create_task(_bg_ocr(inv_id, content, file.filename, file.content_type or "", handwriting, user["sub"], invoice_type, tess_hint=_tess_text))
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     return {"status": "processing", "id": inv_id, "message": "OCR is being processed in background"}
