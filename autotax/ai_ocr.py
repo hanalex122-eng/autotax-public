@@ -784,6 +784,14 @@ def vision_should_fire(parsed: dict) -> tuple:
         reasons.append("date_empty")
     if vendor in ("", "Unbekannt"):
         reasons.append("vendor_missing")
+    # VAT sanity — total parsed OK but no usable MwSt rate means Tesseract
+    # likely missed/garbled the VAT block (very common on multi-rate DE
+    # receipts, e.g. ALDI 7%+19% where cheap OCR grabbed only the tiny 7%
+    # line). Escalate so vision re-reads the VAT. Genuine 0%/KU receipts also
+    # escalate cheaply and simply get confirmed.
+    vat_rate = str(parsed.get("vat_rate") or "").strip()
+    if total > 0 and not vat_rate:
+        reasons.append("vat_missing")
     return (bool(reasons), ",".join(reasons))
 
 
@@ -847,7 +855,15 @@ async def maybe_vision_enhance(parsed: dict, image_bytes: bytes,
             out["vendor"] = vv
         if not (parsed.get("date") or "").strip() and _vision_date_ok(vis.get("date") or ""):
             out["date"] = vis.get("date")
-        for k in ("vat_amount", "vat_rate", "invoice_number", "currency",
+        # VAT — vision reads the image directly and is far more reliable than
+        # Tesseract on multi-rate MwSt blocks. When vision returns a concrete
+        # rate, take its VAT (OVERRIDE a wrong/garbled cheap value), not gap-fill
+        # — this is what fixes ALDI-style 0,22→10,70 / ""→"19%".
+        if str(vis.get("vat_rate") or "").strip():
+            out["vat_rate"] = vis.get("vat_rate")
+            if vis.get("vat_amount") not in _EMPTY_VALUES:
+                out["vat_amount"] = vis.get("vat_amount")
+        for k in ("invoice_number", "currency",
                   "vendor_email", "vendor_iban", "vendor_ust_id",
                   "vendor_address", "category"):
             if (out.get(k) in _EMPTY_VALUES) and (vis.get(k) not in _EMPTY_VALUES):
