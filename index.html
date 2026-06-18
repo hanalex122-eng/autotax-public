@@ -1102,6 +1102,7 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
         <h3 style={{fontSize:15,fontWeight:600,color:theme.text,margin:0}}>{_pl("Finanzübersicht","Finansal Özet","Financial overview")}</h3>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           {_periods.map(([k,lbl])=><button key={k} onClick={()=>setPeriod(k)} style={period===k?{...css.btn(theme.accent),padding:"7px 12px",fontSize:12,boxShadow:"none"}:{...css.btnOutline,padding:"7px 12px",fontSize:12}}>{lbl}</button>)}
+          {["all","2026","2025","2024","2023","2022","2021","2020"].map(y=>{const _n=new Date();const _td=_n.getFullYear()+"-"+String(_n.getMonth()+1).padStart(2,"0")+"-"+String(_n.getDate()).padStart(2,"0");const yfrom=(y==="all")?"2020-01-01":(y+"-01-01");const yto=(y==="all"||y===String(_n.getFullYear()))?_td:(y+"-12-31");const on=period==="custom"&&cFrom===yfrom&&cTo===yto;return(<button key={"y"+y} onClick={()=>{setPeriod("custom");setCFrom(yfrom);setCTo(yto);}} style={on?{...css.btn("#8b5cf6"),padding:"7px 12px",fontSize:12,boxShadow:"none"}:{...css.btnOutline,padding:"7px 12px",fontSize:12,borderColor:"rgba(139,92,246,0.4)",color:"#8b5cf6"}}>{y==="all"?_pl("Alle","Tümü","All"):y}</button>);})}
         </div>
       </div>
       {period==="custom"&&<div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
