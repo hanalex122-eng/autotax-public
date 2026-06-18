@@ -1539,6 +1539,10 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
         </span>
       </div>
     }
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
+      <span style={{fontSize:11,color:theme.textDim,fontWeight:600}}>{getLang()==="tr"?"📅 Yıl:":getLang()==="en"?"📅 Year:":"📅 Jahr:"}</span>
+      {["all","2026","2025","2024","2023","2022","2021","2020"].map(y=>{const on=(y==="all")?(activeRange==="all"):(activeRange===y);return(<button key={y} type="button" onClick={()=>{if(y==="all"){setActiveRange("all");setDateFrom(_jan1);setDateTo(_today);load(filter,filterCat,_jan1,_today);}else{const f=y+"-01-01";const t=(y===String(new Date().getFullYear()))?_today:(y+"-12-31");setActiveRange(y);setDateFrom(f);setDateTo(t);load(filter,filterCat,f,t);}}} style={on?{...css.btn(theme.accent),padding:"6px 13px",fontSize:12,boxShadow:"none"}:{...css.btnOutline,padding:"6px 13px",fontSize:12}}>{y==="all"?(getLang()==="tr"?"Tümü":getLang()==="en"?"All":"Alle"):y}</button>);})}
+    </div>
     <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
       <div style={{position:"relative",flex:1,minWidth:160}}><input style={{...css.input,paddingLeft:36}} placeholder={getLang()==="de"?"Lieferant, Nr., Datum (2023), Text…":getLang()==="tr"?"Tedarikçi, no, tarih (2023), metin…":"Vendor, no., date (2023), text…"} value={filter} onChange={e=>setFilter(e.target.value)}/><div style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}><Icon d={I.search} size={16} color={theme.textDim}/></div></div>
       <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:theme.textDim}}>Von</span><input style={{...css.input,width:140,cursor:"pointer"}} type="date" min="2020-01-01" max={dateTo||_today} value={dateFrom} onKeyDown={e=>e.preventDefault()} onChange={e=>{setActiveRange("");setDateFrom(e.target.value);load(filter,filterCat,e.target.value,dateTo);}}/></div>
