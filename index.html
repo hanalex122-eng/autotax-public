@@ -1191,7 +1191,9 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
   const[docType,setDocType]=useState("rechnung");
   const load=(vendorQ,catQ,dfQ,dtQ)=>{
     const params=new URLSearchParams({limit:"500"});
-    if(vendorQ)params.set("vendor",vendorQ);
+    // Smart search: vendor + OCR text + invoice no + category + date (year).
+    // Was "vendor" only — so "2023" / invoice-no / amount never matched.
+    if(vendorQ)params.set("search",vendorQ);
     if(catQ)params.set("category",catQ);
     // Datum-Filter jetzt client-seitig (robust gegen ISO/US/DE) — siehe `filtered`.
     // Server-String-Vergleich brach bei DE-Daten (09.04.2026) -> Periode-Buttons leer.
@@ -1538,7 +1540,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
       </div>
     }
     <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
-      <div style={{position:"relative",flex:1,minWidth:160}}><input style={{...css.input,paddingLeft:36}} placeholder="Search vendor..." value={filter} onChange={e=>setFilter(e.target.value)}/><div style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}><Icon d={I.search} size={16} color={theme.textDim}/></div></div>
+      <div style={{position:"relative",flex:1,minWidth:160}}><input style={{...css.input,paddingLeft:36}} placeholder={getLang()==="de"?"Lieferant, Nr., Datum (2023), Text…":getLang()==="tr"?"Tedarikçi, no, tarih (2023), metin…":"Vendor, no., date (2023), text…"} value={filter} onChange={e=>setFilter(e.target.value)}/><div style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}><Icon d={I.search} size={16} color={theme.textDim}/></div></div>
       <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:theme.textDim}}>Von</span><input style={{...css.input,width:140,cursor:"pointer"}} type="date" min="2020-01-01" max={dateTo||_today} value={dateFrom} onKeyDown={e=>e.preventDefault()} onChange={e=>{setActiveRange("");setDateFrom(e.target.value);load(filter,filterCat,e.target.value,dateTo);}}/></div>
       <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:theme.textDim}}>Bis</span><input style={{...css.input,width:140,cursor:"pointer"}} type="date" min={dateFrom||"2020-01-01"} max={_today} value={dateTo} onKeyDown={e=>e.preventDefault()} onChange={e=>{setActiveRange("");setDateTo(e.target.value);load(filter,filterCat,dateFrom,e.target.value);}}/></div>
       <select style={{...css.input,width:130}} value={filterCat} onChange={e=>{setFilterCat(e.target.value);load(filter,e.target.value,dateFrom,dateTo);}}><option value="">{_t("all_categories")}</option><option value="food">{_t("food")}</option><option value="restaurant">{_t("restaurant")}</option><option value="fuel">{_t("fuel")}</option><option value="clothing">{_t("clothing")}</option><option value="electronics">{_t("electronics")}</option><option value="office">{_t("office")}</option><option value="telecom">{_t("telecom")}</option><option value="transport">{_t("transport")}</option><option value="drugstore">{_t("drugstore")}</option><option value="other">{_t("other")}</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select>

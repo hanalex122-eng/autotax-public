@@ -4281,6 +4281,34 @@ async def vision_reocr_invoice(invoice_id: int, request: Request,
             inv.processed = True
         db.commit()
 
+        # P0 — Sync corrected values to the linked Kassenbuch entry. Without this
+        # the cash book kept the stale VAT/total after a 🪄 vision re-read (the
+        # PATCH-invoice path syncs at ~9429, but this endpoint did not). Vision
+        # is authoritative on a re-read, so override the cash entry.
+        try:
+            linked = db.query(CashEntry).filter(
+                CashEntry.invoice_id == inv.id,
+                CashEntry.user_id == user["sub"],
+            ).first()
+            if linked:
+                if inv.vendor:
+                    linked.vendor = inv.vendor
+                    linked.description = f"Rechnung: {inv.vendor}"
+                if inv.total_amount is not None:
+                    linked.gross_amount = inv.total_amount
+                if inv.vat_amount is not None:
+                    linked.vat_amount = inv.vat_amount
+                    if inv.total_amount is not None:
+                        linked.net_amount = round(float(inv.total_amount) - float(inv.vat_amount or 0), 2)
+                if inv.vat_rate:
+                    linked.vat_rate = inv.vat_rate
+                if inv.date:
+                    linked.date = parse_date_str_to_datetime(inv.date)
+                db.commit()
+                logger.info("vision_reocr synced invoice %d -> cash entry %d", inv.id, linked.id)
+        except Exception:
+            logger.warning("vision_reocr cash-entry sync failed (invoice %s)", invoice_id, exc_info=True)
+
         audit("invoice.vision_reocr", user_id=user["sub"], resource_type="invoice",
               resource_id=inv.id,
               payload={"updated_fields": list(updated_fields.keys()),
@@ -9146,6 +9174,7 @@ def list_invoices(
                     Invoice.vendor.ilike(pattern),
                     Invoice.category.ilike(pattern),
                     Invoice.invoice_number.ilike(pattern),
+                    Invoice.date.ilike(pattern),  # "2023" / "2023-06" finds by year/date (date is stored as YYYY-MM-DD string)
                 ))
         if vendor:
             q = q.filter(Invoice.vendor.ilike(f"%{vendor}%"))
