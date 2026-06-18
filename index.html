@@ -5304,7 +5304,7 @@ function EurDetailModal({year,onClose,tr}){
   useEffect(()=>{
     (async()=>{
       try{
-        const r=await _authFetch(API+"/invoices?date_from="+year+"-01-01&date_to="+year+"-12-31&limit=500");
+        const r=await _authFetch(API+"/invoices?date_from="+year+"-01-01&date_to="+year+"-12-31&limit=5000");
         if(r.ok){
           const j=await r.json();
           const items=j.items||j||[];
