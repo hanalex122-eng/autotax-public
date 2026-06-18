@@ -2816,7 +2816,7 @@ function CompaniesView(){
 }
 
 function TableImportView({triggerRefresh,showToast,onNav}){
-  const[file,setFile]=useState(null);const[rows,setRows]=useState([]);const[csv,setCsv]=useState("");const[loading,setLoading]=useState(false);const[saving,setSaving]=useState(false);const[saved,setSaved]=useState(0);
+  const[file,setFile]=useState(null);const[files,setFiles]=useState([]);const[rows,setRows]=useState([]);const[csv,setCsv]=useState("");const[loading,setLoading]=useState(false);const[saving,setSaving]=useState(false);const[saved,setSaved]=useState(0);
   const[step,setStep]=useState("");const[errorMsg,setErrorMsg]=useState("");const[rawRows,setRawRows]=useState([]);const[showRaw,setShowRaw]=useState(false);
   const fileRef=useRef(null);const tableRef=useRef(null);
   const[mode,setMode]=useState("image");
@@ -2857,8 +2857,8 @@ function TableImportView({triggerRefresh,showToast,onNav}){
     }catch(e){}
   };
 
-  const resetAll=()=>{setFile(null);setRows([]);setCsv("");setSaved(0);setErrorMsg("");setShowTable(false);setShowMapping(false);setRawTable([]);setRawRows([]);setShowRaw(false);};
-  const handleFile=(e)=>{const f=e.target.files?.[0];if(f){resetAll();setFile(f);}e.target.value="";};
+  const resetAll=()=>{setFile(null);setFiles([]);setRows([]);setCsv("");setSaved(0);setErrorMsg("");setShowTable(false);setShowMapping(false);setRawTable([]);setRawRows([]);setShowRaw(false);};
+  const handleFile=(e)=>{const fl=Array.from(e.target.files||[]);if(fl.length){resetAll();setFiles(fl);setFile(fl[0]);}e.target.value="";};
 
   /* Sort table-import rows chronologically by date.
      Handles DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD and 2-digit years.
@@ -3013,47 +3013,48 @@ function TableImportView({triggerRefresh,showToast,onNav}){
   // ayri endpoint /api/import-image-ki cagirir. Hata olursa kullanici
   // normal "🔍 Tabelle erkennen" akisina geri donebilir.
   const analyzeKi=async()=>{
-    if(!file)return;
+    const fileList=(files&&files.length)?files:(file?[file]:[]);
+    if(!fileList.length)return;
     if(mode!=="image"){if(showToast)showToast("KI nur fuer Bilder/PDF","warn");return;}
     setLoading(true);setRows([]);setCsv("");setSaved(0);setErrorMsg("");setShowTable(false);
     const tk=localStorage.getItem("atx_token");
-    const isPdf=/\.pdf$/i.test(file.name||"")||/pdf/i.test(file.type||"");
-    const callPage=async(pageIdx)=>{
-      const fd=new FormData();fd.append("file",file);
+    // One API call per file (image: page<0 → whole image; PDF: a given page index).
+    const callPage=async(theFile,pageIdx)=>{
+      const fd=new FormData();fd.append("file",theFile);
       const url=API+"/api/import-image-ki"+(pageIdx>=0?("?page="+pageIdx):"");
       const r=await fetch(url,{method:"POST",headers:{Authorization:"Bearer "+tk},body:fd});
       const d=await r.json().catch(()=>({}));
       return{ok:r.ok,status:r.status,d};
     };
+    const N=fileList.length;
+    let allRows=[];let expected=0,found=0;let pageNo=0;let failed=0;const failedNames=[];
     try{
-      setStep("🪄 Smart-Erkennung… Seite 1");
-      const first=await callPage(isPdf?0:-1);
-      if(!first.ok||(!first.d.success&&!((first.d.rows||[]).length))){
-        setErrorMsg("KI: "+(first.d.detail||first.d.error||("HTTP "+first.status)));
-        setLoading(false);setStep("");return;
-      }
-      const pageCount=isPdf?Math.max(1,Math.min(150,first.d.page_count||1)):1;
-      let allRows=(first.d.rows||[]).map(rr=>({...rr,page:1}));
-      let expected=(first.d.expected_rows||0),found=(first.d.found_rows||(first.d.rows||[]).length);
-      // Loop the remaining PDF pages — no 3-page cap. One page failing must not
-      // abort the whole book; it is reflected in the missing-rows report.
-      for(let p=1;p<pageCount;p++){
-        setStep("🪄 Smart-Erkennung… Seite "+(p+1)+"/"+pageCount+" — "+allRows.length+" Zeilen");
+      // Loop EVERY selected file (100 jpg's möglich). A file/page failing must NEVER
+      // abort the batch — it is counted + reported so the user can re-upload only those.
+      for(let fi=0;fi<N;fi++){
+        const f=fileList[fi];
+        const isPdf=/\.pdf$/i.test(f.name||"")||/pdf/i.test(f.type||"");
+        setStep("🪄 "+(fi+1)+"/"+N+" — "+(f.name||"").substring(0,22)+" … "+allRows.length+" Zeilen");
         try{
-          const res=await callPage(p);
-          if(res.ok&&(res.d.rows||[]).length){
-            allRows=allRows.concat((res.d.rows||[]).map(rr=>({...rr,page:p+1})));
-            expected+=(res.d.expected_rows||0);found+=(res.d.found_rows||(res.d.rows||[]).length);
+          const first=await callPage(f,isPdf?0:-1);
+          if(!first.ok||!((first.d.rows||[]).length)){failed++;failedNames.push(f.name||("Datei "+(fi+1)));continue;}
+          pageNo++;
+          allRows=allRows.concat((first.d.rows||[]).map(rr=>({...rr,page:pageNo,_src:f.name})));
+          expected+=(first.d.expected_rows||0);found+=(first.d.found_rows||(first.d.rows||[]).length);
+          const pc=isPdf?Math.max(1,Math.min(150,first.d.page_count||1)):1;
+          for(let p=1;p<pc;p++){
+            setStep("🪄 "+(fi+1)+"/"+N+" — Seite "+(p+1)+"/"+pc+" … "+allRows.length+" Zeilen");
+            try{const res=await callPage(f,p);if(res.ok&&(res.d.rows||[]).length){pageNo++;allRows=allRows.concat((res.d.rows||[]).map(rr=>({...rr,page:pageNo,_src:f.name})));expected+=(res.d.expected_rows||0);found+=(res.d.found_rows||(res.d.rows||[]).length);}}catch(ex){}
           }
-        }catch(ex){/* skip this page, keep going */}
+        }catch(ex){failed++;failedNames.push(f.name||("Datei "+(fi+1)));}
       }
-      if(!allRows.length){setErrorMsg("KI hat keine Zeilen gefunden");setLoading(false);setStep("");return;}
+      if(!allRows.length){setErrorMsg("KI hat keine Zeilen gefunden"+(failed?(" · "+failed+" Datei(en) ohne Treffer"):""));setLoading(false);setStep("");return;}
       allRows.forEach((rr,ix)=>{rr.row_no=ix+1;});
       const lost=Math.max(0,expected-found);
-      setRows(sortRowsByDate(applyForceType(allRows)));setCsv(first.d.csv||"");setRawRows([]);
-      const rep="🪄 "+pageCount+" Seite(n) · "+allRows.length+" Zeilen"+(lost>0?(" · ⚠ ~"+lost+" evtl. fehlend"):"");
-      if(showToast)showToast(rep+" — prüfen + speichern",lost>0?"warn":"success");
-      if(lost>0)setErrorMsg("Bericht: "+pageCount+" Seiten · erwartet "+expected+" · gefunden "+found+" · evtl. fehlend "+lost+" — bitte am Seitenende prüfen.");
+      setRows(sortRowsByDate(applyForceType(allRows)));setCsv("");setRawRows([]);
+      const rep="🪄 "+N+" Datei(en) · "+pageNo+" Seite(n) · "+allRows.length+" Zeilen"+(failed?(" · ⚠ "+failed+" ohne Treffer"):"")+(lost>0?(" · ⚠ ~"+lost+" evtl. fehlend"):"");
+      if(showToast)showToast(rep+" — prüfen + speichern",(lost>0||failed)?"warn":"success");
+      if(lost>0||failed)setErrorMsg("Bericht: "+N+" Datei(en) · "+pageNo+" Seite(n) · erwartet "+expected+" · gefunden "+found+(failed?(" · "+failed+" Datei(en) OHNE Treffer: "+failedNames.slice(0,8).join(", ")+(failedNames.length>8?" …":"")):"")+" — bitte prüfen (diese erneut hochladen).");
       setTimeout(()=>{setShowTable(true);setTimeout(()=>{tableRef.current?.scrollIntoView({behavior:"smooth",block:"start"});},200);},100);
     }catch(e){setErrorMsg("KI Verbindungsfehler — "+(e.message||e));}
     setLoading(false);setStep("");
@@ -3173,11 +3174,11 @@ function TableImportView({triggerRefresh,showToast,onNav}){
     </div>
 
     <div style={{...css.card,textAlign:"center",padding:file?24:48,border:"2px dashed "+(file?theme.accent:theme.border),cursor:"pointer",transition:"all 0.3s",background:file?"rgba(16,185,129,0.04)":theme.card}} onClick={()=>fileRef.current?.click()}>
-      <input ref={fileRef} type="file" accept={mode==="image"?"image/*,.pdf":mode==="csv"?".csv,.txt,.CSV,text/csv,text/plain,application/vnd.ms-excel":mode==="datev"?".csv,.txt,.CSV,text/csv":".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"} style={{display:"none"}} onChange={handleFile}/>
+      <input ref={fileRef} type="file" multiple={mode==="image"} accept={mode==="image"?"image/*,.pdf":mode==="csv"?".csv,.txt,.CSV,text/csv,text/plain,application/vnd.ms-excel":mode==="datev"?".csv,.txt,.CSV,text/csv":".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"} style={{display:"none"}} onChange={handleFile}/>
       {file?<div style={{animation:"fadeIn 0.3s ease"}}>
         <div style={{fontSize:32,marginBottom:4}}>✅</div>
-        <div style={{fontSize:16,fontWeight:600,color:theme.text}}>{file.name}</div>
-        <div style={{fontSize:12,color:theme.textMuted,marginTop:4}}>{(file.size/1024).toFixed(0)} KB — {_t("click_other_file")}</div>
+        <div style={{fontSize:16,fontWeight:600,color:theme.text}}>{files.length>1?(files.length+(getLang()==="de"?" Dateien gewählt":getLang()==="tr"?" dosya seçildi":" files selected")):file.name}</div>
+        <div style={{fontSize:12,color:theme.textMuted,marginTop:4}}>{files.length>1?((getLang()==="de"?"~"+(files.length*30)+" Zeilen erwartet · seitenweise gelesen — ":getLang()==="tr"?"~"+(files.length*30)+" satır bekleniyor · sayfa sayfa okunur — ":"~"+(files.length*30)+" rows expected — ")+_t("click_other_file")):((file.size/1024).toFixed(0)+" KB — "+_t("click_other_file"))}</div>
       </div>:<div>
         <div style={{fontSize:48,marginBottom:12,opacity:0.8}}>{mode==="image"?"📸":mode==="csv"?"📄":"📊"}</div>
         <div style={{fontSize:17,fontWeight:700,color:theme.text}}>{mode==="image"?_t("upload_photo_pdf"):mode==="csv"?_t("choose_csv"):_t("choose_excel")}</div>
@@ -3193,7 +3194,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
     </div>}
 
     {file&&!loading&&!rows.length&&!saved&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-      <button style={{background:"linear-gradient(135deg,#10b981,#3b82f6)",color:"#fff",border:"none",borderRadius:12,padding:"14px 28px",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 20px rgba(16,185,129,0.3)",transition:"all 0.3s",flex:mode==="image"?1:"1 1 100%"}} onClick={mode==="image"?analyzeKi:analyze} onMouseOver={e=>e.currentTarget.style.transform="scale(1.03)"} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}>{mode==="image"?"🪄 Tabelle lesen (KI)":"📥 Jetzt importieren"}</button>
+      <button style={{background:"linear-gradient(135deg,#10b981,#3b82f6)",color:"#fff",border:"none",borderRadius:12,padding:"14px 28px",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 20px rgba(16,185,129,0.3)",transition:"all 0.3s",flex:mode==="image"?1:"1 1 100%"}} onClick={mode==="image"?analyzeKi:analyze} onMouseOver={e=>e.currentTarget.style.transform="scale(1.03)"} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}>{mode==="image"?("🪄 "+(files.length>1?(files.length+(getLang()==="tr"?" foto oku (KI)":" Fotos lesen (KI)")):"Tabelle lesen (KI)")):"📥 Jetzt importieren"}</button>
       {mode==="image"&&<button title="Standard-OCR — nur falls die KI-Erkennung mal nicht passt (für gedruckte Tabellen)" style={{background:"rgba(168,85,247,0.10)",color:"#a855f7",border:"1.5px solid rgba(168,85,247,0.55)",borderRadius:12,padding:"14px 22px",fontSize:15,fontWeight:700,cursor:"pointer",transition:"all 0.3s"}} onClick={analyze} onMouseOver={e=>{e.currentTarget.style.background="rgba(168,85,247,0.20)";e.currentTarget.style.transform="scale(1.03)";}} onMouseOut={e=>{e.currentTarget.style.background="rgba(168,85,247,0.10)";e.currentTarget.style.transform="scale(1)";}}>🔍 Standard-OCR</button>}
     </div>}
 
