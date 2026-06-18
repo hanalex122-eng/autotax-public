@@ -2322,6 +2322,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   const[editId,setEditId]=useState(null);
   const[editData,setEditData]=useState({});
   const[searchKB,setSearchKB]=useState("");
+  const[kbFrom,setKbFrom]=useState("");const[kbTo,setKbTo]=useState("");
   const csvRef=useRef(null);
   const[speedyPrev,setSpeedyPrev]=useState(null);const[speedyBusy,setSpeedyBusy]=useState(false);const speedyRef=useRef(null);
   const speedyUpload=async(e)=>{const f=e.target.files&&e.target.files[0];if(!f){return;}e.target.value="";setSpeedyBusy(true);const tk=localStorage.getItem("atx_token");const fd=new FormData();fd.append("file",f);try{const r=await fetch(API+"/kasse/speedy-import",{method:"POST",headers:{Authorization:"Bearer "+tk},body:fd});const d=await r.json();if(d&&d.ok){setSpeedyPrev(d);}else{alert((d&&d.message)||"Speedy-Bericht nicht erkannt");}}catch(ex){alert(ex.message);}setSpeedyBusy(false);};
@@ -2375,7 +2376,11 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   // the query must not be hidden by the current period filter; without a query the
   // period filter applies as before.
   const _matchQ=e=>(e.description||"").toLowerCase().includes(_sQ)||(e.vendor||"").toLowerCase().includes(_sQ)||String(e.date||"").toLowerCase().includes(_sQ)||(e.notes||"").toLowerCase().includes(_sQ);
-  const _vis=entries.filter(e=>_sQ?_matchQ(e):_inPeriod(e));
+  // Von/Bis calendar range — when set it takes precedence over the period buttons
+  // (easiest way to pull e.g. 2023). Dates stored YYYY-MM-DD, so string compare works.
+  const _dr=!!(kbFrom||kbTo);
+  const _inRange=e=>{const d=String(e.date||"").slice(0,10);if(!d)return false;if(kbFrom&&d<kbFrom)return false;if(kbTo&&d>kbTo)return false;return true;};
+  const _vis=entries.filter(e=>_dr?(_inRange(e)&&(!_sQ||_matchQ(e))):(_sQ?_matchQ(e):_inPeriod(e)));
   const _agg=_vis.reduce((a,e)=>{const g=Number(e.gross_amount||0),v=Number(e.vat_amount||0);if(e.entry_type==="income"){a.ein+=g;a.vin+=v;}else{a.aus+=g;a.vex+=v;}return a;},{ein:0,aus:0,vin:0,vex:0});
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}>
     {speedyPrev&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setSpeedyPrev(null)}>
@@ -2446,12 +2451,14 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
         </div>
       </div>);
     })()}
-    <div style={{display:"flex",gap:8,margin:"4px 0 12px",maxWidth:500}}>
-      <div style={{position:"relative",flex:1}}>
+    <div style={{display:"flex",gap:8,margin:"4px 0 12px",flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{position:"relative",flex:1,minWidth:200}}>
         <input style={{...css.input,width:"100%",paddingLeft:38,border:"1.5px solid "+theme.accent,background:theme.card}} placeholder={getLang()==="de"?"Beschreibung, Lieferant suchen…":getLang()==="tr"?"Açıklama, tedarikçi ara…":"Search description, vendor…"} value={searchKB} onChange={e=>setSearchKB(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")e.preventDefault();}}/>
         <div style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}><Icon d={I.search} size={16} color={theme.accent}/></div>
       </div>
-      {searchKB&&<button style={{...css.btnOutline,padding:"8px 12px"}} onClick={()=>setSearchKB("")}>x</button>}
+      <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:theme.textDim}}>Von</span><input style={{...css.input,width:140,cursor:"pointer"}} type="date" min="2020-01-01" max={kbTo||undefined} value={kbFrom} onKeyDown={e=>e.preventDefault()} onChange={e=>setKbFrom(e.target.value)}/></div>
+      <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:theme.textDim}}>Bis</span><input style={{...css.input,width:140,cursor:"pointer"}} type="date" min={kbFrom||"2020-01-01"} value={kbTo} onKeyDown={e=>e.preventDefault()} onChange={e=>setKbTo(e.target.value)}/></div>
+      {(searchKB||kbFrom||kbTo)&&<button style={{...css.btnOutline,padding:"8px 12px"}} onClick={()=>{setSearchKB("");setKbFrom("");setKbTo("");}}>✕ {getLang()==="tr"?"Temizle":getLang()==="de"?"Zurücksetzen":"Clear"}</button>}
     </div>
     {(()=>{const ein=_agg.ein,aus=_agg.aus,_g=ein-aus,_mwst=_agg.vin-_agg.vex,_cnt=_vis.length;return(
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))",gap:12}}>
