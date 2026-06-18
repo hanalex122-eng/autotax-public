@@ -815,7 +815,7 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
   const load=()=>{
     setLoading(true);
     api("/invoices/dashboard?country=DE").then(setData).catch(()=>{}).finally(()=>setLoading(false));
-    api("/invoices?limit=500").then(d=>{setAllInv(d.items||[]);}).catch(()=>{});
+    api("/invoices?limit=5000").then(d=>{setAllInv(d.items||[]);}).catch(()=>{});
     api("/account/me").then(setMe).catch(()=>{});
     Promise.all([
       api("/reminders/overdue").catch(()=>({count:0,total_amount:0,items:[]})),
@@ -844,7 +844,7 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
     if(!confirm(_t("confirm_reset2"))) return;
     try{
       // Use bulk delete for invoices
-      const invData=await api("/invoices?limit=500").catch(()=>({items:[]}));
+      const invData=await api("/invoices?limit=5000").catch(()=>({items:[]}));
       const allIds=(invData.items||[]).map(i=>i.id);
       let delCount=0;
       if(allIds.length>0){
@@ -1191,7 +1191,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
   const[newInv,setNewInv]=useState({kunde:"",betrag:"",mwst_satz:"19%",datum:new Date().toISOString().slice(0,10),rechnung_nr:"",zahlungsart:"",kategorie:"service",beschreibung:"",positionen:[{description:"",amount:""}]});
   const[docType,setDocType]=useState("rechnung");
   const load=(vendorQ,catQ,dfQ,dtQ)=>{
-    const params=new URLSearchParams({limit:"500"});
+    const params=new URLSearchParams({limit:"5000"});
     // Smart search: vendor + OCR text + invoice no + category + date (year).
     // Was "vendor" only — so "2023" / invoice-no / amount never matched.
     if(vendorQ)params.set("search",vendorQ);

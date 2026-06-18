@@ -9134,7 +9134,7 @@ async def upload_batch(files: List[UploadFile] = File(...), invoice_type: str = 
 @app.get("/invoices")
 def list_invoices(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=5000),
     search: Optional[str] = Query(None),
     vendor: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
