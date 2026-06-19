@@ -3069,14 +3069,14 @@ function TableImportView({triggerRefresh,showToast,onNav}){
   const saveRows=async()=>{
     if(!rows.length)return;
     if(!isTable){setErrorMsg("Single receipt — please use Upload. Table Import is for cash book tables (multiple entries).");return;}
-    // Save EVERY row that has an amount (income OR expense) — including ⚠ uncertain
-    // ones: their amount is usually right; the flag just means "glance & verify".
-    // Only rows with NO amount at all cannot be saved and stay for manual entry.
+    // Save EVERY detected row. Rows whose amount could not be read are saved as a
+    // 0,00 placeholder flagged "BETRAG FEHLT" so NO row is ever lost — the user
+    // fills the amount later directly in the Kassenbuch.
     const _hasAmt=r=>(Number(r.income)>0||Number(r.expense)>0);
-    const validRows=rows.filter(_hasAmt);
-    const noAmountRows=rows.filter(r=>!_hasAmt(r));
-    const uncertainSaved=validRows.filter(r=>r.is_uncertain).length;
-    if(!validRows.length){setErrorMsg("Keine Beträge erkannt — bitte Beträge der ⚠ Zeilen eintragen.");return;}
+    const _amt=r=>(Number(r.income)>0?Number(r.income):(Number(r.expense)>0?Number(r.expense):0));
+    const validRows=rows;                          // ALLE Zeilen (auch ohne Betrag)
+    const noAmountCount=rows.filter(r=>!_hasAmt(r)).length;
+    if(!validRows.length){setErrorMsg("Keine Zeilen.");return;}
     setSaving(true);setStep("Einträge werden gespeichert...");setErrorMsg("");
     const tk=localStorage.getItem("atx_token");
     let ok=0;
@@ -3089,8 +3089,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
       let dupCount=0;
       const newRows=[];
       for(const r of validRows){
-        const amount=r.income>0?r.income:r.expense;
-        const key=(r.description||"Import").substring(0,50)+"|"+amount+"|"+(r.date||"").slice(0,10);
+        const key=(r.description||"Import").substring(0,50)+"|"+_amt(r)+"|"+(r.date||"").slice(0,10);
         if(existingKeys.has(key)){dupCount++;}else{newRows.push(r);}
       }
       if(dupCount>0&&newRows.length===0){
@@ -3103,9 +3102,10 @@ function TableImportView({triggerRefresh,showToast,onNav}){
       const toSave=newRows.length>0?newRows:validRows;
       const createdInvIds=[];
       for(const r of toSave){
-        const amount=r.income>0?r.income:r.expense;
-        const entryType=r.income>0?"income":"expense";
-        const body={description:r.description||"Import",vendor:(r.description||"Import").substring(0,50),gross_amount:amount,entry_type:entryType,vat_rate:"19%",category:"other",payment_method:"",reference:"",notes:(r.is_uncertain?"Tabelle Import ⚠ Betrag prüfen":"Tabelle Import"),date:r.date||""};
+        const amount=_amt(r);
+        const entryType=Number(r.income)>0?"income":"expense";
+        const _noAmt=!_hasAmt(r);
+        const body={description:r.description||"Import",vendor:(r.description||"Import").substring(0,50),gross_amount:amount,entry_type:entryType,vat_rate:"19%",category:"other",payment_method:"",reference:"",notes:(_noAmt?"Tabelle Import ⚠ BETRAG FEHLT – bitte ergänzen":(r.is_uncertain?"Tabelle Import ⚠ Betrag prüfen":"Tabelle Import")),date:r.date||""};
         const res=await fetch(API+"/bookkeeping",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+tk},body:JSON.stringify(body)});
         if(res.ok){ok++;try{const d=await res.json();if(d.invoice_id)createdInvIds.push(d.invoice_id);}catch(ex){}}
       }
@@ -3116,14 +3116,11 @@ function TableImportView({triggerRefresh,showToast,onNav}){
         }
       }
       setSaved(ok);
-      const remaining=noAmountRows;
-      setRows(remaining);
-      if(!remaining.length)setShowTable(false);
-      if(showToast)showToast(ok+" Einträge gespeichert"+(uncertainSaved?" · "+uncertainSaved+" ⚠ zur Prüfung markiert":""),"success");
-      if(remaining.length>0)setErrorMsg(remaining.length+" Zeile(n) ohne erkannten Betrag — bitte Betrag ergänzen und speichern.");
+      setRows([]);setShowTable(false);
+      if(showToast)showToast(ok+" Einträge gespeichert"+(noAmountCount?" · "+noAmountCount+" ⚠ ohne Betrag (0,00 — ergänzen)":""),"success");
+      if(noAmountCount>0)setErrorMsg(noAmountCount+" Zeile(n) ohne Betrag wurden als 0,00 gespeichert (⚠) — Betrag im Kassenbuch ergänzen.");
       else setErrorMsg("");
       if(triggerRefresh)triggerRefresh();
-      if(!remaining.length){setShowTable(false);}
     }catch(e){setErrorMsg("Verbindungsfehler — "+ok+" of "+validRows.length+" gespeichert.");}
     setSaving(false);setStep("");
   };
