@@ -2386,7 +2386,9 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   // (easiest way to pull e.g. 2023). Dates stored YYYY-MM-DD, so string compare works.
   const _dr=!!(kbFrom||kbTo);
   const _inRange=e=>{const d=String(e.date||"").slice(0,10);if(!d)return false;if(kbFrom&&d<kbFrom)return false;if(kbTo&&d>kbTo)return false;return true;};
-  const _vis=entries.filter(e=>_dr?(_inRange(e)&&(!_sQ||_matchQ(e))):(_sQ?_matchQ(e):_inPeriod(e)));
+  // Foto/defter sırası: reference'taki Nr'ye göre diz (Nr'siz kayıtlar sona). Arama bitsin.
+  const _nrOf=e=>{const m=/(\d{1,7})/.exec(e.reference||"");return m?parseInt(m[1],10):9e8;};
+  const _vis=entries.filter(e=>_dr?(_inRange(e)&&(!_sQ||_matchQ(e))):(_sQ?_matchQ(e):_inPeriod(e))).sort((a,b)=>_nrOf(a)-_nrOf(b)||(String(a.date)<String(b.date)?-1:1));
   const _agg=_vis.reduce((a,e)=>{const g=Number(e.gross_amount||0),v=Number(e.vat_amount||0);if(e.entry_type==="income"){a.ein+=g;a.vin+=v;}else{a.aus+=g;a.vex+=v;}return a;},{ein:0,aus:0,vin:0,vex:0});
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}>
     {speedyPrev&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setSpeedyPrev(null)}>
