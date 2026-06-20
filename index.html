@@ -2526,11 +2526,11 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
           {[_t("type"),_t("date"),_t("description"),_t("amount"),_t("vat"),_t("category"),"","","",""].map((h,i)=><th key={h+i} className={(i===4||i===5||i===6||i===8)?"hide-mobile":""} style={{padding:"8px 6px",textAlign:"left",color:theme.textDim,fontWeight:500,fontSize:10,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}
         </tr></thead>
         <tbody>{_vis.map(e=>{const t=tc[e.entry_type]||tc.expense;return(
-          <tr key={e.id} style={{borderBottom:"1px solid "+theme.border,background:selected.has(e.id)?"rgba(16,185,129,0.08)":"transparent"}}>
+          <tr key={e.id} style={{borderBottom:"1px solid "+theme.border,background:selected.has(e.id)?"rgba(16,185,129,0.08)":(/FEHLT|KONTROL|prüfen/i.test(e.notes||"")?"rgba(239,68,68,0.10)":(/💰|>1000/.test(e.notes||"")?"rgba(245,158,11,0.10)":"transparent"))}}>
             <td style={{padding:"10px 8px"}} className="cb-cell"><input type="checkbox" checked={selected.has(e.id)} onChange={()=>toggleSelect(e.id)}/></td>
             <td style={{padding:"6px 6px"}}><span style={css.badge(t.bg,t.c)}>{t.t}</span></td>
             <td style={{padding:"6px 6px",color:theme.textMuted,fontSize:11,whiteSpace:"nowrap"}}>{formatDateEU(e.date)}</td>
-            <td style={{padding:"6px 6px",color:theme.text,fontWeight:500,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12}} title={e.description}>{e.description}</td>
+            <td style={{padding:"6px 6px",color:theme.text,fontWeight:500,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12}} title={(e.notes||"")+" — "+e.description}>{(/FEHLT|KONTROL|prüfen|💰/i.test(e.notes||"")?"⚠ ":"")}{e.description}</td>
             <td style={{padding:"6px 6px",color:theme.text,fontFamily:mono,fontWeight:600,fontSize:12,whiteSpace:"nowrap"}}>€{e.gross_amount?.toFixed(2)}</td>
             <td className="hide-mobile" style={{padding:"6px 6px",color:theme.textMuted,fontFamily:mono,fontSize:11,whiteSpace:"nowrap"}}>€{e.vat_amount?.toFixed(2)}</td>
             <td className="hide-mobile" style={{padding:"6px 6px"}}>{e.category?<span style={css.badge(theme.blueSoft,theme.blue)}>{e.category}</span>:"—"}</td>
@@ -3106,6 +3106,8 @@ function TableImportView({triggerRefresh,showToast,onNav}){
       }
       const toSave=newRows.length>0?newRows:validRows;
       const createdInvIds=[];
+      // saldo-kayma tespiti (sayfa içi, row_no sırasıyla): saldo[n]-saldo[n-1] ≈ net olmalı
+      const _kayma=new Set();{const _bp={};rows.forEach(x=>{(_bp[x.page]=_bp[x.page]||[]).push(x);});Object.values(_bp).forEach(arr=>{arr.sort((a,b)=>(Number(a.row_no)||0)-(Number(b.row_no)||0));let _pv=null;arr.forEach(x=>{const _s=Number(x.saldo);if(x.saldo==null||isNaN(_s))return;const _nt=(Number(x.income)||0)-(Number(x.expense)||0);if(_pv!==null&&Math.abs((_s-_pv)-_nt)>0.02)_kayma.add(x);_pv=_s;});});}
       for(const r of toSave){
         const amount=_amt(r);
         const entryType=Number(r.income)>0?"income":"expense";
@@ -3113,7 +3115,7 @@ function TableImportView({triggerRefresh,showToast,onNav}){
         const _nr=(r.row_no!=null&&r.row_no!=="")?parseInt(r.row_no,10):null;
         const _ref=_nr!=null?String(_nr).padStart(5,"0"):("9"+String(r._seq||0).padStart(5,"0"));
         const _desc=(_nr!=null?("Nr"+_nr+" "):"")+(r.description||"Import");
-        const body={description:_desc,vendor:(r.description||"Import").substring(0,50),gross_amount:amount,entry_type:entryType,vat_rate:"19%",category:"other",payment_method:"",reference:_ref,notes:(_noAmt?"Tabelle Import ⚠ BETRAG FEHLT – bitte ergänzen":(r.is_uncertain?"Tabelle Import ⚠ Betrag prüfen":"Tabelle Import")),date:r.date||""};
+        const body={description:_desc,vendor:(r.description||"Import").substring(0,50),gross_amount:amount,entry_type:entryType,vat_rate:"19%",category:"other",payment_method:"",reference:_ref,notes:((_noAmt?"Tabelle Import ⚠ BETRAG FEHLT – bitte ergänzen":(r.is_uncertain?"Tabelle Import ⚠ Betrag prüfen":"Tabelle Import"))+(amount>1000?" 💰>1000":"")+(_kayma.has(r)?" ⚠ KONTROL(saldo)":"")),date:r.date||""};
         const res=await fetch(API+"/bookkeeping",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+tk},body:JSON.stringify(body)});
         if(res.ok){ok++;try{const d=await res.json();if(d.invoice_id)createdInvIds.push(d.invoice_id);}catch(ex){}}
       }
