@@ -844,9 +844,9 @@ def _portfolio(db, uid, year):
     uids = [u.id for u in units]
     tenancies = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy),
                                              ImmoTenancy.unit_id.in_(uids)).all() if uids else []
-    rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent),
+    rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent), ImmoRent.property_id.in_(pids),
                                       ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all() if pids else []
-    exps = db.query(ImmoExpense).filter(ImmoExpense.user_id == uid, _notdel(ImmoExpense),
+    exps = db.query(ImmoExpense).filter(ImmoExpense.user_id == uid, _notdel(ImmoExpense), ImmoExpense.property_id.in_(pids),
                                         ImmoExpense.datum >= date(year, 1, 1), ImmoExpense.datum <= date(year, 12, 31)).all() if pids else []
     ten_by_unit = {}
     for t in tenancies:
