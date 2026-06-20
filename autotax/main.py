@@ -443,6 +443,15 @@ try:
 except Exception as _e:  # pragma: no cover - defensive
     logger.warning("kasse_v2 router not registered: %s", _e)
 
+# Additive Immobilien PRO module — own tables (immo_*), own /immo prefix,
+# fully isolated. Wrapped so a failure here can never stop the app starting.
+try:
+    from autotax.immo_api import router as _immo_router
+    app.include_router(_immo_router)
+    logger.info("immobilien router registered")
+except Exception as _e:  # pragma: no cover - defensive
+    logger.warning("immobilien router not registered: %s", _e)
+
 
 _CSP_POLICY = (
     "default-src 'self'; "

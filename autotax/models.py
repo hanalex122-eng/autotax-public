@@ -878,6 +878,7 @@ class ImmoProperty(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String(200), nullable=False)
     adresse = Column(String(400), nullable=True)
+    einheiten = Column(Integer, nullable=False, default=1)   # number of units (for belegt/leer)
     kaufdatum = Column(Date, nullable=True)
     kaufpreis = Column(Float, nullable=True)
     notiz = Column(Text, nullable=True)
