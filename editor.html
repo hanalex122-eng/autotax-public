@@ -287,7 +287,8 @@ function navigate(dir) {
 }
 
 function loadInvoice(inv) {
-  document.getElementById("invIdBadge").textContent = "#" + inv.id;
+  var _nrm = (inv.vendor || "").match(/\bNr\s*(\d+)/i) || (inv.ocr_snippet || "").match(/Nr\s*(\d+)/i);
+  document.getElementById("invIdBadge").textContent = (_nrm ? ("Nr " + _nrm[1] + "  ·  ") : "") + "#" + inv.id;
   document.getElementById("vendor").value = inv.vendor || "";
   document.getElementById("amount").value = inv.total_amount || "";
   document.getElementById("vat_rate").value = inv.vat_rate || "19%";
@@ -485,10 +486,10 @@ async function save() {
         if (n && n > 0) savedMsg = "✓ Gespeichert + " + n + " Lernregel(n) gemerkt";
       } catch(_) {}
       showToast(savedMsg);
-      // Auto-advance to next if available
-      if (currentIdx < invoices.length - 1) {
-        setTimeout(() => navigate(1), 800);
-      }
+      // Kaydedince KAYITTA KAL (otomatik sonrakine atlama kaldırıldı — "kaydolmadı"
+      // hissini önler). Kaydedildiği rozette de görünsün:
+      var _b = document.getElementById("statusBadge");
+      if (_b) { _b.textContent = "✓ Gespeichert"; _b.className = "status-badge status-ok"; }
     } else {
       let d = {}; try { d = await res.json(); } catch(_) {}
       if (res.status === 401) {
