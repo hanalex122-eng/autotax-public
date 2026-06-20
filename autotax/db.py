@@ -43,6 +43,17 @@ def init_db():
             logger.info("pg_trgm extension + GIN index ready (AI knowledge cache)")
         except Exception as e:
             logger.warning("pg_trgm setup skipped: %s", e)
+    # Immobilien: immo_rent.tenancy_id (create_all can't ALTER existing table).
+    try:
+        _ii = inspect(engine)
+        if "immo_rent" in _ii.get_table_names():
+            _rc = [c["name"] for c in _ii.get_columns("immo_rent")]
+            if "tenancy_id" not in _rc:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE immo_rent ADD COLUMN tenancy_id INTEGER"))
+                logger.info("Added 'tenancy_id' column to immo_rent")
+    except Exception as e:
+        logger.warning("immo_rent tenancy_id migration skipped: %s", e)
     insp = inspect(engine)
     try:
         user_cols = [c["name"] for c in insp.get_columns("users")]

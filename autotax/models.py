@@ -887,6 +887,36 @@ class ImmoProperty(Base):
     deleted_at = Column(DateTime, nullable=True)
 
 
+class ImmoUnit(Base):
+    __tablename__ = "immo_unit"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    property_id = Column(Integer, ForeignKey("immo_property.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(100), nullable=True)        # z.B. "Whg 1", "EG links"
+    wohnflaeche = Column(Float, nullable=True)
+    soll_miete = Column(Float, nullable=True)         # Ziel-/Marktmiete (für Leerstand-Bewertung)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class ImmoTenancy(Base):
+    __tablename__ = "immo_tenancy"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    unit_id = Column(Integer, ForeignKey("immo_unit.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    mieter_name = Column(String(200), nullable=False)
+    von = Column(Date, nullable=True)                 # Einzug
+    bis = Column(Date, nullable=True)                 # Auszug (null = laufend)
+    kaltmiete = Column(Float, nullable=True)
+    kaution = Column(Float, nullable=True)
+    nk_voraus = Column(Float, nullable=True)          # NK-Vorauszahlung pro Monat
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+# immo_tenant (legacy, flat) — kept for back-compat; PRO engine uses unit+tenancy.
 class ImmoTenant(Base):
     __tablename__ = "immo_tenant"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -908,6 +938,7 @@ class ImmoRent(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     property_id = Column(Integer, ForeignKey("immo_property.id"), nullable=False, index=True)
     tenant_id = Column(Integer, ForeignKey("immo_tenant.id"), nullable=True, index=True)
+    tenancy_id = Column(Integer, ForeignKey("immo_tenancy.id"), nullable=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     datum = Column(Date, nullable=True)
     betrag = Column(Float, nullable=False, default=0.0)
