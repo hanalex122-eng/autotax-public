@@ -3058,7 +3058,8 @@ function TableImportView({triggerRefresh,showToast,onNav}){
         }catch(ex){failed++;failedNames.push(f.name||("Datei "+(fi+1)));}
       }
       if(!allRows.length){setErrorMsg("KI hat keine Zeilen gefunden"+(failed?(" · "+failed+" Datei(en) ohne Treffer"):""));setLoading(false);setStep("");return;}
-      allRows.forEach((rr,ix)=>{rr.row_no=ix+1;});
+      // row_no = defterin GERÇEK basılı Nr'si (vision okudu) — EZME. Sadece okunamayan (null) olanlara sıra ver.
+      allRows.forEach((rr,ix)=>{if(rr.row_no==null||rr.row_no==="")rr.row_no=null; rr._seq=ix+1;});
       const lost=Math.max(0,expected-found);
       setRows(sortRowsByDate(applyForceType(allRows)));setCsv("");setRawRows([]);
       const rep="🪄 "+N+" Datei(en) · "+pageNo+" Seite(n) · "+allRows.length+" Zeilen"+(failed?(" · ⚠ "+failed+" ohne Treffer"):"")+(lost>0?(" · ⚠ ~"+lost+" evtl. fehlend"):"");
@@ -3109,7 +3110,10 @@ function TableImportView({triggerRefresh,showToast,onNav}){
         const amount=_amt(r);
         const entryType=Number(r.income)>0?"income":"expense";
         const _noAmt=!_hasAmt(r);
-        const body={description:r.description||"Import",vendor:(r.description||"Import").substring(0,50),gross_amount:amount,entry_type:entryType,vat_rate:"19%",category:"other",payment_method:"",reference:"",notes:(_noAmt?"Tabelle Import ⚠ BETRAG FEHLT – bitte ergänzen":(r.is_uncertain?"Tabelle Import ⚠ Betrag prüfen":"Tabelle Import")),date:r.date||""};
+        const _nr=(r.row_no!=null&&r.row_no!=="")?parseInt(r.row_no,10):null;
+        const _ref=_nr!=null?String(_nr).padStart(5,"0"):("9"+String(r._seq||0).padStart(5,"0"));
+        const _desc=(_nr!=null?("Nr"+_nr+" "):"")+(r.description||"Import");
+        const body={description:_desc,vendor:(r.description||"Import").substring(0,50),gross_amount:amount,entry_type:entryType,vat_rate:"19%",category:"other",payment_method:"",reference:_ref,notes:(_noAmt?"Tabelle Import ⚠ BETRAG FEHLT – bitte ergänzen":(r.is_uncertain?"Tabelle Import ⚠ Betrag prüfen":"Tabelle Import")),date:r.date||""};
         const res=await fetch(API+"/bookkeeping",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+tk},body:JSON.stringify(body)});
         if(res.ok){ok++;try{const d=await res.json();if(d.invoice_id)createdInvIds.push(d.invoice_id);}catch(ex){}}
       }

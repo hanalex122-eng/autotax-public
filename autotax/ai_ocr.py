@@ -512,7 +512,7 @@ CRITICAL: Return ALL rows you can see, including UNCERTAIN ones. Mark uncertaint
 ]
 
 Rules:
-- row_no: sequential row number from the visible table (1, 2, 3 ...). Helps users locate gaps.
+- row_no: the PRINTED number in the leftmost "Nr" column, read EXACTLY as written (e.g. 29, 30, 113, 308). This is the book's own row number and is CRITICAL for ordering — NEVER renumber from 1. If the page's first visible row shows Nr 113, then row_no MUST be 113 (not 1). Read each row's Nr from the column; do not invent a sequence. If a row's Nr is genuinely unreadable, use null.
 - date: convert any format (12.9.21, 9.9.21, 13/09/2021) to YYYY-MM-DD. Use 20YY for 2-digit years.
 - income/expense: usually exactly ONE is > 0. income comes ONLY from the Einnahmen column, expense ONLY from the Ausgaben column. If you can't read the amount but the row exists, use null and mark is_uncertain=true.
 - CRITICAL: NEVER use the Saldo (running balance, rightmost column) as income or expense. The Saldo is a cumulative total, not the row's amount. If a row's Einnahmen AND Ausgaben are both empty/unreadable, set income=0, expense=null, is_uncertain=true — do NOT fall back to the Saldo value.
