@@ -865,3 +865,47 @@ class InvoiceMetadata(Base):
         # One metadata row per invoice (NULL invoice_id allowed: NULLs distinct).
         Index("uq_invoice_metadata_invoice", "invoice_id", unique=True),
     )
+
+
+# ============================================================
+# IMMOBILIEN MVP — küçük ev sahibi (1-5 daire). Additive + izole:
+# create_all bu 3 tabloyu otomatik oluşturur, mevcut tablolara dokunmaz.
+# OCR/Vision/Parser/VAT/Kassenbuch/Rechnungen ile ALAKASI YOK.
+# ============================================================
+class ImmoObjekt(Base):
+    __tablename__ = "immo_objekt"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    adresse = Column(String(400), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class ImmoMieter(Base):
+    __tablename__ = "immo_mieter"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    objekt_id = Column(Integer, ForeignKey("immo_objekt.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    einzug_datum = Column(Date, nullable=True)
+    kaltmiete = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class ImmoBuchung(Base):
+    __tablename__ = "immo_buchung"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    objekt_id = Column(Integer, ForeignKey("immo_objekt.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    datum = Column(Date, nullable=True)
+    richtung = Column(String(10), nullable=False)   # income | expense
+    typ = Column(String(20), nullable=False)        # miete | nebenkosten | reparatur | versicherung | zinsen
+    betrag = Column(Float, nullable=False, default=0.0)
+    beschreibung = Column(String(300), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
