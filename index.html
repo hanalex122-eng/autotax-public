@@ -3090,11 +3090,15 @@ function TableImportView({triggerRefresh,showToast,onNav}){
       const existingRes=await fetch(API+"/bookkeeping?limit=10000",{headers:{"Authorization":"Bearer "+tk}});
       const existingData=await existingRes.json();
       const existingEntries=(existingData.items||[]);
-      const existingKeys=new Set(existingEntries.map(e=>e.vendor+"|"+e.gross_amount+"|"+(e.date||"").slice(0,10)));
-      let dupCount=0;
+      // DEDUP anahtarı artık Nr içerir (reference). Aynı isim+tutar+tarihli MEŞRU tekrarlar
+      // (farklı Nr) artık DÜŞMEZ; sadece gerçek re-upload (aynı Nr) atlanır. Nr-siz satır
+      // benzersiz anahtar alır → asla düşmez. (P0 fix — chunked kayıp 0.)
+      const existingKeys=new Set(existingEntries.map(e=>"NR:"+(e.reference||("X"+e.id))+"|"+e.gross_amount+"|"+(e.date||"").slice(0,10)));
+      let dupCount=0; let _uc=0;
       const newRows=[];
       for(const r of validRows){
-        const key=(r.description||"Import").substring(0,50)+"|"+_amt(r)+"|"+(r.date||"").slice(0,10);
+        const _n=(r.row_no!=null&&r.row_no!=="")?parseInt(r.row_no,10):null;
+        const key=_n!=null?("NR:"+String(_n).padStart(5,"0")+"|"+_amt(r)+"|"+(r.date||"").slice(0,10)):("U:"+(++_uc)+":"+(r._seq||0));
         if(existingKeys.has(key)){dupCount++;}else{newRows.push(r);}
       }
       if(dupCount>0&&newRows.length===0){
