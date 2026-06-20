@@ -707,6 +707,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     {id:"send_invoices",icon:I.export,label:_gl==="de"?"Rechnungen senden":_gl==="tr"?"Faturaları gönder":"Send invoices"},
     {id:"angebote",icon:I.invoice,label:_gl==="de"?"Angebote":_gl==="tr"?"Teklifler":"Quotes"},
     {id:"bookkeeping",icon:I.tax,label:_gl==="de"?"💰 Kasse":_gl==="tr"?"💰 Kasa":"💰 Cash Book"},
+    {id:"immobilien_dash",icon:I.tax,label:_gl==="de"?"🏠 Immobilien Dashboard":_gl==="tr"?"🏠 Gayrimenkul Panosu":"🏠 Property Dashboard"},
     {id:"immobilien",icon:I.invoice,label:_gl==="de"?"🏠 Immobilien":_gl==="tr"?"🏠 Gayrimenkul":"🏠 Properties"},
     ...(F.kasse_v2===true?[{id:"kasse_v2",icon:I.upload,label:_gl==="de"?"Kasse":_gl==="tr"?"Kasa":"Cash",badge:"NEU"}]:[]),
     {id:"export",icon:I.export,label:_t("export")},
@@ -2317,6 +2318,62 @@ function ChatView(){
 /* ══════════════════════════════════════════
    FIX #5: Kassenbuch — Toplu silme (checkbox) + FIX #2: tarih EU
    ══════════════════════════════════════════ */
+function ImmoDashboardView({onNav}){
+  const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
+  const _e=n=>"€"+(Number(n)||0).toLocaleString("de-DE",{maximumFractionDigits:0});
+  const [year,setYear]=React.useState(new Date().getFullYear());
+  const [d,setD]=React.useState(null);
+  React.useEffect(()=>{api("/immo/dashboard?year="+year).then(setD).catch(()=>{});},[year]);
+  const MON=["J","F","M","A","M","J","J","A","S","O","N","D"];
+  const KATL={nebenkosten:"Nebenkosten",strom:"Strom",gas:"Gas",heizung:"Heizung/WW",reparaturen:"Reparaturen",schoenheitsrep:"Schönheitsrep.",garten:"Garten",versicherung:"Versicherung",grundsteuer:"Grundsteuer",finanzierung:"Finanzierung",sonstige:"Sonstige"};
+  const kpi=(icon,label,val,col,sub)=>(<div style={{...css.card,minWidth:0}}><div style={{fontSize:12,color:theme.textMuted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{icon} {label}</div><div style={{fontSize:19,fontWeight:700,color:col||theme.text,fontFamily:mono}}>{val}</div>{sub&&<div style={{fontSize:11,color:theme.textDim}}>{sub}</div>}</div>);
+  const Bars=({arr,color})=>{const mx=Math.max(1,...arr);return(<svg viewBox="0 0 244 70" style={{width:"100%",height:70}}>{arr.map((v,i)=>{const h=v/mx*52;return <rect key={i} x={i*20+3} y={60-h} width={15} height={h} fill={color} rx={2}><title>{MON[i]}: {Math.round(v)}</title></rect>;})}{arr.map((v,i)=><text key={"t"+i} x={i*20+10} y={69} fontSize="6" fill={theme.textDim} textAnchor="middle">{MON[i]}</text>)}</svg>);};
+  const Line=({arr,color})=>{const mx=Math.max(1,...arr);const pts=arr.map((v,i)=>(i*22+3)+","+(58-v/mx*50)).join(" ");return(<svg viewBox="0 0 244 70" style={{width:"100%",height:70}}><polyline points={pts} fill="none" stroke={color} strokeWidth="2"/>{arr.map((v,i)=><circle key={i} cx={i*22+3} cy={58-v/mx*50} r="2.2" fill={color}><title>{MON[i]}: {v}</title></circle>)}{arr.map((v,i)=><text key={"t"+i} x={i*22+3} y={69} fontSize="6" fill={theme.textDim} textAnchor="middle">{MON[i]}</text>)}</svg>);};
+  if(!d) return <div style={{...css.card,textAlign:"center",color:theme.textMuted}}>{_L("Lädt…","Yükleniyor…","Loading…")}</div>;
+  const P=d.portfolio,F=d.financial,W=d.warnings,C=d.charts;
+  const cardgrid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10};
+  const tblgrid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:12};
+  return(<div style={{display:"flex",flexDirection:"column",gap:14}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+      <h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>🏠 {_L("Immobilien Dashboard","Gayrimenkul Panosu","Property Dashboard")}</h2>
+      <div style={{display:"flex",gap:6}}>{[year-1,year,year+1].map(y=><button key={y} onClick={()=>setYear(y)} style={y===year?{...css.btn("#6366f1"),padding:"6px 12px",fontSize:13,boxShadow:"none"}:{...css.btnOutline,padding:"6px 12px",fontSize:13}}>{y}</button>)}</div>
+    </div>
+    <div style={cardgrid}>
+      {kpi("🏢",_L("Objekte","Mülk","Properties"),P.properties)}
+      {kpi("🏠",_L("Einheiten","Daire","Units"),P.units)}
+      {kpi("✅",_L("Belegt","Dolu","Occupied"),P.occupied,theme.accent)}
+      {kpi("🕳️",_L("Leer","Boş","Vacant"),P.vacant,P.vacant>0?"#f59e0b":theme.text)}
+      {kpi("📊",_L("Belegung","Doluluk","Occupancy"),P.occupancy_rate+"%")}
+    </div>
+    <div style={cardgrid}>
+      {kpi("📈",_L("Ist-Miete","Alınan","Received"),_e(F.ist),theme.accent,_L("Soll","Beklenen","Expected")+" "+_e(F.soll))}
+      {kpi("🕳️",_L("Leerstand","Boşluk kaybı","Vacancy loss"),_e(F.leerstandsverlust),"#f59e0b")}
+      {kpi("⚠",_L("Rückstand","Borç","Arrears"),_e(F.rueckstand),F.rueckstand>0?theme.danger:theme.text)}
+      {kpi("📉",_L("Ausgaben","Gider","Expenses"),_e(F.ausgaben),theme.danger)}
+      {kpi("💰",_L("Gewinn","Kâr","Profit"),_e(F.gewinn),F.gewinn>=0?theme.accent:theme.danger)}
+      {kpi("📐",_L("Rendite","Getiri","Yield"),F.rendite!=null?F.rendite+"%":"—","#6366f1")}
+    </div>
+    {(W.vacant_units>0||W.debtors>0||W.contracts_ending>0)&&<div style={{...css.card,background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.3)",display:"flex",gap:16,flexWrap:"wrap"}}>
+      {W.vacant_units>0&&<span>🕳️ {W.vacant_units} {_L("leere Einheiten","boş daire","vacant units")}</span>}
+      {W.debtors>0&&<span>⚠ {W.debtors} {_L("Mieter im Rückstand","borçlu kiracı","debtors")}</span>}
+      {W.contracts_ending>0&&<span>📅 {W.contracts_ending} {_L("Vertrag endet bald","sözleşme bitiyor","ending soon")}</span>}
+    </div>}
+    <div style={tblgrid}>
+      <div style={css.card}><div style={{fontWeight:700,marginBottom:6}}>🕳️ {_L("Top Leerstand","En çok boşluk","Top vacancies")}</div>{d.top_vacancies.length?d.top_vacancies.map((v,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"3px 0"}}><span>{v.unit} <span style={{color:theme.textDim,fontSize:11}}>{v.empty_since}</span></span><b style={{color:"#f59e0b"}}>{_e(v.loss)}</b></div>):<div style={{color:theme.textMuted,fontSize:13}}>—</div>}</div>
+      <div style={css.card}><div style={{fontWeight:700,marginBottom:6}}>⚠ {_L("Top Schuldner","En çok borçlu","Top debtors")}</div>{d.top_debtors.length?d.top_debtors.map((v,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"3px 0"}}><span>{v.tenant} <span style={{color:theme.textDim,fontSize:11}}>{v.months_overdue!=null?v.months_overdue+" Mon":""}</span></span><b style={{color:theme.danger}}>{_e(v.debt)}</b></div>):<div style={{color:theme.textMuted,fontSize:13}}>—</div>}</div>
+      <div style={css.card}><div style={{fontWeight:700,marginBottom:6}}>📉 {_L("Top Ausgaben","En çok gider","Top expenses")}</div>{Object.keys(d.top_expenses).length?Object.entries(d.top_expenses).map(([k,v])=><div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"3px 0"}}><span>{KATL[k]||k}</span><b>{_e(v)}</b></div>):<div style={{color:theme.textMuted,fontSize:13}}>—</div>}</div>
+    </div>
+    <div style={tblgrid}>
+      <div style={css.card}><div style={{fontSize:13,fontWeight:600,marginBottom:4}}>📊 {_L("Mieteingang/Monat","Aylık kira","Monthly income")}</div><Bars arr={C.monthly_income} color={theme.accent}/></div>
+      <div style={css.card}><div style={{fontSize:13,fontWeight:600,marginBottom:4}}>📊 {_L("Ausgaben/Monat","Aylık gider","Monthly expenses")}</div><Bars arr={C.monthly_expenses} color={theme.danger}/></div>
+      <div style={css.card}><div style={{fontSize:13,fontWeight:600,marginBottom:4}}>📈 {_L("Leerstand-Trend","Boşluk trendi","Vacancy trend")}</div><Line arr={C.vacancy_trend} color="#f59e0b"/></div>
+      <div style={css.card}><div style={{fontSize:13,fontWeight:600,marginBottom:6}}>🥧 {_L("Ausgaben-Kategorien","Gider kategorileri","Expense categories")}</div>{Object.keys(C.expense_by_cat||{}).length?Object.entries(C.expense_by_cat).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>{const mx=Math.max(1,...Object.values(C.expense_by_cat));return(<div key={k} style={{marginBottom:5}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:theme.textMuted}}><span>{KATL[k]||k}</span><span>{_e(v)}</span></div><div style={{height:7,background:theme.surfaceAlt,borderRadius:4}}><div style={{height:7,width:(v/mx*100)+"%",background:"#6366f1",borderRadius:4}}></div></div></div>);}):<div style={{color:theme.textMuted,fontSize:13}}>—</div>}</div>
+    </div>
+    <button style={{...css.btnOutline,alignSelf:"flex-start"}} onClick={()=>onNav&&onNav("immobilien")}>→ {_L("Immobilien verwalten","Mülk yönet","Manage properties")}</button>
+  </div>);
+}
+
+
 function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
   const _e=n=>"€"+(Number(n)||0).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -6727,9 +6784,9 @@ function App(){
   }}/><CookieConsent/></Fragment>;
   // SendInvoicesView: InvoicesView'in sendOnly=true ile kopyasi — sadece email gonder buton'u
   const SendInvoicesView=(props)=><InvoicesView {...props} sendOnly={true}/>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,angebote:AngeboteView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,immobilien:ImmobilienView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView,kasse_v2:KasseAppView};
+  const views={dashboard:DashboardView,invoices:InvoicesView,angebote:AngeboteView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,immobilien_dash:ImmoDashboardView,immobilien:ImmobilienView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView,kasse_v2:KasseAppView};
   const _t=typeof t==="function"?t:k=>k;
-  const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),send_invoices:(getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),immobilien:(getLang()==="de"?"🏠 Immobilien":getLang()==="tr"?"🏠 Gayrimenkul":"🏠 Properties"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
+  const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),send_invoices:(getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),immobilien_dash:(getLang()==="de"?"🏠 Immobilien Dashboard":getLang()==="tr"?"🏠 Gayrimenkul Panosu":"🏠 Property Dashboard"),immobilien:(getLang()==="de"?"🏠 Immobilien":getLang()==="tr"?"🏠 Gayrimenkul":"🏠 Properties"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.
   const _FEAT=window.FEATURES||{};
   const _hiddenPages={upload:_FEAT.upload===false,tableimport:_FEAT.tableimport===false,chat:_FEAT.ai_chat===false};

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import io
 from calendar import monthrange
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -825,5 +825,121 @@ def property_accounting(pid: int, year: Optional[int] = Query(None), user: dict 
         _own_property(db, _uid(user), pid)
         y = year or datetime.now(timezone.utc).year
         return _accounting(db, _uid(user), pid, y)
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  EXECUTIVE DASHBOARD — portfolio-wide KPIs (all properties, one year)
+# ══════════════════════════════════════════════════════════════════════
+def _portfolio(db, uid, year):
+    today = date.today()
+    ref_month = today.month if year == today.year else 12
+    props = db.query(ImmoProperty).filter(ImmoProperty.user_id == uid, _notdel(ImmoProperty)).all()
+    pids = [p.id for p in props]
+    prop_name = {p.id: p.name for p in props}
+    kaufpreis_total = sum(float(p.kaufpreis or 0) for p in props)
+    units = db.query(ImmoUnit).filter(ImmoUnit.user_id == uid, _notdel(ImmoUnit),
+                                      ImmoUnit.property_id.in_(pids)).all() if pids else []
+    uids = [u.id for u in units]
+    tenancies = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy),
+                                             ImmoTenancy.unit_id.in_(uids)).all() if uids else []
+    rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent),
+                                      ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all() if pids else []
+    exps = db.query(ImmoExpense).filter(ImmoExpense.user_id == uid, _notdel(ImmoExpense),
+                                        ImmoExpense.datum >= date(year, 1, 1), ImmoExpense.datum <= date(year, 12, 31)).all() if pids else []
+    ten_by_unit = {}
+    for t in tenancies:
+        ten_by_unit.setdefault(t.unit_id, []).append(t)
+    unit_by_id = {u.id: u for u in units}
+    # monthly series + per-tenancy Ist
+    monthly_income = [0.0] * 12
+    monthly_expenses = [0.0] * 12
+    ist_by_ten = {}
+    for r in rents:
+        if r.datum:
+            monthly_income[r.datum.month - 1] += float(r.betrag or 0)
+        if r.tenancy_id:
+            ist_by_ten[r.tenancy_id] = ist_by_ten.get(r.tenancy_id, 0) + float(r.betrag or 0)
+    ist_total = round(sum(monthly_income), 2)
+    expense_by_cat = {}
+    for e in exps:
+        if e.datum:
+            monthly_expenses[e.datum.month - 1] += float(e.betrag or 0)
+        expense_by_cat[e.kategorie] = round(expense_by_cat.get(e.kategorie, 0) + float(e.betrag or 0), 2)
+    ausgaben_total = round(sum(monthly_expenses), 2)
+    # per unit: occupancy, vacancy, soll
+    vacancy_trend = [0] * 12
+    occupied_now = 0
+    soll_total = leer_total = 0.0
+    top_vacancies = []
+    for u in units:
+        ut = ten_by_unit.get(u.id, [])
+        vac_months = 0
+        for m in range(1, 13):
+            act = [t for t in ut if _tenancy_active_in_month(t, year, m)]
+            if act:
+                soll_total += float(act[0].kaltmiete or 0)
+            else:
+                vac_months += 1
+                vacancy_trend[m - 1] += 1
+        ref_act = [t for t in ut if _tenancy_active_in_month(t, year, ref_month)]
+        if ref_act:
+            occupied_now += 1
+        loss = vac_months * float(u.soll_miete or 0)
+        leer_total += loss
+        if not ref_act and vac_months > 0:
+            last_bis = max([t.bis for t in ut if t.bis], default=None)
+            top_vacancies.append({"unit": u.name or ("Whg " + str(u.id)), "property": prop_name.get(u.property_id, ""),
+                                  "empty_since": str(last_bis) if last_bis else "", "loss": round(loss, 2)})
+    vacant_now = len(units) - occupied_now
+    # debtors
+    top_debtors = []
+    ausfall_total = 0.0
+    for t in tenancies:
+        ma = _months_active_in_year(t, year)
+        soll_t = ma * float(t.kaltmiete or 0)
+        ist_t = round(ist_by_ten.get(t.id, 0), 2)
+        arr = round(max(0, soll_t - ist_t), 2)
+        if arr > 0:
+            ausfall_total += arr
+            mo = round(arr / float(t.kaltmiete)) if t.kaltmiete else None
+            top_debtors.append({"tenant": t.mieter_name, "debt": arr, "months_overdue": mo})
+    ausfall_total = round(ausfall_total, 2)
+    # contracts ending within 60 days
+    contracts_ending = []
+    for t in tenancies:
+        if t.bis and today <= t.bis <= today + timedelta(days=60):
+            uu = unit_by_id.get(t.unit_id)
+            contracts_ending.append({"tenant": t.mieter_name, "unit": (uu.name if uu else ""), "bis": str(t.bis)})
+    soll_total = round(soll_total, 2)
+    leer_total = round(leer_total, 2)
+    gewinn = round(ist_total - ausgaben_total, 2)
+    rendite = round(gewinn / kaufpreis_total * 100, 2) if kaufpreis_total else None
+    occ_rate = round(occupied_now / len(units) * 100, 1) if units else 0
+    top_vacancies.sort(key=lambda x: -x["loss"])
+    top_debtors.sort(key=lambda x: -x["debt"])
+    return {
+        "year": year,
+        "portfolio": {"properties": len(props), "units": len(units), "occupied": occupied_now,
+                      "vacant": vacant_now, "occupancy_rate": occ_rate},
+        "financial": {"soll": soll_total, "ist": ist_total, "leerstandsverlust": leer_total,
+                      "rueckstand": ausfall_total, "ausgaben": ausgaben_total, "gewinn": gewinn, "rendite": rendite},
+        "warnings": {"vacant_units": vacant_now, "debtors": len(top_debtors), "contracts_ending": len(contracts_ending)},
+        "top_vacancies": top_vacancies[:5],
+        "top_debtors": top_debtors[:5],
+        "top_expenses": dict(sorted(expense_by_cat.items(), key=lambda x: -x[1])[:6]),
+        "charts": {"monthly_income": [round(x, 2) for x in monthly_income],
+                   "monthly_expenses": [round(x, 2) for x in monthly_expenses],
+                   "vacancy_trend": vacancy_trend, "expense_by_cat": expense_by_cat},
+        "contracts_ending": contracts_ending,
+    }
+
+
+@router.get("/dashboard")
+def immo_dashboard(year: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        return _portfolio(db, _uid(user), year or datetime.now(timezone.utc).year)
     finally:
         db.close()
