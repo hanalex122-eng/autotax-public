@@ -2324,9 +2324,8 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const katLbl=k=>{const f=KAT.find(x=>x[0]===k);return f?f[1]:k;};
   const [props_,setProps]=React.useState([]);
   const [sel,setSel]=React.useState(null);
-  const [dash,setDash]=React.useState(null);
+  const [acc,setAcc]=React.useState(null);
   const [tab,setTab]=React.useState("uebersicht");
-  const [tenants,setTenants]=React.useState([]);
   const [rents,setRents]=React.useState([]);
   const [exps,setExps]=React.useState([]);
   const [docs,setDocs]=React.useState([]);
@@ -2337,16 +2336,16 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   React.useEffect(()=>{loadProps();},[refreshKey]);
   const openProp=(p)=>{setSel(p);setTab("uebersicht");refreshDetail(p.id,year);};
   const refreshDetail=(pid,yr)=>{
-    api("/immo/properties/"+pid+"/dashboard?year="+yr).then(setDash).catch(()=>{});
-    api("/immo/properties/"+pid+"/tenants").then(d=>setTenants(d.tenants||[])).catch(()=>{});
+    api("/immo/properties/"+pid+"/accounting?year="+yr).then(setAcc).catch(()=>{});
     api("/immo/properties/"+pid+"/rent?year="+yr).then(d=>setRents(d.rent||[])).catch(()=>{});
     api("/immo/properties/"+pid+"/expenses?year="+yr).then(d=>setExps(d.expenses||[])).catch(()=>{});
     api("/immo/properties/"+pid+"/documents").then(d=>setDocs(d.documents||[])).catch(()=>{});
   };
   const dlPdf=async(pid)=>{try{const r=await fetch(API+"/immo/properties/"+pid+"/report/pdf?year="+year,{headers:{Authorization:"Bearer "+_tk()}});if(!r.ok){alert("PDF "+r.status);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="immobilie_"+pid+"_"+year+".pdf";a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(u);},1500);}catch(e){alert(e.message);}};
   // ---- forms ----
-  const addProp=async(name,adresse,einheiten,kaufpreis)=>{if(!name)return;await api("/immo/properties",{method:"POST",body:JSON.stringify({name,adresse,einheiten:parseInt(einheiten)||1,kaufpreis:parseFloat(kaufpreis)||null})});setShowNewProp(false);loadProps();};
-  const addTenant=async(b)=>{await api("/immo/tenants",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});refreshDetail(sel.id,year);};
+  const addProp=async(name,adresse,kaufpreis)=>{if(!name)return;await api("/immo/properties",{method:"POST",body:JSON.stringify({name,adresse,kaufpreis:parseFloat(kaufpreis)||null})});setShowNewProp(false);loadProps();};
+  const addUnit=async(b)=>{await api("/immo/units",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});refreshDetail(sel.id,year);};
+  const addTenancy=async(b)=>{await api("/immo/tenancies",{method:"POST",body:JSON.stringify(b)});refreshDetail(sel.id,year);};
   const addRent=async(b)=>{await api("/immo/rent",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});refreshDetail(sel.id,year);};
   const addExp=async(b)=>{await api("/immo/expenses",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});refreshDetail(sel.id,year);};
   const delItem=async(kind,id)=>{if(!confirm(_L("Löschen?","Sil?","Delete?")))return;await api("/immo/"+kind+"/"+id,{method:"DELETE"});refreshDetail(sel.id,year);};
@@ -2354,6 +2353,9 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const setYr=(y)=>{setYear(y);if(sel)refreshDetail(sel.id,y);};
   const _btn=(bg)=>({background:bg,color:"#fff",border:"none",borderRadius:10,padding:"12px 18px",fontSize:14,fontWeight:700,cursor:"pointer"});
   const _inp={...css.input,marginBottom:8,width:"100%"};
+  const S=acc?acc.summe:null;
+  const units=acc?acc.units:[];
+  const tncs=acc?acc.tenancies:[];
   // ============ LIST VIEW ============
   if(!sel){
     return (<div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -2361,16 +2363,15 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
         <div><h2 style={{fontSize:22,fontWeight:700,color:theme.text,margin:0}}>🏠 {_L("Immobilien","Gayrimenkul","Properties")}</h2><p style={{color:theme.textMuted,fontSize:14,margin:"4px 0 0"}}>{props_.length} {_L("Immobilie(n)","mülk","properties")}</p></div>
         <button style={_btn("linear-gradient(135deg,#10b981,#059669)")} onClick={()=>setShowNewProp(!showNewProp)}>➕ {_L("Neue Immobilie","Yeni mülk","New property")}</button>
       </div>
-      {showNewProp&&(()=>{let n,a,u,k;return(<div style={{...css.card,maxWidth:480}}>
+      {showNewProp&&(()=>{let n,a,k;return(<div style={{...css.card,maxWidth:480}}>
         <input style={_inp} placeholder={_L("Name (z.B. Musterstr. 12)","Ad","Name")} onChange={e=>n=e.target.value}/>
         <input style={_inp} placeholder={_L("Adresse","Adres","Address")} onChange={e=>a=e.target.value}/>
-        <input style={_inp} type="number" placeholder={_L("Einheiten (Anzahl)","Daire sayısı","Units")} defaultValue="1" onChange={e=>u=e.target.value}/>
-        <input style={_inp} type="number" placeholder={_L("Kaufpreis (optional)","Alış fiyatı","Purchase price")} onChange={e=>k=e.target.value}/>
-        <button style={_btn("#10b981")} onClick={()=>addProp(n,a,u,k)}>💾 {_L("Speichern","Kaydet","Save")}</button>
+        <input style={_inp} type="number" placeholder={_L("Kaufpreis (optional, für Rendite)","Alış fiyatı","Purchase price")} onChange={e=>k=e.target.value}/>
+        <button style={_btn("#10b981")} onClick={()=>addProp(n,a,k)}>💾 {_L("Speichern","Kaydet","Save")}</button>
       </div>);})()}
       {props_.map(p=><div key={p.id} style={{...css.card,cursor:"pointer"}} onClick={()=>openProp(p)}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
-          <div><div style={{fontSize:16,fontWeight:700,color:theme.text}}>{p.name}</div><div style={{fontSize:13,color:theme.textMuted}}>{p.adresse||""} · {p.einheiten} {_L("Einheiten","daire","units")}</div></div>
+          <div><div style={{fontSize:16,fontWeight:700,color:theme.text}}>{p.name}</div><div style={{fontSize:13,color:theme.textMuted}}>{p.adresse||""}</div></div>
           <span style={{fontSize:13,color:theme.accent}}>→</span>
         </div>
       </div>)}
@@ -2378,7 +2379,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
     </div>);
   }
   // ============ DETAIL VIEW ============
-  const TABS=[["uebersicht","📊 "+_L("Übersicht","Özet","Overview")],["mieter","👤 "+_L("Mieter","Kiracı","Tenants")],["einnahmen","📈 "+_L("Einnahmen","Gelir","Income")],["ausgaben","📉 "+_L("Ausgaben","Gider","Expenses")],["dokumente","📄 "+_L("Dokumente","Belgeler","Documents")]];
+  const TABS=[["uebersicht","📊 "+_L("Übersicht","Özet","Overview")],["einheiten","🏘️ "+_L("Einheiten & Mieter","Daire & Kiracı","Units & Tenants")],["einnahmen","📈 "+_L("Mieteingang","Kira girişi","Rent")],["ausgaben","📉 "+_L("Ausgaben","Gider","Expenses")],["dokumente","📄 "+_L("Dokumente","Belgeler","Documents")]];
   return (<div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
       <button style={{...css.btnOutline,padding:"8px 12px"}} onClick={()=>{setSel(null);loadProps();}}>← {_L("Zurück","Geri","Back")}</button>
@@ -2387,31 +2388,47 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
     </div>
     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={tab===k?{...css.btn(theme.accent),padding:"8px 12px",fontSize:13,boxShadow:"none"}:{...css.btnOutline,padding:"8px 12px",fontSize:13}}>{l}</button>)}</div>
     <div style={{display:"flex",gap:6,alignItems:"center"}}><span style={{fontSize:12,color:theme.textDim}}>{_L("Jahr","Yıl","Year")}:</span>{[year-1,year,year+1].map(y=><button key={y} onClick={()=>setYr(y)} style={y===year?{...css.btn("#6366f1"),padding:"5px 10px",fontSize:12,boxShadow:"none"}:{...css.btnOutline,padding:"5px 10px",fontSize:12}}>{y}</button>)}</div>
-    {tab==="uebersicht"&&dash&&<div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:12}}>
-        <div style={{...css.card,borderLeft:"3px solid "+theme.accent}}><div style={{fontSize:12,color:theme.textMuted}}>📈 {_L("Einnahmen","Gelir","Income")}</div><div style={{fontSize:20,fontWeight:700,color:theme.accent,fontFamily:mono}}>{_e(dash.einnahmen)}</div></div>
-        <div style={{...css.card,borderLeft:"3px solid "+theme.danger}}><div style={{fontSize:12,color:theme.textMuted}}>📉 {_L("Ausgaben","Gider","Expenses")}</div><div style={{fontSize:20,fontWeight:700,color:theme.danger,fontFamily:mono}}>{_e(dash.ausgaben)}</div></div>
-        <div style={{...css.card,borderLeft:"3px solid #6366f1"}}><div style={{fontSize:12,color:theme.textMuted}}>💰 {_L("Gewinn","Kâr","Profit")}</div><div style={{fontSize:20,fontWeight:700,color:dash.gewinn>=0?theme.accent:theme.danger,fontFamily:mono}}>{_e(dash.gewinn)}</div></div>
-        <div style={{...css.card}}><div style={{fontSize:12,color:theme.textMuted}}>🏠 {_L("Einheiten","Daire","Units")}</div><div style={{fontSize:20,fontWeight:700,color:theme.text}}>{dash.belegt}/{dash.einheiten} <span style={{fontSize:12,color:theme.textMuted}}>{_L("belegt","dolu","occ.")}</span></div></div>
+    {tab==="uebersicht"&&S&&<div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:12}}>
+        <div style={{...css.card,borderLeft:"3px solid "+theme.accent}}><div style={{fontSize:12,color:theme.textMuted}}>📈 {_L("Ist-Miete","Alınan kira","Received")}</div><div style={{fontSize:20,fontWeight:700,color:theme.accent,fontFamily:mono}}>{_e(S.ist_miete)}</div><div style={{fontSize:11,color:theme.textDim}}>{_L("Soll","Beklenen","Expected")} {_e(S.soll_miete)}</div></div>
+        <div style={{...css.card,borderLeft:"3px solid #f59e0b"}}><div style={{fontSize:12,color:theme.textMuted}}>🕳️ {_L("Leerstand","Boşluk","Vacancy")}</div><div style={{fontSize:20,fontWeight:700,color:"#f59e0b",fontFamily:mono}}>{_e(S.leerstandsverlust)}</div><div style={{fontSize:11,color:theme.textDim}}>{S.leerstand_monate} {_L("Monate","ay","months")}</div></div>
+        <div style={{...css.card,borderLeft:"3px solid "+theme.danger}}><div style={{fontSize:12,color:theme.textMuted}}>📉 {_L("Ausgaben","Gider","Expenses")}</div><div style={{fontSize:20,fontWeight:700,color:theme.danger,fontFamily:mono}}>{_e(S.ausgaben)}</div></div>
+        <div style={{...css.card,borderLeft:"3px solid #6366f1"}}><div style={{fontSize:12,color:theme.textMuted}}>💰 {_L("Gewinn","Kâr","Profit")}</div><div style={{fontSize:20,fontWeight:700,color:S.gewinn>=0?theme.accent:theme.danger,fontFamily:mono}}>{_e(S.gewinn)}</div>{S.rendite_prozent!=null&&<div style={{fontSize:11,color:theme.textDim}}>{_L("Rendite","Getiri","Yield")} {S.rendite_prozent}%</div>}</div>
+        <div style={{...css.card}}><div style={{fontSize:12,color:theme.textMuted}}>🏠 {_L("Belegung","Doluluk","Occupancy")}</div><div style={{fontSize:20,fontWeight:700,color:theme.text}}>{S.belegungsquote}%</div><div style={{fontSize:11,color:theme.textDim}}>{S.einheiten} {_L("Einheiten","daire","units")}</div></div>
       </div>
-      {dash.fehlende_miete>0&&<div style={{...css.card,background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.3)",marginBottom:12}}>⚠ {_L("Mögliche fehlende Miete","Eksik kira olabilir","Possible missing rent")}: <b>{_e(dash.fehlende_miete)}</b> <span style={{fontSize:12,color:theme.textMuted}}>({_L("Soll/Jahr","Yıllık beklenen","Expected/yr")} {_e(dash.soll_miete_jahr)})</span></div>}
+      {S.zahlungsausfall>0&&<div style={{...css.card,background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",marginBottom:12}}>⚠ {_L("Mietrückstand (Zahlungsausfall)","Kira borcu","Rent arrears")}: <b>{_e(S.zahlungsausfall)}</b></div>}
+      {tncs.length>0&&<div style={{...css.card,marginBottom:12}}><div style={{fontWeight:700,marginBottom:8}}>📋 {_L("Mietenkonto (pro Mieter)","Kiracı bazında hesap","Per-tenant ledger")}</div>
+        <div style={{overflowX:"auto"}}><table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}><thead><tr style={{color:theme.textDim,textAlign:"left"}}><th style={{padding:4}}>{_L("Mieter","Kiracı","Tenant")}</th><th>{_L("Zeitraum","Dönem","Period")}</th><th>{_L("Mon.","Ay","Mo")}</th><th>Soll</th><th>Ist</th><th>{_L("Rückstand","Borç","Arrears")}</th></tr></thead><tbody>
+          {tncs.map(t=><tr key={t.tenancy_id} style={{borderTop:"1px solid "+theme.border}}><td style={{padding:4,fontWeight:600}}>{t.mieter_name}</td><td style={{fontSize:11}}>{t.von}→{t.bis||_L("läuft","devam","ongoing")}</td><td>{t.monate}</td><td>{_e(t.soll)}</td><td style={{color:theme.accent}}>{_e(t.ist)}</td><td style={{color:t.rueckstand>0?theme.danger:theme.textMuted}}>{_e(t.rueckstand)}</td></tr>)}
+        </tbody></table></div></div>}
+      {units.length>0&&<div style={{...css.card,marginBottom:12}}><div style={{fontWeight:700,marginBottom:8}}>🏘️ {_L("Einheiten","Daireler","Units")}</div>
+        {units.map(u=><div key={u.unit_id} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderTop:"1px solid "+theme.border}}><span>{u.name}</span><span style={{color:theme.textMuted}}>{_L("Belegung","Doluluk","Occ")} {u.belegungsquote}% · {_L("Leerstand","Boşluk","Vacancy")} {_e(u.leerstandsverlust)}</span></div>)}
+      </div>}
       <button style={_btn("#6366f1")} onClick={()=>dlPdf(sel.id)}>📄 {_L("Jahresbericht PDF","Yıllık rapor PDF","Annual report PDF")}</button>
     </div>}
-    {tab==="mieter"&&(()=>{let n,m,ka,ed;return(<div>
-      <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Mieter hinzufügen","Kiracı ekle","Add tenant")}</div>
-        <input style={_inp} placeholder={_L("Name","Ad","Name")} onChange={e=>n=e.target.value}/>
-        <input style={_inp} type="number" placeholder={_L("Kaltmiete €/Monat","Kira €/ay","Monthly rent")} onChange={e=>m=e.target.value}/>
-        <input style={_inp} type="number" placeholder={_L("Kaution €","Depozito €","Deposit")} onChange={e=>ka=e.target.value}/>
-        <input style={_inp} type="date" onChange={e=>ed=e.target.value}/>
-        <button style={_btn("#10b981")} onClick={()=>{if(n)addTenant({name:n,kaltmiete:parseFloat(m)||null,kaution:parseFloat(ka)||null,einzug_datum:ed,status:"active"});}}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
-      {tenants.map(t=><div key={t.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><b>{t.name}</b> <span style={{fontSize:12,color:t.status==="active"?theme.accent:theme.textMuted}}>({t.status==="active"?_L("aktiv","aktif","active"):_L("inaktiv","pasif","inactive")})</span><div style={{fontSize:12,color:theme.textMuted}}>{_e(t.kaltmiete)}/{_L("Monat","ay","mo")} · {_L("Kaution","Depozito","Deposit")} {_e(t.kaution)}</div></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("tenants",t.id)}>✕</span></div>)}
-    </div>);})()}
-    {tab==="einnahmen"&&(()=>{let b,d;return(<div>
-      <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Miete erfassen","Kira ekle","Add rent")}</div>
+    {tab==="einheiten"&&<div>
+      {(()=>{let n,s;return(<div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Einheit anlegen","Daire ekle","Add unit")}</div>
+        <input style={_inp} placeholder={_L("Name (z.B. Whg 1, EG links)","Daire adı","Unit name")} onChange={e=>n=e.target.value}/>
+        <input style={_inp} type="number" placeholder={_L("Soll-/Marktmiete €/Monat (für Leerstand)","Hedef kira €/ay","Target rent")} onChange={e=>s=e.target.value}/>
+        <button style={_btn("#10b981")} onClick={()=>{if(n)addUnit({name:n,soll_miete:parseFloat(s)||null});}}>💾 {_L("Speichern","Kaydet","Save")}</button></div>);})()}
+      {units.map(u=><div key={u.unit_id} style={{...css.card,marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{fontWeight:700,fontSize:15}}>🏠 {u.name} <span style={{fontSize:12,fontWeight:400,color:theme.textMuted}}>· {_L("Soll","Hedef","Target")} {_e(u.soll_miete)}/{_L("Mon.","ay","mo")} · {_L("Belegung","Doluluk","Occ")} {u.belegungsquote}%</span></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("units",u.unit_id)}>✕</span></div>
+        <div style={{marginTop:8}}>{tncs.filter(t=>t.unit_id===u.unit_id).map(t=><div key={t.tenancy_id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,padding:"6px 8px",background:theme.surfaceAlt,borderRadius:8,marginBottom:4}}><span>👤 <b>{t.mieter_name}</b> <span style={{color:theme.textMuted,fontSize:12}}>{t.von}→{t.bis||_L("läuft","devam","ongoing")} · {_e(t.kaltmiete)}</span></span><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("tenancies",t.tenancy_id)}>✕</span></div>)}</div>
+        {(()=>{let nm,v,bb,k,ka;return(<div style={{marginTop:8,paddingTop:8,borderTop:"1px dashed "+theme.border}}><div style={{fontSize:12,color:theme.textDim,marginBottom:4}}>➕ {_L("Mieter / Mietzeit","Kiracı / dönem","Tenancy")}</div>
+          <input style={_inp} placeholder={_L("Mieter-Name","Kiracı adı","Tenant name")} onChange={e=>nm=e.target.value}/>
+          <div style={{display:"flex",gap:6}}><input style={{..._inp,flex:1}} type="date" title={_L("Einzug","Giriş","Move-in")} onChange={e=>v=e.target.value}/><input style={{..._inp,flex:1}} type="date" title={_L("Auszug (leer=läuft)","Çıkış","Move-out")} onChange={e=>bb=e.target.value}/></div>
+          <div style={{display:"flex",gap:6}}><input style={{..._inp,flex:1}} type="number" placeholder={_L("Kaltmiete €","Kira €","Rent")} onChange={e=>k=e.target.value}/><input style={{..._inp,flex:1}} type="number" placeholder={_L("Kaution €","Depozito","Deposit")} onChange={e=>ka=e.target.value}/></div>
+          <button style={{..._btn("#10b981"),padding:"8px 14px",fontSize:13}} onClick={()=>{if(nm)addTenancy({unit_id:u.unit_id,mieter_name:nm,von:v||null,bis:bb||null,kaltmiete:parseFloat(k)||null,kaution:parseFloat(ka)||null});}}>💾 {_L("Mieter speichern","Kiracı kaydet","Save tenant")}</button></div>);})()}
+      </div>)}
+      {!units.length&&<div style={{...css.card,textAlign:"center",color:theme.textMuted}}>{_L("Lege zuerst eine Einheit an, dann Mieter mit Ein-/Auszug.","Önce daire ekle.","Add a unit first.")}</div>}
+    </div>}
+    {tab==="einnahmen"&&(()=>{let b,d,tid="";return(<div>
+      <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Mieteingang erfassen","Kira girişi","Add rent payment")}</div>
+        <select style={_inp} defaultValue="" onChange={e=>tid=e.target.value}><option value="">{_L("— Mieter wählen —","— Kiracı seç —","— Select tenant —")}</option>{tncs.map(t=><option key={t.tenancy_id} value={t.tenancy_id}>{t.mieter_name} ({t.von}→{t.bis||"…"})</option>)}</select>
         <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} onChange={e=>b=e.target.value}/>
         <input style={_inp} type="date" defaultValue={new Date().toISOString().slice(0,10)} onChange={e=>d=e.target.value}/>
-        <button style={_btn("#10b981")} onClick={()=>{if(b)addRent({betrag:parseFloat(b),datum:d||new Date().toISOString().slice(0,10)});}}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
-      {rents.map(r=><div key={r.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><b style={{color:theme.accent}}>{_e(r.betrag)}</b> <span style={{fontSize:12,color:theme.textMuted}}>{r.datum}</span></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("rent",r.id)}>✕</span></div>)}
+        <button style={_btn("#10b981")} onClick={()=>{if(b)addRent({tenancy_id:tid?parseInt(tid):null,betrag:parseFloat(b),datum:d||new Date().toISOString().slice(0,10)});}}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
+      {rents.map(r=>{const tn=tncs.find(t=>t.tenancy_id===r.tenancy_id);return(<div key={r.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><b style={{color:theme.accent}}>{_e(r.betrag)}</b> <span style={{fontSize:12,color:theme.textMuted}}>{r.datum}{tn?" · "+tn.mieter_name:""}</span></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("rent",r.id)}>✕</span></div>);})}
     </div>);})()}
     {tab==="ausgaben"&&(()=>{let b,d,k="nebenkosten",be;return(<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Ausgabe erfassen","Gider ekle","Add expense")}</div>
