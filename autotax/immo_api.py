@@ -10,6 +10,7 @@ Plus per-property dashboard (year) and a one-click annual PDF report.
 from __future__ import annotations
 
 import io
+from calendar import monthrange
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -20,7 +21,8 @@ from pydantic import BaseModel, Field
 from autotax import storage
 from autotax.auth import get_current_user
 from autotax.db import SessionLocal
-from autotax.models import ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, ImmoDocument
+from autotax.models import (ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, ImmoDocument,
+                            ImmoUnit, ImmoTenancy)
 
 router = APIRouter(prefix="/immo", tags=["immobilien"])
 
@@ -68,7 +70,7 @@ def _tenant_dict(t):
 
 
 def _rent_dict(r):
-    return {"id": r.id, "property_id": r.property_id, "tenant_id": r.tenant_id,
+    return {"id": r.id, "property_id": r.property_id, "tenant_id": r.tenant_id, "tenancy_id": r.tenancy_id,
             "datum": str(r.datum) if r.datum else "", "betrag": r.betrag, "notiz": r.notiz or ""}
 
 
@@ -124,6 +126,7 @@ class TenantPatch(BaseModel):
 class RentIn(BaseModel):
     property_id: int
     tenant_id: Optional[int] = None
+    tenancy_id: Optional[int] = None
     datum: Optional[str] = None
     betrag: float = 0.0
     notiz: Optional[str] = None
@@ -131,6 +134,7 @@ class RentIn(BaseModel):
 
 class RentPatch(BaseModel):
     tenant_id: Optional[int] = None
+    tenancy_id: Optional[int] = None
     datum: Optional[str] = None
     betrag: Optional[float] = None
     notiz: Optional[str] = None
@@ -295,8 +299,8 @@ def create_rent(body: RentIn, user: dict = Depends(get_current_user)):
     db = SessionLocal()
     try:
         _own_property(db, _uid(user), body.property_id)
-        r = ImmoRent(property_id=body.property_id, tenant_id=body.tenant_id, user_id=_uid(user),
-                     datum=_pdate(body.datum) or date.today(), betrag=body.betrag, notiz=body.notiz)
+        r = ImmoRent(property_id=body.property_id, tenant_id=body.tenant_id, tenancy_id=body.tenancy_id,
+                     user_id=_uid(user), datum=_pdate(body.datum) or date.today(), betrag=body.betrag, notiz=body.notiz)
         db.add(r); db.commit(); db.refresh(r)
         return {"success": True, **_rent_dict(r)}
     finally:
@@ -311,6 +315,7 @@ def update_rent(rid: int, body: RentPatch, user: dict = Depends(get_current_user
         if not r:
             raise HTTPException(status_code=404, detail="Mietzahlung nicht gefunden")
         if body.tenant_id is not None: r.tenant_id = body.tenant_id
+        if body.tenancy_id is not None: r.tenancy_id = body.tenancy_id
         if body.datum is not None: r.datum = _pdate(body.datum)
         if body.betrag is not None: r.betrag = body.betrag
         if body.notiz is not None: r.notiz = body.notiz
@@ -557,5 +562,268 @@ def property_report_pdf(pid: int, year: Optional[int] = Query(None), user: dict 
         buf.seek(0)
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": f'attachment; filename="immobilie_{pid}_{y}.pdf"'})
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  PRO ACCOUNTING ENGINE — units + tenancies (period-based, per-tenant)
+# ══════════════════════════════════════════════════════════════════════
+def _notdel(c):
+    return (c.is_deleted == False) | (c.is_deleted == None)  # noqa: E712
+
+
+def _own_unit(db, uid, uid_):
+    u = db.query(ImmoUnit).filter(ImmoUnit.id == uid_, ImmoUnit.user_id == uid, _notdel(ImmoUnit)).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="Einheit nicht gefunden")
+    return u
+
+
+def _unit_dict(u):
+    return {"id": u.id, "property_id": u.property_id, "name": u.name or "", "wohnflaeche": u.wohnflaeche,
+            "soll_miete": u.soll_miete}
+
+
+def _tenancy_dict(t):
+    return {"id": t.id, "unit_id": t.unit_id, "mieter_name": t.mieter_name,
+            "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
+            "kaltmiete": t.kaltmiete, "kaution": t.kaution, "nk_voraus": t.nk_voraus}
+
+
+def _tenancy_active_in_month(t, y, m):
+    mstart = date(y, m, 1)
+    mend = date(y, m, monthrange(y, m)[1])
+    von = t.von or date(1900, 1, 1)
+    bis = t.bis or date(2999, 12, 31)
+    return von <= mend and bis >= mstart
+
+
+def _months_active_in_year(t, y):
+    return sum(1 for m in range(1, 13) if _tenancy_active_in_month(t, y, m))
+
+
+class UnitIn(BaseModel):
+    property_id: int
+    name: Optional[str] = None
+    wohnflaeche: Optional[float] = None
+    soll_miete: Optional[float] = None
+
+
+class UnitPatch(BaseModel):
+    name: Optional[str] = None
+    wohnflaeche: Optional[float] = None
+    soll_miete: Optional[float] = None
+
+
+class TenancyIn(BaseModel):
+    unit_id: int
+    mieter_name: str = Field(..., min_length=1, max_length=200)
+    von: Optional[str] = None
+    bis: Optional[str] = None
+    kaltmiete: Optional[float] = None
+    kaution: Optional[float] = None
+    nk_voraus: Optional[float] = None
+
+
+class TenancyPatch(BaseModel):
+    mieter_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    von: Optional[str] = None
+    bis: Optional[str] = None
+    kaltmiete: Optional[float] = None
+    kaution: Optional[float] = None
+    nk_voraus: Optional[float] = None
+
+
+# ── UNITS ─────────────────────────────────────────────────────────────
+@router.get("/properties/{pid}/units")
+def list_units(pid: int, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        _own_property(db, _uid(user), pid)
+        rows = db.query(ImmoUnit).filter(ImmoUnit.property_id == pid, ImmoUnit.user_id == _uid(user),
+                                         _notdel(ImmoUnit)).order_by(ImmoUnit.id).all()
+        return {"units": [_unit_dict(u) for u in rows]}
+    finally:
+        db.close()
+
+
+@router.post("/units")
+def create_unit(body: UnitIn, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        _own_property(db, _uid(user), body.property_id)
+        u = ImmoUnit(property_id=body.property_id, user_id=_uid(user), name=body.name,
+                     wohnflaeche=body.wohnflaeche, soll_miete=body.soll_miete)
+        db.add(u); db.commit(); db.refresh(u)
+        return {"success": True, **_unit_dict(u)}
+    finally:
+        db.close()
+
+
+@router.patch("/units/{uid_}")
+def update_unit(uid_: int, body: UnitPatch, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        u = _own_unit(db, _uid(user), uid_)
+        if body.name is not None: u.name = body.name
+        if body.wohnflaeche is not None: u.wohnflaeche = body.wohnflaeche
+        if body.soll_miete is not None: u.soll_miete = body.soll_miete
+        db.commit(); db.refresh(u)
+        return {"success": True, **_unit_dict(u)}
+    finally:
+        db.close()
+
+
+@router.delete("/units/{uid_}")
+def delete_unit(uid_: int, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        u = _own_unit(db, _uid(user), uid_)
+        u.is_deleted = True; u.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"success": True}
+    finally:
+        db.close()
+
+
+# ── TENANCIES (Mietverhältnisse) ──────────────────────────────────────
+@router.get("/units/{uid_}/tenancies")
+def list_tenancies(uid_: int, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        _own_unit(db, _uid(user), uid_)
+        rows = db.query(ImmoTenancy).filter(ImmoTenancy.unit_id == uid_, ImmoTenancy.user_id == _uid(user),
+                                            _notdel(ImmoTenancy)).order_by(ImmoTenancy.von).all()
+        return {"tenancies": [_tenancy_dict(t) for t in rows]}
+    finally:
+        db.close()
+
+
+@router.post("/tenancies")
+def create_tenancy(body: TenancyIn, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        _own_unit(db, _uid(user), body.unit_id)
+        t = ImmoTenancy(unit_id=body.unit_id, user_id=_uid(user), mieter_name=body.mieter_name.strip(),
+                        von=_pdate(body.von), bis=_pdate(body.bis), kaltmiete=body.kaltmiete,
+                        kaution=body.kaution, nk_voraus=body.nk_voraus)
+        db.add(t); db.commit(); db.refresh(t)
+        return {"success": True, **_tenancy_dict(t)}
+    finally:
+        db.close()
+
+
+@router.patch("/tenancies/{tid}")
+def update_tenancy(tid: int, body: TenancyPatch, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == _uid(user)).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        if body.mieter_name is not None: t.mieter_name = body.mieter_name.strip()
+        if body.von is not None: t.von = _pdate(body.von)
+        if body.bis is not None: t.bis = _pdate(body.bis)
+        if body.kaltmiete is not None: t.kaltmiete = body.kaltmiete
+        if body.kaution is not None: t.kaution = body.kaution
+        if body.nk_voraus is not None: t.nk_voraus = body.nk_voraus
+        db.commit(); db.refresh(t)
+        return {"success": True, **_tenancy_dict(t)}
+    finally:
+        db.close()
+
+
+@router.delete("/tenancies/{tid}")
+def delete_tenancy(tid: int, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == _uid(user)).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        t.is_deleted = True; t.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"success": True}
+    finally:
+        db.close()
+
+
+# ── THE ENGINE: period-based accounting per property/year ──────────────
+def _accounting(db, uid, pid, year):
+    p = db.query(ImmoProperty).filter(ImmoProperty.id == pid, ImmoProperty.user_id == uid).first()
+    units = db.query(ImmoUnit).filter(ImmoUnit.property_id == pid, ImmoUnit.user_id == uid,
+                                      _notdel(ImmoUnit)).order_by(ImmoUnit.id).all()
+    uids = [u.id for u in units]
+    if uids:
+        tenancies = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy),
+                                                 ImmoTenancy.unit_id.in_(uids)).all()
+    else:
+        tenancies = []
+    rents = db.query(ImmoRent).filter(ImmoRent.property_id == pid, ImmoRent.user_id == uid, _notdel(ImmoRent),
+                                      ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all()
+    ist_by_tenancy = {}
+    ist_total = 0.0
+    for r in rents:
+        ist_total += float(r.betrag or 0)
+        if r.tenancy_id:
+            ist_by_tenancy[r.tenancy_id] = ist_by_tenancy.get(r.tenancy_id, 0) + float(r.betrag or 0)
+    unit_results = []
+    tenancy_results = []
+    total_soll = total_occ = total_vac = total_leer = 0.0
+    for u in units:
+        u_ten = [t for t in tenancies if t.unit_id == u.id]
+        occ = vac = 0
+        soll_u = 0.0
+        for m in range(1, 13):
+            act = [t for t in u_ten if _tenancy_active_in_month(t, year, m)]
+            if act:
+                occ += 1
+                soll_u += float(act[0].kaltmiete or 0)
+            else:
+                vac += 1
+        leer = vac * float(u.soll_miete or 0)
+        unit_results.append({"unit_id": u.id, "name": u.name or ("Whg " + str(u.id)),
+                             "soll_miete": u.soll_miete, "occupied_months": occ, "vacant_months": vac,
+                             "belegungsquote": round(occ / 12 * 100, 1), "soll": round(soll_u, 2),
+                             "leerstandsverlust": round(leer, 2)})
+        total_soll += soll_u; total_occ += occ; total_vac += vac; total_leer += leer
+        for t in u_ten:
+            ma = _months_active_in_year(t, year)
+            soll_t = ma * float(t.kaltmiete or 0)
+            ist_t = round(ist_by_tenancy.get(t.id, 0), 2)
+            tenancy_results.append({"tenancy_id": t.id, "unit_id": u.id, "mieter_name": t.mieter_name,
+                                    "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
+                                    "kaltmiete": t.kaltmiete, "monate": ma, "soll": round(soll_t, 2),
+                                    "ist": ist_t, "rueckstand": round(max(0, soll_t - ist_t), 2),
+                                    "kaution": t.kaution})
+    exps = db.query(ImmoExpense).filter(ImmoExpense.property_id == pid, ImmoExpense.user_id == uid, _notdel(ImmoExpense),
+                                        ImmoExpense.datum >= date(year, 1, 1), ImmoExpense.datum <= date(year, 12, 31)).all()
+    by_kat = {}
+    for e in exps:
+        by_kat[e.kategorie] = round(by_kat.get(e.kategorie, 0) + float(e.betrag or 0), 2)
+    ausgaben = round(sum(by_kat.values()), 2)
+    gewinn = round(ist_total - ausgaben, 2)
+    rendite = round(gewinn / float(p.kaufpreis) * 100, 2) if (p and p.kaufpreis) else None
+    soll_sum = round(sum(t["soll"] for t in tenancy_results), 2)
+    ist_sum = round(sum(t["ist"] for t in tenancy_results), 2)
+    zahlungsausfall = round(max(0, soll_sum - ist_sum), 2)
+    total_unit_months = (len(units) * 12) or 1
+    return {
+        "year": year, "property": _prop_dict(p) if p else None,
+        "summe": {"soll_miete": round(total_soll, 2), "ist_miete": round(ist_total, 2),
+                  "leerstandsverlust": round(total_leer, 2), "zahlungsausfall": zahlungsausfall,
+                  "ausgaben": ausgaben, "gewinn": gewinn, "rendite_prozent": rendite,
+                  "belegungsquote": round(total_occ / total_unit_months * 100, 1),
+                  "leerstand_monate": int(total_vac), "einheiten": len(units)},
+        "ausgaben_by_kategorie": by_kat, "units": unit_results, "tenancies": tenancy_results,
+    }
+
+
+@router.get("/properties/{pid}/accounting")
+def property_accounting(pid: int, year: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        _own_property(db, _uid(user), pid)
+        y = year or datetime.now(timezone.utc).year
+        return _accounting(db, _uid(user), pid, y)
     finally:
         db.close()
