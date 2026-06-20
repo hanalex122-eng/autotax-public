@@ -868,44 +868,78 @@ class InvoiceMetadata(Base):
 
 
 # ============================================================
-# IMMOBILIEN MVP — küçük ev sahibi (1-5 daire). Additive + izole:
-# create_all bu 3 tabloyu otomatik oluşturur, mevcut tablolara dokunmaz.
+# IMMOBILIEN PRO MVP — küçük ev sahibi (1-20 daire). Additive + izole:
+# create_all bu 5 tabloyu otomatik oluşturur, mevcut tablolara dokunmaz.
 # OCR/Vision/Parser/VAT/Kassenbuch/Rechnungen ile ALAKASI YOK.
 # ============================================================
-class ImmoObjekt(Base):
-    __tablename__ = "immo_objekt"
+class ImmoProperty(Base):
+    __tablename__ = "immo_property"
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String(200), nullable=False)
     adresse = Column(String(400), nullable=True)
+    kaufdatum = Column(Date, nullable=True)
+    kaufpreis = Column(Float, nullable=True)
+    notiz = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
 
 
-class ImmoMieter(Base):
-    __tablename__ = "immo_mieter"
+class ImmoTenant(Base):
+    __tablename__ = "immo_tenant"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    objekt_id = Column(Integer, ForeignKey("immo_objekt.id"), nullable=False, index=True)
+    property_id = Column(Integer, ForeignKey("immo_property.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String(200), nullable=False)
     einzug_datum = Column(Date, nullable=True)
+    auszug_datum = Column(Date, nullable=True)
     kaltmiete = Column(Float, nullable=True)
+    kaution = Column(Float, nullable=True)
+    status = Column(String(10), nullable=False, default="active")   # active | inactive
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
 
 
-class ImmoBuchung(Base):
-    __tablename__ = "immo_buchung"
+class ImmoRent(Base):
+    __tablename__ = "immo_rent"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    objekt_id = Column(Integer, ForeignKey("immo_objekt.id"), nullable=False, index=True)
+    property_id = Column(Integer, ForeignKey("immo_property.id"), nullable=False, index=True)
+    tenant_id = Column(Integer, ForeignKey("immo_tenant.id"), nullable=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     datum = Column(Date, nullable=True)
-    richtung = Column(String(10), nullable=False)   # income | expense
-    typ = Column(String(20), nullable=False)        # miete | nebenkosten | reparatur | versicherung | zinsen
+    betrag = Column(Float, nullable=False, default=0.0)
+    notiz = Column(String(300), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class ImmoExpense(Base):
+    __tablename__ = "immo_expense"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    property_id = Column(Integer, ForeignKey("immo_property.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    datum = Column(Date, nullable=True)
+    kategorie = Column(String(20), nullable=False)   # utilities|repairs|insurance|property_tax|interest|management|other
     betrag = Column(Float, nullable=False, default=0.0)
     beschreibung = Column(String(300), nullable=True)
+    document_id = Column(Integer, nullable=True)      # optional link to immo_document (no hard FK; additive)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class ImmoDocument(Base):
+    __tablename__ = "immo_document"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    property_id = Column(Integer, ForeignKey("immo_property.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    typ = Column(String(20), nullable=True)          # contract|utility|insurance|tax|repair|other
+    filename = Column(String(300), nullable=True)
+    file_path = Column(String(400), nullable=True)
+    file_content_type = Column(String(100), nullable=True)
+    uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
