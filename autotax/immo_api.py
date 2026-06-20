@@ -943,3 +943,119 @@ def immo_dashboard(year: Optional[int] = Query(None), user: dict = Depends(get_c
         return _portfolio(db, _uid(user), year or datetime.now(timezone.utc).year)
     finally:
         db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  COCKPIT — decision-support layer (score, actions, ranking, risk).
+#  Pure derivation on top of the engine; NO accounting formula changes.
+# ══════════════════════════════════════════════════════════════════════
+_MON_DE = ["", "Jan", "Feb", "März", "Apr", "Mai", "Juni", "Juli", "Aug", "Sep", "Okt", "Nov", "Dez"]
+
+
+def _risk_from_months(m):
+    m = m or 0
+    return "high" if m >= 2 else ("mid" if m >= 1 else "low")
+
+
+def _days_since(s, today):
+    if not s:
+        return None
+    try:
+        return (today - datetime.strptime(s, "%Y-%m-%d").date()).days
+    except ValueError:
+        return None
+
+
+def _cockpit(db, uid, year):
+    base = _portfolio(db, uid, year)
+    P, F = base["portfolio"], base["financial"]
+    today = date.today()
+    soll = F["soll"] or 0
+    # ── Portfolio score (0-100) — derived from existing engine numbers ──
+    belegung = P["occupancy_rate"]
+    inkasso = min(100.0, (F["ist"] / soll * 100) if soll else 100.0)
+    leer_den = soll + F["leerstandsverlust"]
+    leerstand_sc = 100.0 - min(100.0, (F["leerstandsverlust"] / leer_den * 100) if leer_den else 0.0)
+    schulden_sc = 100.0 - min(100.0, (F["rueckstand"] / soll * 100) if soll else 0.0)
+    rend = F["rendite"]
+    rendite_sc = 50.0 if rend is None else min(100.0, max(0.0, rend * 15))
+    total = round(0.30 * belegung + 0.25 * inkasso + 0.15 * leerstand_sc + 0.10 * schulden_sc + 0.20 * rendite_sc)
+    score = {"total": total, "color": "green" if total >= 80 else ("orange" if total >= 60 else "red"),
+             "components": {"belegung": round(belegung), "inkasso": round(inkasso), "leerstand": round(leerstand_sc),
+                            "schulden": round(schulden_sc), "rendite": round(rendite_sc)}}
+    # ── Vacancy enriched (days + risk) ──
+    vacancy = []
+    for v in base["top_vacancies"]:
+        dv = _days_since(v.get("empty_since"), today)
+        risk = "high" if ((dv or 0) >= 60 or v["loss"] >= 3000) else ("mid" if (dv or 0) >= 20 else "low")
+        vacancy.append({**v, "days_vacant": dv, "risk": risk})
+    # ── Tenant risk ──
+    tenant_risk = [{**d, "risk": _risk_from_months(d.get("months_overdue"))} for d in base["top_debtors"]]
+    # ── Property ranking + trend (year vs year-1) ──
+    props = db.query(ImmoProperty).filter(ImmoProperty.user_id == uid, _notdel(ImmoProperty)).all()
+    ranking = []
+    gewinn_items = []
+    for p in props:
+        a = _accounting(db, uid, p.id, year)["summe"]
+        a0 = _accounting(db, uid, p.id, year - 1)["summe"]
+        g, g0 = a["gewinn"], a0["gewinn"]
+        trend = "up" if g > g0 + 1 else ("down" if g < g0 - 1 else "flat")
+        col = "green" if (g > 0 and a["belegungsquote"] >= 80) else ("red" if (a["belegungsquote"] < 60 or g < 0) else "orange")
+        ranking.append({"property_id": p.id, "name": p.name, "gewinn": g, "trend": trend,
+                        "color": col, "belegung": a["belegungsquote"]})
+        gewinn_items.append({"name": p.name, "value": g})
+    ranking.sort(key=lambda x: -x["gewinn"])
+    gewinn_items.sort(key=lambda x: -x["value"])
+    # ── Actions (Heute wichtig) ──
+    actions = []
+    for v in vacancy:
+        actions.append({"severity": "red" if v["risk"] == "high" else "orange", "typ": "vacancy",
+                        "text": "%s · %s Tage leer · −%.0f€" % (v["unit"], v["days_vacant"] if v["days_vacant"] is not None else "?", v["loss"]),
+                        "unit": v["unit"], "property": v.get("property", "")})
+    for d in tenant_risk:
+        actions.append({"severity": "red" if d["risk"] == "high" else "orange", "typ": "debt",
+                        "text": "%s schuldet %.0f€ · %s Mon" % (d["tenant"], d["debt"], d.get("months_overdue") if d.get("months_overdue") is not None else "?"),
+                        "tenant": d["tenant"]})
+    for c in base["contracts_ending"]:
+        dleft = None
+        try:
+            dleft = (datetime.strptime(c["bis"], "%Y-%m-%d").date() - today).days
+        except ValueError:
+            pass
+        actions.append({"severity": "orange", "typ": "contract_ending",
+                        "text": "Vertrag %s (%s) endet in %s Tagen" % (c.get("unit", ""), c["tenant"], dleft if dleft is not None else "?"),
+                        "tenant": c["tenant"]})
+    # missing rent for current month (only when viewing current year)
+    if year == today.year:
+        cm = today.month
+        pids = [p.id for p in props]
+        units = db.query(ImmoUnit).filter(ImmoUnit.user_id == uid, _notdel(ImmoUnit), ImmoUnit.property_id.in_(pids)).all() if pids else []
+        uids2 = [u.id for u in units]
+        tens = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy), ImmoTenancy.unit_id.in_(uids2)).all() if uids2 else []
+        cm_rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent),
+                                             ImmoRent.datum >= date(year, cm, 1),
+                                             ImmoRent.datum <= date(year, cm, monthrange(year, cm)[1])).all() if pids else []
+        paid = set(r.tenancy_id for r in cm_rents if r.tenancy_id)
+        for t in tens:
+            if _tenancy_active_in_month(t, year, cm) and t.id not in paid:
+                actions.append({"severity": "orange", "typ": "missing_rent",
+                                "text": "Miete %s fehlt · %s" % (_MON_DE[cm], t.mieter_name), "tenant": t.mieter_name})
+    actions.sort(key=lambda a: 0 if a["severity"] == "red" else 1)
+    kpi = {
+        "gewinn": {"total": F["gewinn"], "items": gewinn_items},
+        "leerstand": {"total": F["leerstandsverlust"], "items": vacancy},
+        "rueckstand": {"total": F["rueckstand"], "items": tenant_risk},
+        "belegung": {"occupied": P["occupied"], "vacant": P["vacant"], "rate": P["occupancy_rate"]},
+    }
+    return {"year": year, "score": score, "portfolio": P, "financial": F, "actions": actions,
+            "ranking": ranking, "kpi": kpi, "vacancy": vacancy, "tenant_risk": tenant_risk,
+            "charts": base["charts"], "contracts_ending": base["contracts_ending"]}
+
+
+@router.get("/cockpit")
+def immo_cockpit(year: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        return _cockpit(db, _uid(user), year or datetime.now(timezone.utc).year)
+    finally:
+        db.close()
