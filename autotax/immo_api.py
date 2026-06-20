@@ -24,7 +24,9 @@ from autotax.models import ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, Immo
 
 router = APIRouter(prefix="/immo", tags=["immobilien"])
 
-EXPENSE_KATEGORIEN = {"utilities", "repairs", "insurance", "property_tax", "interest", "management", "other"}
+EXPENSE_KATEGORIEN = {"nebenkosten", "strom", "gas", "heizung", "reparaturen",
+                      "schoenheitsrep", "garten", "versicherung", "grundsteuer",
+                      "finanzierung", "sonstige"}
 DOC_TYPEN = {"contract", "utility", "insurance", "tax", "repair", "other"}
 
 
@@ -137,7 +139,7 @@ class RentPatch(BaseModel):
 class ExpenseIn(BaseModel):
     property_id: int
     datum: Optional[str] = None
-    kategorie: str = "other"
+    kategorie: str = "sonstige"
     betrag: float = 0.0
     beschreibung: Optional[str] = None
     document_id: Optional[int] = None
@@ -355,7 +357,7 @@ def create_expense(body: ExpenseIn, user: dict = Depends(get_current_user)):
     db = SessionLocal()
     try:
         _own_property(db, _uid(user), body.property_id)
-        kat = body.kategorie if body.kategorie in EXPENSE_KATEGORIEN else "other"
+        kat = body.kategorie if body.kategorie in EXPENSE_KATEGORIEN else "sonstige"
         e = ImmoExpense(property_id=body.property_id, user_id=_uid(user), datum=_pdate(body.datum) or date.today(),
                         kategorie=kat, betrag=body.betrag, beschreibung=body.beschreibung, document_id=body.document_id)
         db.add(e); db.commit(); db.refresh(e)

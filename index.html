@@ -2320,7 +2320,7 @@ function ChatView(){
 function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
   const _e=n=>"€"+(Number(n)||0).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
-  const KAT=[["repairs",_L("Reparaturen","Tamirat","Repairs")],["utilities",_L("Nebenkosten","Aidat/Yan gider","Utilities")],["insurance",_L("Versicherung","Sigorta","Insurance")],["property_tax",_L("Grundsteuer","Emlak vergisi","Property tax")],["interest",_L("Zinsen","Faiz","Interest")],["management",_L("Verwaltung","Yönetim","Management")],["other",_L("Sonstige","Diğer","Other")]];
+  const KAT=[["nebenkosten",_L("Nebenkosten","Aidat/Yan gider","Utilities")],["strom",_L("Strom","Elektrik","Electricity")],["gas",_L("Gas","Gaz","Gas")],["heizung",_L("Heizung/Warmwasser","Isıtma/Sıcak su","Heating/Hot water")],["reparaturen",_L("Reparaturen","Tamirat","Repairs")],["schoenheitsrep",_L("Schönheitsreparaturen","Boya/Tadilat","Cosmetic repairs")],["garten",_L("Garten","Bahçe","Garden")],["versicherung",_L("Versicherungen","Sigorta","Insurance")],["grundsteuer",_L("Grundsteuer","Emlak vergisi","Property tax")],["finanzierung",_L("Finanzierung","Finansman/Faiz","Financing")],["sonstige",_L("Sonstige","Diğer","Other")]];
   const katLbl=k=>{const f=KAT.find(x=>x[0]===k);return f?f[1]:k;};
   const [props_,setProps]=React.useState([]);
   const [sel,setSel]=React.useState(null);
@@ -2413,9 +2413,9 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
         <button style={_btn("#10b981")} onClick={()=>{if(b)addRent({betrag:parseFloat(b),datum:d||new Date().toISOString().slice(0,10)});}}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
       {rents.map(r=><div key={r.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><b style={{color:theme.accent}}>{_e(r.betrag)}</b> <span style={{fontSize:12,color:theme.textMuted}}>{r.datum}</span></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("rent",r.id)}>✕</span></div>)}
     </div>);})()}
-    {tab==="ausgaben"&&(()=>{let b,d,k="repairs",be;return(<div>
+    {tab==="ausgaben"&&(()=>{let b,d,k="nebenkosten",be;return(<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Ausgabe erfassen","Gider ekle","Add expense")}</div>
-        <select style={_inp} defaultValue="repairs" onChange={e=>k=e.target.value}>{KAT.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
+        <select style={_inp} defaultValue="nebenkosten" onChange={e=>k=e.target.value}>{KAT.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
         <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} onChange={e=>b=e.target.value}/>
         <input style={_inp} placeholder={_L("Beschreibung","Açıklama","Description")} onChange={e=>be=e.target.value}/>
         <input style={_inp} type="date" defaultValue={new Date().toISOString().slice(0,10)} onChange={e=>d=e.target.value}/>
