@@ -2342,6 +2342,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
   // C1: tek tıkla eigene Einnahme — entry_type=income + vendor=Firma (düzenlenebilir)
   const openIncome=()=>{setForm(f=>({...f,entry_type:"income",vendor:f.vendor||(defCompany&&defCompany.company_name)||""}));setShowForm(true);};
   const dlReport=async()=>{const tk=localStorage.getItem("atx_token");try{const r=await fetch(API+"/bookkeeping/report?period="+period,{headers:{Authorization:"Bearer "+tk}});if(!r.ok){alert("PDF Fehler ("+r.status+")");return;}const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="kassenbuch_"+period+".pdf";a.target="_blank";document.body.appendChild(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(url);},1500);}catch(e){alert("PDF fehlgeschlagen: "+(e.message||e));}};
+  const dlListe=async(ord)=>{const tk=localStorage.getItem("atx_token");try{const r=await fetch(API+"/bookkeeping/export/pdf?order="+(ord||"date"),{headers:{Authorization:"Bearer "+tk}});if(!r.ok){alert("PDF Fehler ("+r.status+")");return;}const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="kassenbuch_liste.pdf";a.target="_blank";document.body.appendChild(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(url);},1500);}catch(e){alert("PDF fehlgeschlagen: "+(e.message||e));}};
   const add=async()=>{if(!form.description||!form.gross_amount){alert("Description and amount required");return;}
     try{await api("/bookkeeping",{method:"POST",body:JSON.stringify({...form,gross_amount:parseFloat(form.gross_amount)})});setShowForm(false);setForm({entry_type:"expense",date:new Date().toISOString().slice(0,10),description:"",vendor:"",category:"",gross_amount:"",vat_rate:"19%",payment_method:"",reference:"",notes:""});load();if(triggerRefresh)triggerRefresh();}catch(e){alert(e.message);}};
   const del=async(id)=>{if(!confirm(_t("delete_entry")))return;try{await api("/bookkeeping/"+id,{method:"DELETE"});load();if(triggerRefresh)triggerRefresh();}catch(e){alert(e.message);}};
@@ -2453,6 +2454,7 @@ function BookkeepingView({refreshKey,triggerRefresh,onNav}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,margin:"6px 0 10px"}}>
           <div style={{fontSize:13,color:theme.textMuted}}>{L("Gewählter Zeitraum","Seçilen Dönem","Selected period")}: <strong style={{color:theme.accent,fontSize:14}}>{_rt(period)}</strong></div>
           <button style={{...css.btn("#6366f1"),padding:"8px 14px",fontSize:13}} onClick={dlReport}>📄 {L("PDF Bericht","PDF Rapor","PDF Report")}</button>
+          <button style={{...css.btn("#0ea5e9"),padding:"8px 14px",fontSize:13}} onClick={()=>dlListe("date")}>📋 {L("Liste PDF (alle)","Liste PDF (tümü)","List PDF (all)")}</button>
         </div>
       </div>);
     })()}

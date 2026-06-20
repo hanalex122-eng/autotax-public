@@ -10722,6 +10722,56 @@ def export_bookkeeping_csv(year: int = Query(None), user: dict = Depends(get_act
         db.close()
 
 
+@app.get("/bookkeeping/export/pdf")
+def export_bookkeeping_list_pdf(year: int = Query(None), order: str = Query("date"), user: dict = Depends(get_acting_context)):
+    """Full line-by-line Kassenbuch LIST as a PDF table (the corrected live data,
+    not a summary). Excel-free download. order=date (chronological) | ref (Beleg-Nr)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+    from reportlab.lib.styles import getSampleStyleSheet
+    db = SessionLocal()
+    try:
+        q = db.query(CashEntry).filter(CashEntry.user_id == user["sub"], (CashEntry.is_deleted == False) | (CashEntry.is_deleted == None))
+        if year:
+            q = q.filter(CashEntry.date >= datetime(year, 1, 1), CashEntry.date < datetime(year + 1, 1, 1))
+        entries = q.all()
+        if order == "ref":
+            entries.sort(key=lambda e: (e.reference or "zzz"))
+        else:
+            entries.sort(key=lambda e: (e.date or datetime(9999, 1, 1)))
+        ss = getSampleStyleSheet(); cell = ss["BodyText"]; cell.fontSize = 8; cell.leading = 9
+        title = ss["Title"]; title.fontSize = 13
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=12 * mm, bottomMargin=12 * mm, leftMargin=10 * mm, rightMargin=10 * mm)
+        data = [["Datum", "Beleg", "Beschreibung", "Einnahme", "Ausgabe", "MwSt", "Kategorie"]]
+        tinc = texp = 0.0
+        for e in entries:
+            ds = e.date.strftime("%d.%m.%Y") if e.date else ""
+            inc = safe_float(e.gross_amount) if e.entry_type == "income" else 0.0
+            exp = safe_float(e.gross_amount) if e.entry_type != "income" else 0.0
+            tinc += inc; texp += exp
+            data.append([ds, (e.reference or "")[:12], Paragraph((e.description or "")[:75], cell),
+                         f"{inc:.2f}" if inc else "", f"{exp:.2f}" if exp else "",
+                         f"{safe_float(e.vat_amount):.2f}", safe_category(e.category)])
+        data.append(["", "", "SUMME", f"{tinc:.2f}", f"{texp:.2f}", "", ""])
+        t = Table(data, colWidths=[20 * mm, 16 * mm, 72 * mm, 22 * mm, 22 * mm, 16 * mm, 22 * mm], repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.4, colors.grey), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e2e8f0")), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")]))
+        doc.build([Paragraph(f"Kassenbuch — Liste ({len(entries)} Eintraege)", title), t])
+        buf.seek(0)
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": f'attachment; filename="kassenbuch_liste_{year or "alle"}.pdf"'})
+    except Exception:
+        logger.exception("Bookkeeping list PDF failed")
+        err(500, "PDF failed")
+    finally:
+        db.close()
+
+
 # ============================================================
 # BOOKKEEPING: CSV IMPORT
 # ============================================================
