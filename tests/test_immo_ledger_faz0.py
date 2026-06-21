@@ -96,13 +96,21 @@ def main():
     ok(abs(saldo2 - (-435.0)) < 0.001, f"soft-deleted korrektur excluded -> -435.00 (got {saldo2})")
 
     print("\n[5] Idempotency — partial-unique indexes")
-    # one Sollbuchung per (user, tenancy, jahr, monat): jahr2026/monat1 already exists (e1)
+    # one Sollbuchung per (user, tenancy, KONTO_ART, jahr, monat): miete/2026/1 exists (e1)
     try:
         L.post_entry(db, user_id=UID, typ=L.TYP_SOLLBUCHUNG, betrag=850, jahr=2026, monat=1, tenancy_id=TID)
-        ok(False, "duplicate Sollbuchung (same month) blocked")
+        ok(False, "duplicate Sollbuchung (same konto_art+month) blocked")
     except IntegrityError:
         db.rollback()
-        ok(True, "duplicate Sollbuchung (same month) blocked by uq_immo_ledger_soll")
+        ok(True, "duplicate Sollbuchung (same konto_art+month) blocked by uq_immo_ledger_soll_cat")
+    # DIFFERENT Forderungsart (konto_art) in the SAME month IS allowed (widened index)
+    try:
+        e_nk = L.post_entry(db, user_id=UID, typ=L.TYP_SOLLBUCHUNG, betrag=620, jahr=2026, monat=1,
+                            tenancy_id=TID, konto_art="nebenkosten")
+        ok(e_nk.id is not None, "Sollbuchung nebenkosten SAME month ALLOWED (konto_art in unique key)")
+    except IntegrityError:
+        db.rollback()
+        ok(False, "Sollbuchung nebenkosten SAME month ALLOWED (konto_art in unique key)")
     # one ledger row per source_rent_id
     L.post_entry(db, user_id=UID, typ=L.TYP_ZAHLUNG, betrag=-700, jahr=2026, monat=6, tenancy_id=TID,
                  source="import_rent", source_rent_id=5001)
@@ -113,6 +121,18 @@ def main():
     except IntegrityError:
         db.rollback()
         ok(True, "duplicate import (same source_rent_id) blocked by uq_immo_ledger_rent")
+
+    print("\n[6] Per-category balances — fresh tenancy (Forderungsart split)")
+    T2 = 200
+    L.post_entry(db, user_id=UID, typ=L.TYP_SOLLBUCHUNG, betrag=850, jahr=2026, monat=1, tenancy_id=T2)
+    L.post_entry(db, user_id=UID, typ=L.TYP_SOLLBUCHUNG, betrag=850, jahr=2026, monat=2, tenancy_id=T2)
+    L.post_entry(db, user_id=UID, typ=L.TYP_SOLLBUCHUNG, betrag=620, jahr=2026, monat=1, tenancy_id=T2, konto_art="nebenkosten")
+    s_miete = L.konto_saldo(db, UID, tenancy_id=T2, jahr=2026, konto_art="miete")
+    s_nk = L.konto_saldo(db, UID, tenancy_id=T2, jahr=2026, konto_art="nebenkosten")
+    s_total = L.konto_saldo(db, UID, tenancy_id=T2, jahr=2026, konto_art=None)
+    ok(abs(s_miete - 1700.0) < 0.001, f"Kira (miete) saldo == 1700.00 (got {s_miete})")
+    ok(abs(s_nk - 620.0) < 0.001, f"Nebenkosten saldo == 620.00 (got {s_nk})")
+    ok(abs(s_total - 2320.0) < 0.001, f"Gesamt offene Forderung == 2320.00 (got {s_total})")
 
     db.close()
     print(f"\n=== Faz 0 ledger: {PASS} passed, {FAIL} failed ===")

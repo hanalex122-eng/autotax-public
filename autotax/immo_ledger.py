@@ -134,17 +134,26 @@ def ensure_ledger_indexes(engine) -> None:
     indexes, so they are ensured here. Portable across SQLite and PostgreSQL
     (both support partial indexes). Best-effort — caller wraps in try/except.
 
-      uq_immo_ledger_soll : one Sollbuchung per (user, tenancy, jahr, monat)
-      uq_immo_ledger_rent : one ledger row per imported immo_rent
+      uq_immo_ledger_soll_cat : one Sollbuchung per
+          (user, tenancy, konto_art, jahr, monat)
+      uq_immo_ledger_rent     : one ledger row per imported immo_rent
+
+    The Sollbuchung key includes konto_art so a tenant can carry SEPARATE
+    Forderungsarten (miete / nebenkosten / heizkosten / hausgeld / nachzahlung)
+    in the SAME month. The original 4-column index (uq_immo_ledger_soll, without
+    konto_art) is dropped first — done while immo_ledger_entry is still empty
+    (pre-Faz-1), so there is zero data-migration cost.
     """
     from sqlalchemy import text, inspect
     insp = inspect(engine)
     if "immo_ledger_entry" not in insp.get_table_names():
         return
     with engine.begin() as conn:
+        # retire the old konto_art-less Sollbuchung index (idempotent no-op once gone)
+        conn.execute(text("DROP INDEX IF EXISTS uq_immo_ledger_soll"))
         conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_immo_ledger_soll "
-            "ON immo_ledger_entry(user_id, tenancy_id, jahr, monat) "
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_immo_ledger_soll_cat "
+            "ON immo_ledger_entry(user_id, tenancy_id, konto_art, jahr, monat) "
             "WHERE typ = 'sollbuchung'"))
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_immo_ledger_rent "
