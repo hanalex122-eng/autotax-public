@@ -54,6 +54,15 @@ def init_db():
                 logger.info("Added 'tenancy_id' column to immo_rent")
     except Exception as e:
         logger.warning("immo_rent tenancy_id migration skipped: %s", e)
+    # Immobilien Ledger (Ledger-First Migration, Faz 0). The immo_ledger_entry
+    # table is created by create_all; only the partial-unique indexes (backfill
+    # idempotency) must be ensured explicitly. Best-effort — never block startup.
+    try:
+        from autotax.immo_ledger import ensure_ledger_indexes
+        ensure_ledger_indexes(engine)
+        logger.info("Immo ledger partial-unique indexes ready (Faz 0)")
+    except Exception as e:
+        logger.warning("immo_ledger index migration skipped: %s", e)
     insp = inspect(engine)
     try:
         user_cols = [c["name"] for c in insp.get_columns("users")]

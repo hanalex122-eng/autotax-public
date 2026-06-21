@@ -1004,3 +1004,41 @@ class ImmoEvent(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
+
+
+# ── IMMOBILIEN LEDGER (Ledger-First Migration, Faz 0) ─────────────────
+class ImmoLedgerEntry(Base):
+    """Mietkonto-Buchung — unified, event-based ledger.
+
+    Single source of truth for all Konto movements. The amount is SIGNED and the
+    sign is ENFORCED by the posting service (autotax.immo_ledger.post_entry) so a
+    wrong-signed row can never be persisted:
+        sollbuchung / mahngebuehr  ->  betrag > 0   (Forderung)
+        zahlung / teilzahlung      ->  betrag < 0   (Tilgung)
+        korrektur                  ->  betrag != 0  (any sign)
+    Konto-Saldo = SUM(betrag). Positive saldo = open arrears (Rückstand).
+
+    ADDITIVE & ISOLATED: does NOT touch immo_rent (kept as source/backup during
+    dual-write), OCR, VAT, Kassenbuch or Rechnungen. konto_art prepares the same
+    base for future Leerstand-/Nebenkosten-/Anlage-V-Konten.
+    """
+    __tablename__ = "immo_ledger_entry"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    konto_art = Column(String(20), nullable=False, default="miete")   # miete|leerstand|nebenkosten|anlage_v
+    property_id = Column(Integer, ForeignKey("immo_property.id"), nullable=True, index=True)
+    unit_id = Column(Integer, ForeignKey("immo_unit.id"), nullable=True, index=True)
+    tenancy_id = Column(Integer, ForeignKey("immo_tenancy.id"), nullable=True, index=True)
+    typ = Column(String(20), nullable=False)          # sollbuchung|zahlung|teilzahlung|korrektur|mahngebuehr
+    betrag = Column(Float, nullable=False, default=0.0)  # SIGNED (see class docstring)
+    jahr = Column(Integer, nullable=False, index=True)
+    monat = Column(Integer, nullable=True)            # 1-12 (sollbuchung: required; payments: mahsup ayı)
+    buchungsdatum = Column(Date, nullable=True)       # event date (payment date / Sollstellung date)
+    faellig_am = Column(Date, nullable=True)          # sollbuchung Fälligkeit (aging basis)
+    beleg = Column(String(300), nullable=True)        # free description / reference
+    source = Column(String(20), nullable=True)        # auto|import_rent|manual|mahnung
+    source_rent_id = Column(Integer, nullable=True, index=True)   # backfill idempotency: which immo_rent
+    mahnung_id = Column(Integer, nullable=True, index=True)       # mahngebuehr <-> immo_mahnung link
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
