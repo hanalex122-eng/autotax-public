@@ -22,7 +22,7 @@ from autotax import storage
 from autotax.auth import get_current_user
 from autotax.db import SessionLocal
 from autotax.models import (ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, ImmoDocument,
-                            ImmoUnit, ImmoTenancy)
+                            ImmoUnit, ImmoTenancy, ImmoMahnung, ImmoEvent)
 
 router = APIRouter(prefix="/immo", tags=["immobilien"])
 
@@ -1047,9 +1047,25 @@ def _cockpit(db, uid, year):
         "rueckstand": {"total": F["rueckstand"], "items": tenant_risk},
         "belegung": {"occupied": P["occupied"], "vacant": P["vacant"], "rate": P["occupancy_rate"]},
     }
+    # timeline: contracts ending + manual events, next 90 days
+    timeline = []
+    for c in base["contracts_ending"]:
+        dl = None
+        try:
+            dl = (datetime.strptime(c["bis"], "%Y-%m-%d").date() - today).days
+        except ValueError:
+            pass
+        timeline.append({"datum": c["bis"], "typ": "contract_ending", "days_left": dl,
+                         "titel": "Vertrag endet · %s (%s)" % (c.get("unit", ""), c["tenant"])})
+    ev = db.query(ImmoEvent).filter(ImmoEvent.user_id == uid, _notdel(ImmoEvent), ImmoEvent.done == False,  # noqa: E712
+                                    ImmoEvent.datum >= today, ImmoEvent.datum <= today + timedelta(days=90)).all()
+    for e in ev:
+        timeline.append({"datum": str(e.datum) if e.datum else "", "typ": e.typ or "sonstige",
+                         "days_left": (e.datum - today).days if e.datum else None, "titel": e.titel, "event_id": e.id})
+    timeline.sort(key=lambda x: x["datum"] or "9999")
     return {"year": year, "score": score, "portfolio": P, "financial": F, "actions": actions,
             "ranking": ranking, "kpi": kpi, "vacancy": vacancy, "tenant_risk": tenant_risk,
-            "charts": base["charts"], "contracts_ending": base["contracts_ending"]}
+            "charts": base["charts"], "contracts_ending": base["contracts_ending"], "timeline": timeline}
 
 
 @router.get("/cockpit")
@@ -1057,5 +1073,163 @@ def immo_cockpit(year: Optional[int] = Query(None), user: dict = Depends(get_cur
     db = SessionLocal()
     try:
         return _cockpit(db, _uid(user), year or datetime.now(timezone.utc).year)
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  P2 — Mahnung (dunning) PDF + history, Erinnerungen/Events, Timeline
+# ══════════════════════════════════════════════════════════════════════
+_STUFE_TXT = {1: "Zahlungserinnerung", 2: "1. Mahnung", 3: "2. Mahnung"}
+EVENT_TYPEN = {"wartung", "versicherung", "grundsteuer", "mieterhoehung", "sonstige"}
+
+
+def _tenancy_arrears(db, uid, t, year):
+    ma = _months_active_in_year(t, year)
+    soll = ma * float(t.kaltmiete or 0)
+    rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, ImmoRent.tenancy_id == t.id, _notdel(ImmoRent),
+                                      ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all()
+    ist = sum(float(r.betrag or 0) for r in rents)
+    return round(max(0, soll - ist), 2)
+
+
+class MahnungIn(BaseModel):
+    stufe: int = 1
+    year: Optional[int] = None
+    notiz: Optional[str] = None
+
+
+@router.get("/tenancies/{tid}/mahnungen")
+def list_mahnungen(tid: int, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == _uid(user)).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        rows = db.query(ImmoMahnung).filter(ImmoMahnung.tenancy_id == tid, ImmoMahnung.user_id == _uid(user),
+                                            _notdel(ImmoMahnung)).order_by(ImmoMahnung.datum.desc()).all()
+        return {"mahnungen": [{"id": m.id, "datum": str(m.datum) if m.datum else "", "betrag": m.betrag,
+                               "stufe": m.stufe, "stufe_text": _STUFE_TXT.get(m.stufe, "Mahnung"),
+                               "notiz": m.notiz or ""} for m in rows]}
+    finally:
+        db.close()
+
+
+@router.post("/tenancies/{tid}/mahnung")
+def create_mahnung(tid: int, body: MahnungIn, user: dict = Depends(get_current_user)):
+    """Record a Mahnung (computes current arrears) and return the PDF letter."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        u = db.query(ImmoUnit).filter(ImmoUnit.id == t.unit_id).first()
+        p = db.query(ImmoProperty).filter(ImmoProperty.id == u.property_id).first() if u else None
+        y = body.year or datetime.now(timezone.utc).year
+        betrag = _tenancy_arrears(db, uid, t, y)
+        stufe = body.stufe if body.stufe in (1, 2, 3) else 1
+        m = ImmoMahnung(tenancy_id=tid, user_id=uid, datum=date.today(), betrag=betrag, stufe=stufe, notiz=body.notiz)
+        db.add(m); db.commit(); db.refresh(m)
+        ss = getSampleStyleSheet()
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=22 * mm, bottomMargin=18 * mm, leftMargin=22 * mm, rightMargin=22 * mm)
+        objekt = (p.name if p else "") + (" · " + p.adresse if (p and p.adresse) else "")
+        whg = u.name if u else ""
+        heute = date.today().strftime("%d.%m.%Y")
+        body_txt = (
+            f"<b>{_STUFE_TXT.get(stufe, 'Mahnung')}</b><br/><br/>"
+            f"Sehr geehrte/r {t.mieter_name},<br/><br/>"
+            f"für die von Ihnen gemietete Einheit <b>{whg}</b> ({objekt}) ist zum heutigen Tag "
+            f"ein offener Mietbetrag in Höhe von <b>{betrag:.2f} EUR</b> fällig.<br/><br/>"
+            f"Wir bitten Sie, den offenen Betrag innerhalb von <b>14 Tagen</b> auf das bekannte Konto "
+            f"zu überweisen. Sollte sich Ihre Zahlung mit diesem Schreiben überschnitten haben, "
+            f"betrachten Sie es bitte als gegenstandslos.<br/><br/>"
+            f"Mit freundlichen Grüßen<br/>Die Hausverwaltung"
+        )
+        el = [Paragraph(heute, ss["Normal"]), Spacer(1, 10 * mm),
+              Paragraph(t.mieter_name, ss["Normal"]), Spacer(1, 12 * mm),
+              Paragraph(body_txt, ss["Normal"])]
+        doc.build(el)
+        buf.seek(0)
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": f'attachment; filename="mahnung_{tid}_{m.id}.pdf"'})
+    finally:
+        db.close()
+
+
+# ── Events / Erinnerungen ─────────────────────────────────────────────
+class EventIn(BaseModel):
+    property_id: Optional[int] = None
+    datum: Optional[str] = None
+    typ: Optional[str] = None
+    titel: str = Field(..., min_length=1, max_length=200)
+
+
+class EventPatch(BaseModel):
+    datum: Optional[str] = None
+    typ: Optional[str] = None
+    titel: Optional[str] = None
+    done: Optional[bool] = None
+
+
+def _event_dict(e):
+    return {"id": e.id, "property_id": e.property_id, "datum": str(e.datum) if e.datum else "",
+            "typ": e.typ or "sonstige", "titel": e.titel, "done": bool(e.done)}
+
+
+@router.get("/events")
+def list_events(user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        rows = db.query(ImmoEvent).filter(ImmoEvent.user_id == _uid(user), _notdel(ImmoEvent)).order_by(ImmoEvent.datum).all()
+        return {"events": [_event_dict(e) for e in rows]}
+    finally:
+        db.close()
+
+
+@router.post("/events")
+def create_event(body: EventIn, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        e = ImmoEvent(user_id=_uid(user), property_id=body.property_id, datum=_pdate(body.datum),
+                      typ=(body.typ if body.typ in EVENT_TYPEN else "sonstige"), titel=body.titel.strip())
+        db.add(e); db.commit(); db.refresh(e)
+        return {"success": True, **_event_dict(e)}
+    finally:
+        db.close()
+
+
+@router.patch("/events/{eid}")
+def update_event(eid: int, body: EventPatch, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        e = db.query(ImmoEvent).filter(ImmoEvent.id == eid, ImmoEvent.user_id == _uid(user)).first()
+        if not e:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
+        if body.datum is not None: e.datum = _pdate(body.datum)
+        if body.typ is not None and body.typ in EVENT_TYPEN: e.typ = body.typ
+        if body.titel is not None: e.titel = body.titel.strip()
+        if body.done is not None: e.done = body.done
+        db.commit(); db.refresh(e)
+        return {"success": True, **_event_dict(e)}
+    finally:
+        db.close()
+
+
+@router.delete("/events/{eid}")
+def delete_event(eid: int, user: dict = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        e = db.query(ImmoEvent).filter(ImmoEvent.id == eid, ImmoEvent.user_id == _uid(user)).first()
+        if not e:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
+        e.is_deleted = True; e.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"success": True}
     finally:
         db.close()

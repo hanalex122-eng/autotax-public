@@ -975,3 +975,32 @@ class ImmoDocument(Base):
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
+
+
+# ── IMMOBILIEN P2: Mahnung history + Erinnerungen/Events (additive) ──
+class ImmoMahnung(Base):
+    __tablename__ = "immo_mahnung"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenancy_id = Column(Integer, ForeignKey("immo_tenancy.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    datum = Column(Date, nullable=True)
+    betrag = Column(Float, nullable=True)             # offener Betrag bei Mahnung
+    stufe = Column(Integer, nullable=False, default=1)  # 1 Erinnerung · 2 1.Mahnung · 3 2.Mahnung
+    notiz = Column(String(300), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class ImmoEvent(Base):
+    __tablename__ = "immo_event"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    property_id = Column(Integer, ForeignKey("immo_property.id"), nullable=True, index=True)
+    datum = Column(Date, nullable=True)
+    typ = Column(String(20), nullable=True)          # wartung|versicherung|grundsteuer|mieterhoehung|sonstige
+    titel = Column(String(200), nullable=False)
+    done = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
