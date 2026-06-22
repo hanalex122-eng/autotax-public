@@ -107,6 +107,57 @@ def main():
     r = client.get("/immo/_ledger/parity?year=2026")
     ok(r.status_code == 200 and r.json()["passed"] is True, f"admin 200 + passed=True (got {r.status_code})")
 
+    # ── [4] REALISTIC landlord fixture — non-zero parity (regression shield) ──
+    # Year 2025 (complete past year → date-independent / deterministic in CI).
+    # All names are clearly TEST data. Covers: overpayer, partial, debtor,
+    # mid-year Auszug, refund(korrektur), multiple units + 1 vacant.
+    eng4, S4 = fresh()
+    db = S4()
+    db.add(ImmoProperty(id=100, user_id=1, name="TEST Immobilie", is_deleted=False))
+    for i in range(1, 7):
+        db.add(ImmoUnit(id=i, property_id=100, user_id=1, name=f"WHG-0{i}", soll_miete=850))
+    db.add_all([
+        ImmoTenancy(id=101, unit_id=1, user_id=1, mieter_name="Test Mieter 1", von=date(2025, 1, 1), bis=None, kaltmiete=800),  # overpayer
+        ImmoTenancy(id=102, unit_id=2, user_id=1, mieter_name="Test Mieter 2", von=date(2025, 1, 1), bis=None, kaltmiete=700),  # partial
+        ImmoTenancy(id=103, unit_id=3, user_id=1, mieter_name="Test Mieter 3", von=date(2025, 1, 1), bis=None, kaltmiete=900),  # debtor
+        ImmoTenancy(id=104, unit_id=4, user_id=1, mieter_name="Test Mieter 4", von=date(2025, 1, 1), bis=date(2025, 6, 30), kaltmiete=600),  # Auszug
+        ImmoTenancy(id=105, unit_id=5, user_id=1, mieter_name="Test Mieter 5", von=date(2025, 1, 1), bis=None, kaltmiete=500),  # refund
+        # unit 6 → no tenancy → Leerstand
+    ])
+    rid = 6000
+    def pay(tid, betrag, monat):
+        nonlocal rid
+        rid += 1
+        db.add(ImmoRent(id=rid, property_id=100, tenancy_id=tid, user_id=1, datum=date(2025, monat, 10), betrag=betrag))
+    for mo, amt in [(1, 5000), (2, 5000)]:  # M1 soll 9600, pays 10000 (overpaid → credit -400)
+        pay(101, amt, mo)
+    for mo in range(1, 6):  # M2 soll 8400, pays 5×700=3500 (partial)
+        pay(102, 700, mo)
+    for mo in (1, 2):  # M3 soll 10800, pays 2×900=1800 (debtor)
+        pay(103, 900, mo)
+    for mo in range(1, 5):  # M4 soll 6×600=3600, pays 4×600=2400 (Auszug + owes)
+        pay(104, 600, mo)
+    for mo in range(1, 7):  # M5 soll 6000, pays 6×500=3000
+        pay(105, 500, mo)
+    pay(105, -200, 7)  # M5 refund → korrektur
+    db.commit()
+    L.run_backfill(db, 1, dry_run=False)
+    rep4 = immo_api.parity_report(db, 1, 2025)
+    m4 = by_metric(rep4)
+    print("\n[4] REALISTIC fixture (5 Test-Mieter + 1 Leerstand, year 2025) — non-zero parity")
+    ok(rep4["passed"] is True, f"passed=True (got {rep4['passed']})")
+    ok(m4["offene_forderung"]["old"] == 18300.0 and m4["offene_forderung"]["ledger"] == 18300.0, f"offene_forderung 18300 (got {m4['offene_forderung']})")
+    ok(m4["debtor_count"]["old"] == 4 and m4["debtor_count"]["ledger"] == 4, "debtor_count 4==4 (M2,3,4,5)")
+    ok(m4["mahnung_candidates"]["old"] == 4 and m4["mahnung_candidates"]["ledger"] == 4, "mahnung_candidates 4==4")
+    ok(m4["collected_rent"]["old"] == 20500.0 and m4["collected_rent"]["ledger"] == 20500.0, f"collected_rent 20500 (got {m4['collected_rent']})")
+    ok(m4["tenancy_saldo"]["old"] == 17900.0 and m4["tenancy_saldo"]["ledger"] == 17900.0, f"tenancy_saldo 17900 (incl. -400 credit) (got {m4['tenancy_saldo']})")
+    ok(m4["cockpit_critical"]["ok"] and m4["cockpit_critical"]["old"] == m4["cockpit_critical"]["ledger"] and m4["cockpit_critical"]["old"] > 0,
+       f"cockpit_critical match + non-zero (got {m4['cockpit_critical']})")
+    ok(all(m["ok"] for m in rep4["metrics"]), "ALL 6 metrics ok")
+    okc = sum(1 for m in rep4["metrics"] if m["ok"])
+    print("    SUMMARY", {"passed": okc, "total": 6, "overall_ok": rep4["passed"]})
+    db.close()
+
     print(f"\n=== Faz 3 parity: {PASS} passed, {FAIL} failed ===")
     sys.exit(1 if FAIL else 0)
 
