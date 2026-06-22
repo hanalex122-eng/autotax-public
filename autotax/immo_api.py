@@ -1278,9 +1278,8 @@ def ledger_backfill(dry_run: bool = Query(True), user: dict = Depends(get_curren
 #  GATE: no read-path is switched to the ledger (Faz 4) until passed=True.
 #  Read-only; changes NOTHING. Money tol ±0.01, counts exact.
 # ══════════════════════════════════════════════════════════════════════
-def _parity_old(db, uid: int, year: int) -> dict:
-    """OLD-engine metrics, mirroring _portfolio's scoping exactly."""
-    P = _portfolio(db, uid, year)
+def _old_scope(db, uid: int):
+    """OLD _portfolio scoping: non-deleted property → unit → tenancy + year rents."""
     props = db.query(ImmoProperty).filter(ImmoProperty.user_id == uid, _notdel(ImmoProperty)).all()
     pids = [p.id for p in props]
     units = db.query(ImmoUnit).filter(ImmoUnit.user_id == uid, _notdel(ImmoUnit),
@@ -1288,20 +1287,47 @@ def _parity_old(db, uid: int, year: int) -> dict:
     uids = [u.id for u in units]
     tens = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy),
                                         ImmoTenancy.unit_id.in_(uids)).all() if uids else []
+    return pids, tens
+
+
+def _old_ist_by_tenancy(db, uid: int, pids: list, year: int) -> dict:
     rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent), ImmoRent.property_id.in_(pids),
                                       ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all() if pids else []
     ist_by = {}
     for r in rents:
         if r.tenancy_id:
             ist_by[r.tenancy_id] = ist_by.get(r.tenancy_id, 0) + float(r.betrag or 0)
-    debtor_count = 0
-    per_saldo = {}
+    return ist_by
+
+
+def _old_debtors(db, uid: int, year: int) -> list:
+    """Full OLD-engine debtor list (uncapped) in top_debtors shape:
+    [{tenant, debt, months_overdue}], sorted by debt desc. Single source for the
+    parity comparator AND the source adapter so they never drift apart."""
+    pids, tens = _old_scope(db, uid)
+    ist_by = _old_ist_by_tenancy(db, uid, pids, year)
+    out = []
     for t in tens:
         soll_t = _months_active_in_year(t, year) * float(t.kaltmiete or 0)
         ist_t = round(ist_by.get(t.id, 0), 2)
-        per_saldo[t.id] = round(soll_t - ist_t, 2)
-        if round(max(0, soll_t - ist_t), 2) > 0:
-            debtor_count += 1
+        arr = round(max(0, soll_t - ist_t), 2)
+        if arr > 0:
+            mo = round(arr / float(t.kaltmiete)) if t.kaltmiete else None
+            out.append({"tenant": t.mieter_name, "debt": arr, "months_overdue": mo})
+    out.sort(key=lambda x: -x["debt"])
+    return out
+
+
+def _parity_old(db, uid: int, year: int) -> dict:
+    """OLD-engine metrics, mirroring _portfolio's scoping exactly."""
+    P = _portfolio(db, uid, year)
+    pids, tens = _old_scope(db, uid)
+    ist_by = _old_ist_by_tenancy(db, uid, pids, year)
+    per_saldo = {}
+    for t in tens:
+        soll_t = _months_active_in_year(t, year) * float(t.kaltmiete or 0)
+        per_saldo[t.id] = round(soll_t - round(ist_by.get(t.id, 0), 2), 2)
+    debtor_count = len(_old_debtors(db, uid, year))
     C = _cockpit(db, uid, year)
     red = [a for a in C["actions"] if a.get("severity") == "red"]
     return {"rueckstand": P["financial"]["rueckstand"], "ist": P["financial"]["ist"],

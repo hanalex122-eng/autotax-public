@@ -48,6 +48,15 @@ def kasse_v2_enabled() -> bool:
     return _flag("FEAT_KASSE_V2", "0")
 
 
+def immo_ledger_read_enabled() -> bool:
+    """Backend-only flag for the Immobilien LEDGER read path (Faz 4 cutover).
+    Default OFF — consumers (cockpit/debtor/mahnung/dashboard/risk) read the OLD
+    engine exactly as today. ON → they read the ledger read model via the
+    immo_source adapters. Flip with IMMO_LEDGER_READ=1 only AFTER the parity gate
+    is green; revert instantly by setting it back to 0."""
+    return _flag("IMMO_LEDGER_READ", "0")
+
+
 def tax_engine_v2_enabled() -> bool:
     """Backend-only feature flag for the knowledge-driven tax engine v2 API
     (tax_engine package + /tax/* read-only routers). Default OFF — when off,
