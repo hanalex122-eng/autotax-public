@@ -18,11 +18,17 @@ Rechnungen. This is Faz 0 — table + posting service + validation only. Backfil
 """
 from __future__ import annotations
 
+from calendar import monthrange
+from datetime import date
 from typing import Optional
 
 from sqlalchemy import func
 
-from autotax.models import ImmoLedgerEntry
+from autotax.models import ImmoLedgerEntry, ImmoUnit, ImmoTenancy, ImmoRent
+
+
+def _notdel(c):
+    return (c.is_deleted == False) | (c.is_deleted == None)  # noqa: E712
 
 # ── Buchungsarten ─────────────────────────────────────────────────────
 TYP_SOLLBUCHUNG = "sollbuchung"
@@ -124,6 +130,101 @@ def konto_saldo(db, user_id: int, *, tenancy_id: Optional[int] = None,
     if jahr is not None:
         q = q.filter(ImmoLedgerEntry.jahr == jahr)
     return round(float(q.scalar() or 0.0), 2)
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  BACKFILL (Faz 1) — tenancy -> Sollbuchung, immo_rent -> ledger payment
+#  Idempotent (set-difference), non-destructive (immo_rent untouched),
+#  commit=False (caller owns the transaction → all-or-nothing).
+# ══════════════════════════════════════════════════════════════════════
+def _active_in_month(t, y, m) -> bool:
+    """MUST stay identical to immo_api._tenancy_active_in_month so the Faz 3
+    parity gate matches OLD vs LEDGER. von<=Monatsende und bis>=Monatsanfang."""
+    mstart = date(y, m, 1)
+    mend = date(y, m, monthrange(y, m)[1])
+    von = t.von or date(1900, 1, 1)
+    bis = t.bis or date(2999, 12, 31)
+    return von <= mend and bis >= mstart
+
+
+def ensure_sollbuchungen(db, uid: int, year: int, *, faellig_tag: int = 3) -> int:
+    """Idempotently post one konto_art=miete Sollbuchung per ACTIVE month for
+    every tenancy of the user in `year`.
+
+    Replicates the existing engine's active-month logic EXACTLY — including the
+    full-year current-year quirk (_months_active_in_year counts all 12 months,
+    not capped at today) — so parity (Faz 3) matches. The quirk is preserved as
+    a MIGRATION decision only; a tech-debt review follows after parity.
+
+    Set-difference idempotent: a re-run inserts nothing (also guarded by
+    uq_immo_ledger_soll_cat). Tenancies without a positive Kaltmiete are skipped
+    (engine soll = months*0 = 0; a 0-Betrag entry is illegal anyway). commit=False
+    — the caller commits. Returns the number of Sollbuchungen inserted.
+    """
+    units = {u.id: u for u in db.query(ImmoUnit).filter(
+        ImmoUnit.user_id == uid, _notdel(ImmoUnit)).all()}
+    tenancies = db.query(ImmoTenancy).filter(
+        ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all()
+    existing = set(db.query(ImmoLedgerEntry.tenancy_id, ImmoLedgerEntry.monat).filter(
+        ImmoLedgerEntry.user_id == uid, ImmoLedgerEntry.jahr == year,
+        ImmoLedgerEntry.typ == TYP_SOLLBUCHUNG, ImmoLedgerEntry.konto_art == "miete",
+        _notdel(ImmoLedgerEntry)).all())
+    inserted = 0
+    for t in tenancies:
+        kalt = float(t.kaltmiete or 0)
+        if kalt <= 0:
+            continue
+        u = units.get(t.unit_id)
+        pid = u.property_id if u else None
+        for m in range(1, 13):
+            if not _active_in_month(t, year, m):
+                continue
+            if (t.id, m) in existing:
+                continue
+            post_entry(db, user_id=uid, typ=TYP_SOLLBUCHUNG, betrag=kalt, jahr=year, monat=m,
+                       property_id=pid, unit_id=t.unit_id, tenancy_id=t.id,
+                       faellig_am=date(year, m, min(faellig_tag, monthrange(year, m)[1])),
+                       source="auto", konto_art="miete", commit=False)
+            existing.add((t.id, m))
+            inserted += 1
+    return inserted
+
+
+def import_rents_to_ledger(db, uid: int) -> dict:
+    """Idempotently import every immo_rent of the user into the ledger as a
+    konto_art=miete payment. Sign-preserving so parity (ist) is exact:
+        r.betrag > 0  -> zahlung    (betrag = -r.betrag)
+        r.betrag < 0  -> korrektur  (betrag = -r.betrag > 0; a refund/clawback)
+        r.betrag == 0 -> skipped    (illegal 0-Betrag; engine ist unaffected)
+        r.datum is None -> skipped  (engine's year filter ignores undated rows;
+                                     importing them would break parity)
+    Set-difference on source_rent_id => a re-run imports nothing (also guarded by
+    uq_immo_ledger_rent). immo_rent is NOT modified. commit=False. Returns counts.
+    """
+    already = set(rid for (rid,) in db.query(ImmoLedgerEntry.source_rent_id).filter(
+        ImmoLedgerEntry.user_id == uid, ImmoLedgerEntry.source_rent_id != None,  # noqa: E711
+        _notdel(ImmoLedgerEntry)).all())
+    rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent)).all()
+    imported = skipped_zero = skipped_nodate = skipped_dup = 0
+    for r in rents:
+        if r.id in already:
+            skipped_dup += 1
+            continue
+        if not r.datum:
+            skipped_nodate += 1
+            continue
+        amt = round(float(r.betrag or 0), 2)
+        if amt == 0:
+            skipped_zero += 1
+            continue
+        typ = TYP_ZAHLUNG if amt > 0 else TYP_KORREKTUR
+        post_entry(db, user_id=uid, typ=typ, betrag=-amt, jahr=r.datum.year, monat=r.datum.month,
+                   property_id=r.property_id, tenancy_id=r.tenancy_id, buchungsdatum=r.datum,
+                   source="import_rent", source_rent_id=r.id, konto_art="miete", commit=False)
+        already.add(r.id)
+        imported += 1
+    return {"imported": imported, "skipped_zero": skipped_zero,
+            "skipped_nodate": skipped_nodate, "skipped_dup": skipped_dup}
 
 
 # ── idempotency indexes (called from db.init_db AND tests) ────────────
