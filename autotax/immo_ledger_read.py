@@ -12,6 +12,7 @@ Parity foundation (mirrors the OLD engine exactly):
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
 from autotax.models import ImmoLedgerEntry, ImmoTenancy
@@ -119,3 +120,114 @@ def debtor_list(db, uid: int, year: int, konto_art: str = "miete") -> list:
         })
     out.sort(key=lambda x: -x["debt"])
     return out
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  DAY-BASED aging engine (Faz 2.2). NEW capability — the OLD engine has no
+#  equivalent, so this is NOT a parity metric and must never gate parity.
+#  Nothing consumes it yet (no UI/cockpit) — read-model only.
+# ══════════════════════════════════════════════════════════════════════
+def _pay_alloc(soll_rows: list, total_paid: float) -> list:
+    """FIFO: distribute `total_paid` across `soll_rows` (oldest first).
+
+    Each row is a dict carrying at least 'betrag'. Returns the rows enriched with:
+        gedeckt = amount covered, offen = remaining, status = paid|partial|open.
+    Overpayment leftover is ignored (credit shows up in saldo, not here).
+    """
+    remaining = float(total_paid or 0)
+    out = []
+    for r in soll_rows:
+        b = float(r.get("betrag") or 0)
+        covered = min(remaining, b) if remaining > 0 else 0.0
+        remaining -= covered
+        offen = round(b - covered, 2)
+        status = "paid" if offen <= 0.001 else ("partial" if covered > 0 else "open")
+        out.append({**r, "gedeckt": round(covered, 2), "offen": offen, "status": status})
+    return out
+
+
+def _bucket(tage: int) -> Optional[str]:
+    """Day-based overdue bucket. None if not yet due (tage<1)."""
+    if tage < 1:
+        return None
+    return "warning" if tage <= 7 else ("high" if tage <= 30 else "critical")
+
+
+def konto_state(db, uid: int, tenancy_id: int, year: int,
+                konto_art: str = "miete", as_of=None) -> dict:
+    """Month-by-month Mietkonto for one tenancy/year (UI base, not wired yet).
+
+    {"tenancy_id", "year",
+     "rows": [{monat, soll, gedeckt, offen, status, faellig_am, tage_ueberfaellig}],
+     "summe": {soll, ist, saldo, offen}}
+    Payments are allocated FIFO (oldest month first). saldo comes from
+    saldo_by_tenancy (authoritative, incl. korrektur)."""
+    as_of = as_of or date.today()
+    solls = db.query(ImmoLedgerEntry).filter(
+        ImmoLedgerEntry.user_id == uid, _notdel(ImmoLedgerEntry),
+        ImmoLedgerEntry.tenancy_id == tenancy_id, ImmoLedgerEntry.konto_art == konto_art,
+        ImmoLedgerEntry.typ == "sollbuchung", ImmoLedgerEntry.jahr == year,
+    ).order_by(ImmoLedgerEntry.monat).all()
+    pays = db.query(ImmoLedgerEntry.betrag).filter(
+        ImmoLedgerEntry.user_id == uid, _notdel(ImmoLedgerEntry),
+        ImmoLedgerEntry.tenancy_id == tenancy_id, ImmoLedgerEntry.konto_art == konto_art,
+        ImmoLedgerEntry.typ.in_(_PAYMENT_TYPEN), ImmoLedgerEntry.jahr == year).all()
+    ist = round(-sum(float(b or 0) for (b,) in pays), 2)
+    rows_in = [{"monat": s.monat, "betrag": float(s.betrag or 0), "faellig_am": s.faellig_am} for s in solls]
+    rows = []
+    for a in _pay_alloc(rows_in, ist):
+        tage = (as_of - a["faellig_am"]).days if a["faellig_am"] else None
+        rows.append({
+            "monat": a["monat"], "soll": round(a["betrag"], 2), "gedeckt": a["gedeckt"],
+            "offen": a["offen"], "status": a["status"],
+            "faellig_am": str(a["faellig_am"]) if a["faellig_am"] else None,
+            "tage_ueberfaellig": (tage if (a["offen"] > 0.001 and tage and tage > 0) else 0),
+        })
+    saldo = saldo_by_tenancy(db, uid, year, konto_art).get(tenancy_id, {}).get("saldo", 0.0)
+    return {"tenancy_id": tenancy_id, "year": year, "rows": rows,
+            "summe": {"soll": round(sum(r["soll"] for r in rows), 2), "ist": ist,
+                      "saldo": saldo, "offen": round(sum(r["offen"] for r in rows), 2)}}
+
+
+def aging_report(db, uid: int, as_of=None, konto_art: str = "miete") -> dict:
+    """Portfolio-wide day-based aging of OPEN Sollbuchungen (all years).
+
+    Per tenancy, payments are FIFO-allocated across all its Sollbuchungen; each
+    still-open one is aged by (as_of − faellig_am) and bucketed (1-7 warning /
+    8-30 high / 30+ critical). Not-yet-due (tage<1) and fully-paid are excluded.
+    {"summary": {warning, high, critical, offen_total},
+     "items": [{tenancy_id, tenant_name, jahr, monat, offen, faellig_am, tage, bucket}]}"""
+    as_of = as_of or date.today()
+    solls = db.query(ImmoLedgerEntry).filter(
+        ImmoLedgerEntry.user_id == uid, _notdel(ImmoLedgerEntry), ImmoLedgerEntry.konto_art == konto_art,
+        ImmoLedgerEntry.typ == "sollbuchung", ImmoLedgerEntry.tenancy_id != None,  # noqa: E711
+    ).order_by(ImmoLedgerEntry.tenancy_id, ImmoLedgerEntry.jahr, ImmoLedgerEntry.monat).all()
+    pays = db.query(ImmoLedgerEntry.tenancy_id, ImmoLedgerEntry.betrag).filter(
+        ImmoLedgerEntry.user_id == uid, _notdel(ImmoLedgerEntry), ImmoLedgerEntry.konto_art == konto_art,
+        ImmoLedgerEntry.typ.in_(_PAYMENT_TYPEN), ImmoLedgerEntry.tenancy_id != None).all()  # noqa: E711
+    ist_by = {}
+    for tid, b in pays:
+        ist_by[tid] = ist_by.get(tid, 0.0) + (-float(b or 0))
+    by_t = {}
+    for s in solls:
+        by_t.setdefault(s.tenancy_id, []).append(s)
+    tmap = _tenancy_map(db, uid)
+    summary = {"warning": 0, "high": 0, "critical": 0, "offen_total": 0.0}
+    items = []
+    for tid, slist in by_t.items():
+        rows_in = [{"jahr": s.jahr, "monat": s.monat, "betrag": float(s.betrag or 0), "faellig_am": s.faellig_am} for s in slist]
+        for a in _pay_alloc(rows_in, ist_by.get(tid, 0.0)):
+            if a["offen"] <= 0.001 or not a["faellig_am"]:
+                continue
+            tage = (as_of - a["faellig_am"]).days
+            bucket = _bucket(tage)
+            if bucket is None:
+                continue
+            summary[bucket] += 1
+            summary["offen_total"] = round(summary["offen_total"] + a["offen"], 2)
+            t = tmap.get(tid)
+            items.append({"tenancy_id": tid, "tenant_name": (t.mieter_name if t else None),
+                          "jahr": a["jahr"], "monat": a["monat"], "offen": a["offen"],
+                          "faellig_am": str(a["faellig_am"]), "tage": tage, "bucket": bucket})
+    items.sort(key=lambda x: -x["tage"])
+    return {"summary": summary, "items": items}
