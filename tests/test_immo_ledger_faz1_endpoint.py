@@ -17,7 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from autotax.models import Base, ImmoUnit, ImmoTenancy, ImmoRent, ImmoLedgerEntry
+from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent, ImmoLedgerEntry
 from autotax import immo_ledger as L
 
 PASS, FAIL = 0, 0
@@ -40,6 +40,7 @@ def fresh_db():
 
 
 def seed(db, uid=1, pid=10):
+    db.add(ImmoProperty(id=pid, user_id=uid, name="Haus", is_deleted=False))
     db.add_all([
         ImmoUnit(id=1, property_id=pid, user_id=uid, name="WHG-01", soll_miete=850),
         ImmoUnit(id=2, property_id=pid, user_id=uid, name="WHG-02", soll_miete=800),

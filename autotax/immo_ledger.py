@@ -24,11 +24,34 @@ from typing import Optional
 
 from sqlalchemy import func
 
-from autotax.models import ImmoLedgerEntry, ImmoUnit, ImmoTenancy, ImmoRent
+from autotax.models import ImmoLedgerEntry, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent
 
 
 def _notdel(c):
     return (c.is_deleted == False) | (c.is_deleted == None)  # noqa: E712
+
+
+# ── scoping helpers — MUST match OLD _portfolio (non-deleted property →
+#    non-deleted unit → tenancy/rent). A tenancy/rent under a SOFT-DELETED
+#    property is an orphan and must be excluded (orphan-leak fix b03c292).
+def _active_pids(db, uid: int) -> list:
+    return [pid for (pid,) in db.query(ImmoProperty.id).filter(
+        ImmoProperty.user_id == uid, _notdel(ImmoProperty)).all()]
+
+
+def _active_units(db, uid: int, pids: list) -> dict:
+    if not pids:
+        return {}
+    return {u.id: u for u in db.query(ImmoUnit).filter(
+        ImmoUnit.user_id == uid, _notdel(ImmoUnit), ImmoUnit.property_id.in_(pids)).all()}
+
+
+def _active_tenancies(db, uid: int, units: dict) -> list:
+    if not units:
+        return []
+    return db.query(ImmoTenancy).filter(
+        ImmoTenancy.user_id == uid, _notdel(ImmoTenancy),
+        ImmoTenancy.unit_id.in_(list(units.keys()))).all()
 
 # ── Buchungsarten ─────────────────────────────────────────────────────
 TYP_SOLLBUCHUNG = "sollbuchung"
@@ -161,10 +184,8 @@ def ensure_sollbuchungen(db, uid: int, year: int, *, faellig_tag: int = 3) -> in
     (engine soll = months*0 = 0; a 0-Betrag entry is illegal anyway). commit=False
     — the caller commits. Returns the number of Sollbuchungen inserted.
     """
-    units = {u.id: u for u in db.query(ImmoUnit).filter(
-        ImmoUnit.user_id == uid, _notdel(ImmoUnit)).all()}
-    tenancies = db.query(ImmoTenancy).filter(
-        ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all()
+    units = _active_units(db, uid, _active_pids(db, uid))
+    tenancies = _active_tenancies(db, uid, units)
     existing = set(db.query(ImmoLedgerEntry.tenancy_id, ImmoLedgerEntry.monat).filter(
         ImmoLedgerEntry.user_id == uid, ImmoLedgerEntry.jahr == year,
         ImmoLedgerEntry.typ == TYP_SOLLBUCHUNG, ImmoLedgerEntry.konto_art == "miete",
@@ -204,7 +225,9 @@ def import_rents_to_ledger(db, uid: int) -> dict:
     already = set(rid for (rid,) in db.query(ImmoLedgerEntry.source_rent_id).filter(
         ImmoLedgerEntry.user_id == uid, ImmoLedgerEntry.source_rent_id != None,  # noqa: E711
         _notdel(ImmoLedgerEntry)).all())
-    rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent)).all()
+    pids = _active_pids(db, uid)
+    rents = db.query(ImmoRent).filter(
+        ImmoRent.user_id == uid, _notdel(ImmoRent), ImmoRent.property_id.in_(pids)).all() if pids else []
     imported = skipped_zero = skipped_nodate = skipped_dup = 0
     for r in rents:
         if r.id in already:
@@ -230,12 +253,18 @@ def import_rents_to_ledger(db, uid: int) -> dict:
 def _backfill_years(db, uid: int) -> list:
     """Year range to backfill: from the earliest tenancy.von / rent.datum up to
     the CURRENT year (an ongoing tenancy is active now, so the engine counts the
-    current year → ledger must too). Empty if the user has no immo data."""
+    current year → ledger must too). Scoped to non-deleted properties (OLD
+    parity). Empty if the user has no active immo data."""
+    pids = _active_pids(db, uid)
+    if not pids:
+        return []
+    units = _active_units(db, uid, pids)
     yrs = set()
-    for (v,) in db.query(ImmoTenancy.von).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all():
-        if v:
-            yrs.add(v.year)
-    for (d,) in db.query(ImmoRent.datum).filter(ImmoRent.user_id == uid, _notdel(ImmoRent)).all():
+    for t in _active_tenancies(db, uid, units):
+        if t.von:
+            yrs.add(t.von.year)
+    for (d,) in db.query(ImmoRent.datum).filter(
+            ImmoRent.user_id == uid, _notdel(ImmoRent), ImmoRent.property_id.in_(pids)).all():
         if d:
             yrs.add(d.year)
     if not yrs:
@@ -244,12 +273,12 @@ def _backfill_years(db, uid: int) -> list:
 
 
 def _scope_tenancy_count(db, uid: int, years: list) -> int:
-    """Distinct tenancies that fall in scope (Kaltmiete>0 and ≥1 active month in
-    the range). Computed from tenancy data — independent of ledger/session state,
-    so it is stable in both dry-run and execute."""
+    """Distinct tenancies in scope (Kaltmiete>0 and ≥1 active month in range),
+    under non-deleted properties (OLD parity). Independent of ledger/session
+    state → stable in both dry-run and execute."""
     if not years:
         return 0
-    tens = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all()
+    tens = _active_tenancies(db, uid, _active_units(db, uid, _active_pids(db, uid)))
     cnt = 0
     for t in tens:
         if float(t.kaltmiete or 0) <= 0:

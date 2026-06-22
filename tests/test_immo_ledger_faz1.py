@@ -12,7 +12,7 @@ from datetime import date
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from autotax.models import Base, ImmoUnit, ImmoTenancy, ImmoRent, ImmoLedgerEntry
+from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent, ImmoLedgerEntry
 from autotax import immo_ledger as L
 
 PASS, FAIL = 0, 0
@@ -39,7 +39,8 @@ def main():
     db = sessionmaker(bind=engine)()
     UID, PID = 1, 10
 
-    # units + tenancies
+    # property (active) + units + tenancies
+    db.add(ImmoProperty(id=PID, user_id=UID, name="Haus", is_deleted=False)); db.commit()
     u1 = ImmoUnit(id=1, property_id=PID, user_id=UID, name="WHG-01", soll_miete=850)
     u2 = ImmoUnit(id=2, property_id=PID, user_id=UID, name="WHG-02", soll_miete=800)
     u3 = ImmoUnit(id=3, property_id=PID, user_id=UID, name="WHG-03", soll_miete=900)
