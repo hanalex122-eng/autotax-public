@@ -10,7 +10,9 @@ Plus per-property dashboard (year) and a one-click annual PDF report.
 from __future__ import annotations
 
 import io
+import logging
 import os
+import time
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -23,7 +25,10 @@ from sqlalchemy import or_
 from autotax import storage
 from autotax import immo_ledger as _ledger
 from autotax import immo_ledger_read as _read
+from autotax import immo_source as _src
 from autotax.auth import get_current_user
+
+logger = logging.getLogger("autotax")
 from autotax.db import SessionLocal
 from autotax.models import (ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, ImmoDocument,
                             ImmoUnit, ImmoTenancy, ImmoMahnung, ImmoEvent, ImmoLedgerEntry)
@@ -944,11 +949,56 @@ def _portfolio(db, uid, year):
     }
 
 
+# ── Faz 4.2: consumer-facing portfolio view (flag-gated debt source) ──
+def _lazy_ledger_refresh(db, uid: int, year: int) -> dict:
+    """Flag-ON only: bring the ledger current (idempotent backfill) before a read.
+    Replaces dual-write for now. On ANY error → rollback + status='fallback' so the
+    caller serves OLD numbers. Logs cost on every call (per-GET visibility)."""
+    t0 = time.monotonic()
+    try:
+        res = _ledger.run_backfill(db, uid, dry_run=False)
+        created = int(res.get("soll_to_create", 0)) + int(res.get("payments_to_import", 0))
+        out = {"ledger_refresh_ms": round((time.monotonic() - t0) * 1000, 1),
+               "ledger_created_entries": created, "ledger_refresh_status": "ok"}
+    except Exception as e:
+        db.rollback()
+        out = {"ledger_refresh_ms": round((time.monotonic() - t0) * 1000, 1),
+               "ledger_created_entries": 0, "ledger_refresh_status": "fallback"}
+        logger.warning("immo ledger refresh failed (OLD fallback) uid=%s year=%s: %s", uid, year, e)
+    logger.info("ledger_refresh_ms=%s ledger_created_entries=%s ledger_refresh_status=%s",
+                out["ledger_refresh_ms"], out["ledger_created_entries"], out["ledger_refresh_status"])
+    return out
+
+
+def portfolio_view(db, uid: int, year: int) -> dict:
+    """OLD portfolio with the DEBT fields (rueckstand / top_debtors / warnings.
+    debtors) sourced from the ledger when IMMO_LEDGER_READ is ON. Everything else
+    (vacancy / ist / charts) stays OLD. Flag OFF → 100% _portfolio. Any ledger
+    error → OLD fallback (the unmodified base). _portfolio itself stays pure OLD
+    so parity is unaffected."""
+    base = _portfolio(db, uid, year)
+    from autotax.config import immo_ledger_read_enabled
+    if not immo_ledger_read_enabled():
+        return base
+    if _lazy_ledger_refresh(db, uid, year)["ledger_refresh_status"] != "ok":
+        return base  # OLD fallback
+    try:
+        dbt = _src.src_debtors(db, uid, year)
+        rueck = _src.src_arrears_total(db, uid, year)
+    except Exception as e:
+        logger.warning("immo ledger read failed (OLD fallback) uid=%s year=%s: %s", uid, year, e)
+        return base
+    base["financial"]["rueckstand"] = rueck
+    base["top_debtors"] = dbt[:5]
+    base["warnings"]["debtors"] = len(dbt)
+    return base
+
+
 @router.get("/dashboard")
 def immo_dashboard(year: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
     db = SessionLocal()
     try:
-        return _portfolio(db, _uid(user), year or datetime.now(timezone.utc).year)
+        return portfolio_view(db, _uid(user), year or datetime.now(timezone.utc).year)
     finally:
         db.close()
 
@@ -1083,7 +1133,8 @@ def _cockpit(db, uid, year, base=None):
 def immo_cockpit(year: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
     db = SessionLocal()
     try:
-        return _cockpit(db, _uid(user), year or datetime.now(timezone.utc).year)
+        y = year or datetime.now(timezone.utc).year
+        return _cockpit(db, _uid(user), y, base=portfolio_view(db, _uid(user), y))
     finally:
         db.close()
 
