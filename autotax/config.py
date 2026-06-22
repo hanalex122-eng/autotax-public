@@ -57,6 +57,16 @@ def immo_ledger_read_enabled() -> bool:
     return _flag("IMMO_LEDGER_READ", "0")
 
 
+def immo_ledger_mahnung_enabled() -> bool:
+    """Backend-only flag for sourcing the Mahnung amount from the LEDGER (Faz 4.3).
+    INDEPENDENT of IMMO_LEDGER_READ — Mahnung is a legal document, isolated. Default
+    OFF → Mahnung uses OLD _tenancy_arrears exactly as today. ON → ledger amount,
+    but ONLY when a per-Mahnung parity guard confirms it equals OLD to the cent;
+    any mismatch/refresh failure falls back to OLD (a wrong amount must never reach
+    a legal letter). Flip with IMMO_LEDGER_MAHNUNG=1."""
+    return _flag("IMMO_LEDGER_MAHNUNG", "0")
+
+
 def tax_engine_v2_enabled() -> bool:
     """Backend-only feature flag for the knowledge-driven tax engine v2 API
     (tax_engine package + /tax/* read-only routers). Default OFF — when off,

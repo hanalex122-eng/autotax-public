@@ -1155,6 +1155,37 @@ def _tenancy_arrears(db, uid, t, year):
     return round(max(0, soll - ist), 2)
 
 
+def _mahnung_betrag(db, uid, t, year) -> float:
+    """Mahnung open amount with the Faz 4.3 per-Mahnung parity GUARD.
+
+    Flag OFF → OLD _tenancy_arrears (today, bit-for-bit).
+    Flag ON  → ledger src_tenancy_arrears, but ONLY if it equals OLD to the cent.
+               Any mismatch OR lazy-ensure/read failure → OLD amount + WARN. A wrong
+               amount must NEVER reach a legal Mahnung; the guard always degrades to
+               the OLD value rather than trusting a divergent/stale ledger."""
+    old = _tenancy_arrears(db, uid, t, year)
+    from autotax.config import immo_ledger_mahnung_enabled
+    if not immo_ledger_mahnung_enabled():
+        return old
+    if _lazy_ledger_refresh(db, uid, year)["ledger_refresh_status"] != "ok":
+        logger.warning("mahnung_guard refresh_failed uid=%s tenancy=%s year=%s -> OLD amount", uid, t.id, year)
+        return old
+    try:
+        # Read the ledger DIRECTLY (not via src_tenancy_arrears, which is gated by
+        # the separate IMMO_LEDGER_READ flag). Mahnung has its own flag + guard.
+        _sal = _read.saldo_by_tenancy(db, uid, year).get(t.id, {})
+        led = round(max(0.0, float(_sal.get("saldo", 0.0))), 2)
+    except Exception as e:
+        logger.warning("mahnung_guard read_failed uid=%s tenancy=%s year=%s err=%s -> OLD amount", uid, t.id, year, e)
+        return old
+    if abs(round(old, 2) - led) > 0.01:
+        logger.warning("mahnung_parity_mismatch uid=%s tenancy=%s year=%s old=%s ledger=%s diff=%s -> OLD amount",
+                       uid, t.id, year, round(old, 2), led, round(led - old, 2))
+        return old
+    logger.info("mahnung_guard ok uid=%s tenancy=%s year=%s amount=%s (ledger==old)", uid, t.id, year, led)
+    return led
+
+
 class MahnungIn(BaseModel):
     stufe: int = 1
     year: Optional[int] = None
@@ -1193,7 +1224,7 @@ def create_mahnung(tid: int, body: MahnungIn, user: dict = Depends(get_current_u
         u = db.query(ImmoUnit).filter(ImmoUnit.id == t.unit_id).first()
         p = db.query(ImmoProperty).filter(ImmoProperty.id == u.property_id).first() if u else None
         y = body.year or datetime.now(timezone.utc).year
-        betrag = _tenancy_arrears(db, uid, t, y)
+        betrag = _mahnung_betrag(db, uid, t, y)  # Faz 4.3: ledger amount behind guard (flag OFF → OLD)
         stufe = body.stufe if body.stufe in (1, 2, 3) else 1
         m = ImmoMahnung(tenancy_id=tid, user_id=uid, datum=date.today(), betrag=betrag, stufe=stufe, notiz=body.notiz)
         db.add(m); db.commit(); db.refresh(m)
