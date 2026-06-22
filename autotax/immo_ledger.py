@@ -227,6 +227,71 @@ def import_rents_to_ledger(db, uid: int) -> dict:
             "skipped_nodate": skipped_nodate, "skipped_dup": skipped_dup}
 
 
+def _backfill_years(db, uid: int) -> list:
+    """Year range to backfill: from the earliest tenancy.von / rent.datum up to
+    the CURRENT year (an ongoing tenancy is active now, so the engine counts the
+    current year → ledger must too). Empty if the user has no immo data."""
+    yrs = set()
+    for (v,) in db.query(ImmoTenancy.von).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all():
+        if v:
+            yrs.add(v.year)
+    for (d,) in db.query(ImmoRent.datum).filter(ImmoRent.user_id == uid, _notdel(ImmoRent)).all():
+        if d:
+            yrs.add(d.year)
+    if not yrs:
+        return []
+    return list(range(min(yrs), max(max(yrs), date.today().year) + 1))
+
+
+def _scope_tenancy_count(db, uid: int, years: list) -> int:
+    """Distinct tenancies that fall in scope (Kaltmiete>0 and ≥1 active month in
+    the range). Computed from tenancy data — independent of ledger/session state,
+    so it is stable in both dry-run and execute."""
+    if not years:
+        return 0
+    tens = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all()
+    cnt = 0
+    for t in tens:
+        if float(t.kaltmiete or 0) <= 0:
+            continue
+        if any(_active_in_month(t, y, m) for y in years for m in range(1, 13)):
+            cnt += 1
+    return cnt
+
+
+def run_backfill(db, uid: int, *, dry_run: bool = True) -> dict:
+    """Orchestrate the Faz 1 backfill in ONE transaction with rollback safety.
+
+    dry_run=True  → run the same code path, count, then ROLLBACK (writes nothing).
+    dry_run=False → COMMIT (idempotent: a re-run writes 0 because the engine
+                    functions are set-difference + partial-unique guarded).
+
+    Returns the exact requested shape:
+        {dry_run, soll_to_create, payments_to_import, tenancies, rents}
+    Touches ONLY immo_ledger_entry — no cockpit/mahnung/debtor/dashboard/risk,
+    no immo_rent mutation. Any error → rollback + re-raise.
+    """
+    try:
+        years = _backfill_years(db, uid)
+        soll = sum(ensure_sollbuchungen(db, uid, y) for y in years)
+        pay = import_rents_to_ledger(db, uid)
+        result = {
+            "dry_run": dry_run,
+            "soll_to_create": soll,
+            "payments_to_import": pay["imported"],
+            "tenancies": _scope_tenancy_count(db, uid, years),
+            "rents": pay["imported"] + pay["skipped_dup"],
+        }
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+
+
 # ── idempotency indexes (called from db.init_db AND tests) ────────────
 def ensure_ledger_indexes(engine) -> None:
     """Create the partial-unique indexes that guarantee backfill idempotency.

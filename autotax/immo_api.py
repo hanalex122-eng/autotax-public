@@ -10,6 +10,7 @@ Plus per-property dashboard (year) and a one-click annual PDF report.
 from __future__ import annotations
 
 import io
+import os
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -19,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from autotax import storage
+from autotax import immo_ledger as _ledger
 from autotax.auth import get_current_user
 from autotax.db import SessionLocal
 from autotax.models import (ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, ImmoDocument,
@@ -1231,5 +1233,35 @@ def delete_event(eid: int, user: dict = Depends(get_current_user)):
         e.is_deleted = True; e.deleted_at = datetime.now(timezone.utc)
         db.commit()
         return {"success": True}
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  LEDGER BACKFILL (Faz 1.2) — admin-gated, dry-run/execute.
+#  Writes ONLY immo_ledger_entry. Does NOT change cockpit/mahnung/debtor/
+#  dashboard/risk — the ledger is NOT yet a read source (that is Faz 4,
+#  gated by parity). This endpoint only moves existing data into the ledger.
+# ══════════════════════════════════════════════════════════════════════
+def _is_admin(user: dict) -> bool:
+    """Owner/admin gate — token email vs ADMIN_EMAILS (same basis as the
+    /admin/* middleware). Signed JWT, so the email is trustworthy."""
+    admins = {e.strip().lower() for e in (os.getenv("ADMIN_EMAILS") or "").split(",") if e.strip()}
+    return bool(admins) and (user.get("email") or "").strip().lower() in admins
+
+
+@router.post("/_ledger/backfill")
+def ledger_backfill(dry_run: bool = Query(True), user: dict = Depends(get_current_user)):
+    """Run the Faz 1 backfill for the calling admin's own data.
+
+    dry_run=true (default) counts and writes NOTHING; dry_run=false executes in a
+    single transaction (rollback-safe, idempotent). Returns:
+        {dry_run, soll_to_create, payments_to_import, tenancies, rents}
+    """
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Admin only")
+    db = SessionLocal()
+    try:
+        return _ledger.run_backfill(db, _uid(user), dry_run=dry_run)
     finally:
         db.close()
