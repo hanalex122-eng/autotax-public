@@ -974,8 +974,11 @@ def _days_since(s, today):
         return None
 
 
-def _cockpit(db, uid, year):
-    base = _portfolio(db, uid, year)
+def _cockpit(db, uid, year, base=None):
+    # base injectable so the consumer path (Faz 4.2) can feed a ledger-sourced
+    # portfolio_view, while parity keeps calling _cockpit() → pure OLD _portfolio.
+    if base is None:
+        base = _portfolio(db, uid, year)
     P, F = base["portfolio"], base["financial"]
     today = date.today()
     soll = F["soll"] or 0
