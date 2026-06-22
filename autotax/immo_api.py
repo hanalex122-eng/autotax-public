@@ -21,10 +21,11 @@ from pydantic import BaseModel, Field
 
 from autotax import storage
 from autotax import immo_ledger as _ledger
+from autotax import immo_ledger_read as _read
 from autotax.auth import get_current_user
 from autotax.db import SessionLocal
 from autotax.models import (ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, ImmoDocument,
-                            ImmoUnit, ImmoTenancy, ImmoMahnung, ImmoEvent)
+                            ImmoUnit, ImmoTenancy, ImmoMahnung, ImmoEvent, ImmoLedgerEntry)
 
 router = APIRouter(prefix="/immo", tags=["immobilien"])
 
@@ -1263,5 +1264,97 @@ def ledger_backfill(dry_run: bool = Query(True), user: dict = Depends(get_curren
     db = SessionLocal()
     try:
         return _ledger.run_backfill(db, _uid(user), dry_run=dry_run)
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  PARITY COMPARATOR (Faz 3) — proves LEDGER == OLD engine before cutover.
+#  GATE: no read-path is switched to the ledger (Faz 4) until passed=True.
+#  Read-only; changes NOTHING. Money tol ±0.01, counts exact.
+# ══════════════════════════════════════════════════════════════════════
+def _parity_old(db, uid: int, year: int) -> dict:
+    """OLD-engine metrics, mirroring _portfolio's scoping exactly."""
+    P = _portfolio(db, uid, year)
+    props = db.query(ImmoProperty).filter(ImmoProperty.user_id == uid, _notdel(ImmoProperty)).all()
+    pids = [p.id for p in props]
+    units = db.query(ImmoUnit).filter(ImmoUnit.user_id == uid, _notdel(ImmoUnit),
+                                      ImmoUnit.property_id.in_(pids)).all() if pids else []
+    uids = [u.id for u in units]
+    tens = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy),
+                                        ImmoTenancy.unit_id.in_(uids)).all() if uids else []
+    rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent), ImmoRent.property_id.in_(pids),
+                                      ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all() if pids else []
+    ist_by = {}
+    for r in rents:
+        if r.tenancy_id:
+            ist_by[r.tenancy_id] = ist_by.get(r.tenancy_id, 0) + float(r.betrag or 0)
+    debtor_count = 0
+    per_saldo = {}
+    for t in tens:
+        soll_t = _months_active_in_year(t, year) * float(t.kaltmiete or 0)
+        ist_t = round(ist_by.get(t.id, 0), 2)
+        per_saldo[t.id] = round(soll_t - ist_t, 2)
+        if round(max(0, soll_t - ist_t), 2) > 0:
+            debtor_count += 1
+    C = _cockpit(db, uid, year)
+    red = [a for a in C["actions"] if a.get("severity") == "red"]
+    return {"rueckstand": P["financial"]["rueckstand"], "ist": P["financial"]["ist"],
+            "debtor_count": debtor_count, "per_saldo": per_saldo,
+            "cockpit_red": len(red), "cockpit_red_nondebt": sum(1 for a in red if a.get("typ") != "debt")}
+
+
+def parity_report(db, uid: int, year: int) -> dict:
+    """Compare OLD engine vs LEDGER read model across 6 metrics. Returns
+    {year, passed, metrics:[{metric, old, ledger, diff, ok}]}. GATE for Faz 4."""
+    old = _parity_old(db, uid, year)
+    Lf = _read.offene_forderungen(db, uid, year)
+    Ldebt = _read.debtor_list(db, uid, year)
+    Lsal = _read.saldo_by_tenancy(db, uid, year)
+    # collected (ist): exact = −Σ betrag of rent-imported entries (incl. refund=korrektur)
+    imp = db.query(ImmoLedgerEntry.betrag).filter(
+        ImmoLedgerEntry.user_id == uid, ImmoLedgerEntry.source == "import_rent",
+        ImmoLedgerEntry.konto_art == "miete", ImmoLedgerEntry.jahr == year,
+        (ImmoLedgerEntry.is_deleted == False) | (ImmoLedgerEntry.is_deleted == None)).all()  # noqa: E712
+    ledger_ist = round(-sum(float(b or 0) for (b,) in imp), 2)
+    ledger_cockpit_red = old["cockpit_red_nondebt"] + sum(1 for d in Ldebt[:5] if d["risk_level"] == "high")
+    # per-tenancy saldo
+    o_sum = l_sum = 0.0
+    mismatches = []
+    for tid in set(old["per_saldo"]) | set(Lsal):
+        o = round(old["per_saldo"].get(tid, 0.0), 2)
+        l = round(Lsal.get(tid, {}).get("saldo", 0.0), 2)
+        o_sum += o; l_sum += l
+        if abs(o - l) > 0.01:
+            mismatches.append({"tenancy_id": tid, "old": o, "ledger": l, "diff": round(l - o, 2)})
+
+    def _row(metric, o, l, tol, extra=None):
+        diff = round(float(l) - float(o), 2)
+        ok = abs(diff) <= tol
+        r = {"metric": metric, "old": o, "ledger": l, "diff": diff, "ok": bool(ok)}
+        if extra is not None:
+            r["mismatches"] = extra
+            r["ok"] = bool(ok and not extra)
+        return r
+
+    metrics = [
+        _row("offene_forderung", old["rueckstand"], Lf["total"], 0.01),
+        _row("debtor_count", old["debtor_count"], len(Ldebt), 0),
+        _row("mahnung_candidates", old["debtor_count"], len(Ldebt), 0),
+        _row("cockpit_critical", old["cockpit_red"], ledger_cockpit_red, 0),
+        _row("collected_rent", old["ist"], ledger_ist, 0.01),
+        _row("tenancy_saldo", round(o_sum, 2), round(l_sum, 2), 0.01, mismatches),
+    ]
+    return {"year": year, "passed": all(m["ok"] for m in metrics), "metrics": metrics}
+
+
+@router.get("/_ledger/parity")
+def ledger_parity(year: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
+    """Admin-only parity report (OLD vs LEDGER). GATE: cutover (Faz 4) only when passed=True."""
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Admin only")
+    db = SessionLocal()
+    try:
+        return parity_report(db, _uid(user), year or datetime.now(timezone.utc).year)
     finally:
         db.close()
