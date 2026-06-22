@@ -18,6 +18,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 
 from autotax import storage
 from autotax import immo_ledger as _ledger
@@ -210,6 +211,7 @@ def delete_property(pid: int, user: dict = Depends(get_current_user)):
     try:
         p = _own_property(db, _uid(user), pid)
         p.is_deleted = True; p.deleted_at = datetime.now(timezone.utc)
+        _cascade_ledger_delete(db, _uid(user), property_id=pid)  # Faz 4.0: keep ledger scope in sync
         db.commit()
         return {"success": True}
     finally:
@@ -684,6 +686,8 @@ def delete_unit(uid_: int, user: dict = Depends(get_current_user)):
     try:
         u = _own_unit(db, _uid(user), uid_)
         u.is_deleted = True; u.deleted_at = datetime.now(timezone.utc)
+        _tids = [t for (t,) in db.query(ImmoTenancy.id).filter(ImmoTenancy.unit_id == uid_).all()]
+        _cascade_ledger_delete(db, _uid(user), unit_id=uid_, tenancy_ids=_tids)  # Faz 4.0: incl. payments (no unit_id)
         db.commit()
         return {"success": True}
     finally:
@@ -744,6 +748,7 @@ def delete_tenancy(tid: int, user: dict = Depends(get_current_user)):
         if not t:
             raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
         t.is_deleted = True; t.deleted_at = datetime.now(timezone.utc)
+        _cascade_ledger_delete(db, _uid(user), tenancy_id=tid)  # Faz 4.0: keep ledger scope in sync
         db.commit()
         return {"success": True}
     finally:
@@ -1356,5 +1361,99 @@ def ledger_parity(year: Optional[int] = Query(None), user: dict = Depends(get_cu
     db = SessionLocal()
     try:
         return parity_report(db, _uid(user), year or datetime.now(timezone.utc).year)
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  LEDGER SCOPE CONSISTENCY (Faz 4.0) — delete-cascade + reconcile.
+#  Keeps the ledger's scope identical to property/unit/tenancy scope so the
+#  orphan drift parity caught (deleted property with live ledger rows) can
+#  never recur. Pure data consistency: NO flag, NO read-path change — cockpit/
+#  debtor/mahnung/dashboard untouched. Cutover (4.1+) is blocked until this ships.
+# ══════════════════════════════════════════════════════════════════════
+def _cascade_ledger_delete(db, uid: int, *, property_id=None, unit_id=None,
+                           tenancy_id=None, tenancy_ids=None) -> int:
+    """Soft-delete active ledger rows belonging to a just-deleted property/unit/
+    tenancy. NOTE: payment entries carry tenancy_id but NOT unit_id, so a unit
+    delete MUST also pass the unit's tenancy_ids (the caller does) — otherwise
+    payments would be missed. Matches ANY given condition (OR). Same transaction
+    as the parent delete. Returns rows affected."""
+    conds = []
+    if property_id is not None:
+        conds.append(ImmoLedgerEntry.property_id == property_id)
+    if unit_id is not None:
+        conds.append(ImmoLedgerEntry.unit_id == unit_id)
+    if tenancy_id is not None:
+        conds.append(ImmoLedgerEntry.tenancy_id == tenancy_id)
+    if tenancy_ids:
+        conds.append(ImmoLedgerEntry.tenancy_id.in_(tenancy_ids))
+    if not conds:
+        return 0
+    notdel = (ImmoLedgerEntry.is_deleted == False) | (ImmoLedgerEntry.is_deleted == None)  # noqa: E712
+    return db.query(ImmoLedgerEntry).filter(
+        ImmoLedgerEntry.user_id == uid, notdel, or_(*conds)).update(
+        {ImmoLedgerEntry.is_deleted: True, ImmoLedgerEntry.deleted_at: datetime.now(timezone.utc)},
+        synchronize_session=False)
+
+
+@router.post("/_ledger/reconcile")
+def ledger_reconcile(dry_run: bool = Query(True), user: dict = Depends(get_current_user)):
+    """Admin: find (and optionally soft-delete) ORPHAN ledger rows.
+
+    Orphan = active ledger entry NOT in the active scope, i.e. its tenancy is not
+    under a non-deleted unit under a non-deleted property (entries without a
+    tenancy fall back to property scope). Scope-based — does NOT rely on unit_id/
+    property_id columns alone (payment entries have NULL unit_id). Belt-and-
+    suspenders for the delete-cascade. dry_run=true reports only. Returns:
+        {dry_run, orphan_by_property, orphan_by_unit, orphan_by_tenancy,
+         total_orphan, cleaned}
+    Breakdown attributes each orphan to the deepest deleted level (tenancy >
+    unit > property); the three are disjoint and sum to total_orphan."""
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Admin only")
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        # active scope (mirrors OLD _portfolio / backfill)
+        act_pids = set(_ledger._active_pids(db, uid))
+        act_units = _ledger._active_units(db, uid, list(act_pids))
+        act_tids = set(t.id for t in _ledger._active_tenancies(db, uid, act_units))
+        # maps of ALL (incl. deleted) for breakdown
+        tens = {t.id: t for t in db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid).all()}
+        units = {u.id: u for u in db.query(ImmoUnit).filter(ImmoUnit.user_id == uid).all()}
+        notdel = (ImmoLedgerEntry.is_deleted == False) | (ImmoLedgerEntry.is_deleted == None)  # noqa: E712
+        rows = db.query(ImmoLedgerEntry).filter(ImmoLedgerEntry.user_id == uid, notdel).all()
+
+        def _in_scope(e):
+            if e.tenancy_id is not None:
+                return e.tenancy_id in act_tids
+            return e.property_id in act_pids  # tenancy-less entry → property scope
+
+        by_p = by_u = by_t = 0
+        orphan_ids = []
+        for e in rows:
+            if _in_scope(e):
+                continue
+            orphan_ids.append(e.id)
+            t = tens.get(e.tenancy_id) if e.tenancy_id is not None else None
+            if e.tenancy_id is not None and (t is None or t.is_deleted):
+                by_t += 1
+            else:
+                u = units.get(t.unit_id) if t else None
+                if t is not None and (u is None or u.is_deleted):
+                    by_u += 1
+                else:
+                    by_p += 1  # property-level (or tenancy-less under deleted property)
+        total = len(orphan_ids)
+        cleaned = 0
+        if not dry_run and total:
+            cleaned = db.query(ImmoLedgerEntry).filter(
+                ImmoLedgerEntry.id.in_(orphan_ids)).update(
+                {ImmoLedgerEntry.is_deleted: True, ImmoLedgerEntry.deleted_at: datetime.now(timezone.utc)},
+                synchronize_session=False)
+            db.commit()
+        return {"dry_run": dry_run, "orphan_by_property": by_p, "orphan_by_unit": by_u,
+                "orphan_by_tenancy": by_t, "total_orphan": total, "cleaned": cleaned}
     finally:
         db.close()
