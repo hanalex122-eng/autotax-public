@@ -2560,9 +2560,18 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       </div>
       {S.zahlungsausfall>0&&<div style={{...css.card,background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",marginBottom:12}}>⚠ {_L("Mietrückstand (Zahlungsausfall)","Kira borcu","Rent arrears")}: <b>{_e(S.zahlungsausfall)}</b></div>}
       {tncs.length>0&&<div style={{...css.card,marginBottom:12}}><div style={{fontWeight:700,marginBottom:8}}>📋 {_L("Mietenkonto (pro Mieter)","Kiracı bazında hesap","Per-tenant ledger")}</div>
-        <div style={{overflowX:"auto"}}><table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}><thead><tr style={{color:theme.textDim,textAlign:"left"}}><th style={{padding:4}}>{_L("Mieter","Kiracı","Tenant")}</th><th>{_L("Zeitraum","Dönem","Period")}</th><th>{_L("Mon.","Ay","Mo")}</th><th>Soll</th><th>Ist</th><th>{_L("Rückstand","Borç","Arrears")}</th></tr></thead><tbody>
-          {tncs.map(t=><tr key={t.tenancy_id} style={{borderTop:"1px solid "+theme.border}}><td style={{padding:4,fontWeight:600}}>{t.mieter_name}</td><td style={{fontSize:11}}>{t.von}→{t.bis||_L("läuft","devam","ongoing")}</td><td>{t.monate}</td><td>{_e(t.soll)}</td><td style={{color:theme.accent}}>{_e(t.ist)}</td><td style={{color:t.rueckstand>0?theme.danger:theme.textMuted}}>{_e(t.rueckstand)}</td></tr>)}
-        </tbody></table></div></div>}
+        {isMob
+          ? <div style={{display:"flex",flexDirection:"column",gap:8}}>{tncs.map(t=><div key={t.tenancy_id} style={{padding:"8px 10px",background:theme.surfaceAlt,borderRadius:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><b style={{fontSize:13}}>{t.mieter_name}</b><span style={{fontSize:11,color:theme.textMuted}}>{t.von}→{t.bis||_L("läuft","devam","ongoing")} · {t.monate} {_L("Mon.","ay","mo")}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:6,fontSize:12,flexWrap:"wrap"}}>
+                <span style={{color:theme.textDim}}>Soll <b style={{color:theme.text}}>{_e(t.soll)}</b></span>
+                <span style={{color:theme.textDim}}>Ist <b style={{color:theme.accent}}>{_e(t.ist)}</b></span>
+                <span style={{color:theme.textDim}}>{_L("Rückstand","Borç","Arrears")} <b style={{color:t.rueckstand>0?theme.danger:theme.textMuted}}>{_e(t.rueckstand)}</b></span>
+              </div>
+            </div>)}</div>
+          : <div style={{overflowX:"auto"}}><table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}><thead><tr style={{color:theme.textDim,textAlign:"left"}}><th style={{padding:4}}>{_L("Mieter","Kiracı","Tenant")}</th><th>{_L("Zeitraum","Dönem","Period")}</th><th>{_L("Mon.","Ay","Mo")}</th><th>Soll</th><th>Ist</th><th>{_L("Rückstand","Borç","Arrears")}</th></tr></thead><tbody>
+              {tncs.map(t=><tr key={t.tenancy_id} style={{borderTop:"1px solid "+theme.border}}><td style={{padding:4,fontWeight:600}}>{t.mieter_name}</td><td style={{fontSize:11}}>{t.von}→{t.bis||_L("läuft","devam","ongoing")}</td><td>{t.monate}</td><td>{_e(t.soll)}</td><td style={{color:theme.accent}}>{_e(t.ist)}</td><td style={{color:t.rueckstand>0?theme.danger:theme.textMuted}}>{_e(t.rueckstand)}</td></tr>)}
+            </tbody></table></div>}</div>}
       {units.length>0&&<div style={{...css.card,marginBottom:12}}><div style={{fontWeight:700,marginBottom:8}}>🏘️ {_L("Einheiten","Daireler","Units")}</div>
         {units.map(u=>{const uf=uFull[u.unit_id]||{};return(<div key={u.unit_id} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderTop:"1px solid "+theme.border,gap:8,flexWrap:"wrap"}}><span>{u.name}{uf.wohnflaeche!=null?<span style={{color:theme.textDim}}> · {uf.wohnflaeche} m²</span>:null}</span><span style={{color:theme.textMuted}}>{_L("Belegung","Doluluk","Occ")} {u.belegungsquote}% · {_L("Leerstand","Boşluk","Vacancy")} {_e(u.leerstandsverlust)}</span></div>);})}
       </div>}
@@ -2591,7 +2600,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
         <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} onChange={e=>b=e.target.value}/>
         <input style={_inp} type="date" defaultValue={new Date().toISOString().slice(0,10)} onChange={e=>d=e.target.value}/>
         <button style={_btn("#10b981")} onClick={()=>{if(b)addRent({tenancy_id:tid?parseInt(tid):null,betrag:parseFloat(b),datum:d||new Date().toISOString().slice(0,10)});}}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
-      {rents.map(r=>{const tn=tncs.find(t=>t.tenancy_id===r.tenancy_id);return(<div key={r.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><b style={{color:theme.accent}}>{_e(r.betrag)}</b> <span style={{fontSize:12,color:theme.textMuted}}>{r.datum}{tn?" · "+tn.mieter_name:""}</span></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("rent",r.id)}>✕</span></div>);})}
+      {rents.map(r=>{const tn=tncs.find(t=>t.tenancy_id===r.tenancy_id);return(<div key={r.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div><b style={{color:theme.accent}}>{_e(r.betrag)}</b> <span style={{fontSize:12,color:theme.textMuted}}>{r.datum}{tn?" · "+tn.mieter_name:""}</span></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("rent",r.id)}>✕</span></div>);})}
     </div>);})()}
     {tab==="ausgaben"&&(()=>{let b,d,k="nebenkosten",be;return(<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Ausgabe erfassen","Gider ekle","Add expense")}</div>
@@ -2600,7 +2609,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
         <input style={_inp} placeholder={_L("Beschreibung","Açıklama","Description")} onChange={e=>be=e.target.value}/>
         <input style={_inp} type="date" defaultValue={new Date().toISOString().slice(0,10)} onChange={e=>d=e.target.value}/>
         <button style={_btn("#ef4444")} onClick={()=>{if(b)addExp({kategorie:k,betrag:parseFloat(b),beschreibung:be,datum:d||new Date().toISOString().slice(0,10)});}}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
-      {exps.map(x=><div key={x.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><b style={{color:theme.danger}}>{_e(x.betrag)}</b> <span style={css.badge(theme.blueSoft,theme.blue)}>{katLbl(x.kategorie)}</span><div style={{fontSize:12,color:theme.textMuted}}>{x.datum} · {x.beschreibung}</div></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("expenses",x.id)}>✕</span></div>)}
+      {exps.map(x=><div key={x.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div><b style={{color:theme.danger}}>{_e(x.betrag)}</b> <span style={css.badge(theme.blueSoft,theme.blue)}>{katLbl(x.kategorie)}</span><div style={{fontSize:12,color:theme.textMuted}}>{x.datum} · {x.beschreibung}</div></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("expenses",x.id)}>✕</span></div>)}
     </div>);})()}
     {tab==="dokumente"&&<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Dokument hochladen","Belge yükle","Upload document")}</div>
