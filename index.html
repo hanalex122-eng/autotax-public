@@ -2361,14 +2361,16 @@ function ImmoDashboardView({onNav}){
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontWeight:700}}>{_L("Portfolio-Score","Portföy skoru","Portfolio score")}</span><span style={{fontWeight:800,color:sevCol(S.color)}}>{S.total}/100</span></div>
       {[["belegung",_L("Belegung","Doluluk","Occupancy")],["inkasso",_L("Inkasso","Tahsilat","Collection")],["leerstand",_L("Leerstand","Boşluk","Vacancy")],["schulden",_L("Schulden","Borç","Debt")],["rendite",_L("Rendite","Getiri","Yield")]].map(([k,l])=>{const v=S.components[k];const c=v>=80?theme.accent:(v>=60?"#f59e0b":theme.danger);return(<div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:12,width:92,color:theme.textMuted}}>{l}</span><div style={{flex:1,height:8,background:theme.surfaceAlt,borderRadius:4}}><div style={{height:8,width:v+"%",background:c,borderRadius:4}}></div></div><span style={{fontSize:12,width:28,textAlign:"right",fontFamily:mono}}>{v}</span></div>);})}
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,alignItems:"start"}}>
       {cards.map(c=><div key={c.k} onClick={()=>setExp(exp===c.k?null:c.k)} style={{...css.card,cursor:"pointer",minWidth:0,borderBottom:exp===c.k?"2px solid "+c.col:"2px solid transparent"}}>
         <div style={{fontSize:12,color:theme.textMuted}}>{c.icon} {c.label}</div>
         <div style={{fontSize:20,fontWeight:700,color:c.col,fontFamily:mono}}>{c.val}</div>
         <div style={{fontSize:10,color:theme.textDim}}>{exp===c.k?_L("▲ schließen","▲ kapat","▲ close"):_L("▼ Details","▼ detay","▼ details")}</div>
+        {exp===c.k&&<div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+theme.border}} onClick={e=>e.stopPropagation()}>
+          {c.items.length?c.items.map(([n,v],i)=><div key={i} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:12,padding:"3px 0",borderTop:i?"1px solid "+theme.border:"none"}}><span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n}</span><b style={{color:c.col,flexShrink:0}}>{v}</b></div>):<div style={{color:theme.textMuted,fontSize:12}}>{_L("Keine Einträge","Kayıt yok","None")}</div>}
+        </div>}
       </div>)}
     </div>
-    {exp&&<div style={css.card}>{(()=>{const c=cards.find(x=>x.k===exp);return c.items.length?c.items.map(([n,v],i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderTop:i?"1px solid "+theme.border:"none"}}><span>{n}</span><b style={{color:c.col}}>{v}</b></div>):<div style={{color:theme.textMuted,fontSize:13}}>{_L("Keine Einträge","Kayıt yok","None")}</div>;})()}</div>}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
       <div style={css.card}><div style={{fontWeight:700,marginBottom:6}}>🏆 {_L("Objekt-Ranking","Mülk sıralaması","Property ranking")}</div>
         {d.ranking.length?d.ranking.map((r,i)=><div key={r.property_id} onClick={goImmo} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,padding:"5px 0",borderTop:i?"1px solid "+theme.border:"none",cursor:"pointer"}}><span><b>#{i+1}</b> <span style={{color:sevCol(r.color)}}>●</span> {r.name}</span><span><b>{_e(r.gewinn)}</b> <span style={{color:tCol(r.trend)}}>{tIcon(r.trend)}</span></span></div>):<div style={{color:theme.textMuted,fontSize:13}}>—</div>}</div>
