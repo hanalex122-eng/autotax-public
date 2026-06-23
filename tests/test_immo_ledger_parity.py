@@ -20,6 +20,20 @@ from sqlalchemy.pool import StaticPool
 from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent, ImmoLedgerEntry
 from autotax import immo_ledger as L
 from autotax import immo_api
+from autotax import immo_ledger_read as _read
+
+
+# Parity asserts FULL-year OLD==ledger equality. The due-to-date cap (covered by
+# test_immo_due_to_date.py) is neutralised here by pinning today to year-end, so
+# the 2026 fixture counts all 12 months (the 2025 fixture is already past).
+class _FixedDate(date):
+    @classmethod
+    def today(cls):
+        return date(2026, 12, 31)
+
+
+immo_api.date = _FixedDate
+_read.date = _FixedDate
 
 PASS, FAIL = 0, 0
 

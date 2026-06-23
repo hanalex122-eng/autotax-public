@@ -16,6 +16,18 @@ from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy
 from autotax import immo_ledger as L
 from autotax import immo_ledger_read as R
 
+
+# This suite asserts FULL-year saldo arithmetic (12 Sollbuchungen for 2026). The
+# due-to-date cap (separately covered by test_immo_due_to_date.py) is neutralised
+# here by pinning today to year-end, so every month is already due.
+class _FixedDate(date):
+    @classmethod
+    def today(cls):
+        return date(2026, 12, 31)
+
+
+R.date = _FixedDate
+
 PASS, FAIL = 0, 0
 
 

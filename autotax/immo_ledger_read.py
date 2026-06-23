@@ -30,22 +30,39 @@ def _tenancy_map(db, uid: int) -> dict:
 
 
 # ── saldo per tenancy ─────────────────────────────────────────────────
-def saldo_by_tenancy(db, uid: int, year: Optional[int] = None, konto_art: str = "miete") -> dict:
+def _is_future_soll(typ, jahr, monat, as_of) -> bool:
+    """A Sollbuchung whose month is not yet due relative to as_of (current year
+    capped at current month; future years fully). Mirrors OLD _months_due_to_date
+    so arrears never include rent that is not yet owed."""
+    if typ != "sollbuchung" or jahr is None or monat is None:
+        return False
+    return jahr > as_of.year or (jahr == as_of.year and monat > as_of.month)
+
+
+def saldo_by_tenancy(db, uid: int, year: Optional[int] = None, konto_art: str = "miete",
+                     as_of=None) -> dict:
     """{tenancy_id: {"soll", "ist", "saldo"}}.
 
     soll  = Σ betrag (typ=sollbuchung)
     ist   = −Σ betrag (typ in zahlung/teilzahlung)  → positive = collected
     saldo = Σ betrag (ALL typen incl. korrektur)    → positive = open arrears
-    (saldo can differ from soll−ist when korrektur entries exist; saldo is the
-     authoritative balance and equals OLD soll−ist_old.)
+
+    DUE-TO-DATE: Sollbuchungen for FUTURE months (relative to `as_of`, default
+    today) are EXCLUDED from soll & saldo, so not-yet-due rent never shows as
+    arrears — parity-exact with OLD `_months_due_to_date`. Payments/korrektur
+    always count.
     """
-    q = db.query(ImmoLedgerEntry.tenancy_id, ImmoLedgerEntry.typ, ImmoLedgerEntry.betrag).filter(
+    as_of = as_of or date.today()
+    q = db.query(ImmoLedgerEntry.tenancy_id, ImmoLedgerEntry.typ, ImmoLedgerEntry.betrag,
+                 ImmoLedgerEntry.jahr, ImmoLedgerEntry.monat).filter(
         ImmoLedgerEntry.user_id == uid, _notdel(ImmoLedgerEntry),
         ImmoLedgerEntry.konto_art == konto_art, ImmoLedgerEntry.tenancy_id != None)  # noqa: E711
     if year is not None:
         q = q.filter(ImmoLedgerEntry.jahr == year)
     out: dict = {}
-    for tid, typ, betrag in q.all():
+    for tid, typ, betrag, jahr, monat in q.all():
+        if _is_future_soll(typ, jahr, monat, as_of):
+            continue  # not yet due — excluded from arrears
         d = out.setdefault(tid, {"soll": 0.0, "ist": 0.0, "saldo": 0.0})
         b = float(betrag or 0)
         d["saldo"] += b

@@ -613,6 +613,16 @@ def _months_active_in_year(t, y):
     return sum(1 for m in range(1, 13) if _tenancy_active_in_month(t, y, m))
 
 
+def _months_due_to_date(t, y, as_of=None):
+    """Active months whose rent is ALREADY DUE — current year capped at the current
+    month, past years full, future years 0. Used for arrears/Rückstand/Mahnung so
+    future months (not yet owed) don't show up as debt. (Annual forecast Soll keeps
+    using _months_active_in_year.)"""
+    as_of = as_of or date.today()
+    last = 12 if y < as_of.year else (as_of.month if y == as_of.year else 0)
+    return sum(1 for m in range(1, last + 1) if _tenancy_active_in_month(t, y, m))
+
+
 class UnitIn(BaseModel):
     property_id: int
     name: Optional[str] = None
@@ -800,7 +810,7 @@ def _accounting(db, uid, pid, year):
                              "leerstandsverlust": round(leer, 2)})
         total_soll += soll_u; total_occ += occ; total_vac += vac; total_leer += leer
         for t in u_ten:
-            ma = _months_active_in_year(t, year)
+            ma = _months_due_to_date(t, year)
             soll_t = ma * float(t.kaltmiete or 0)
             ist_t = round(ist_by_tenancy.get(t.id, 0), 2)
             tenancy_results.append({"tenancy_id": t.id, "unit_id": u.id, "mieter_name": t.mieter_name,
@@ -910,7 +920,7 @@ def _portfolio(db, uid, year):
     top_debtors = []
     ausfall_total = 0.0
     for t in tenancies:
-        ma = _months_active_in_year(t, year)
+        ma = _months_due_to_date(t, year)
         soll_t = ma * float(t.kaltmiete or 0)
         ist_t = round(ist_by_ten.get(t.id, 0), 2)
         arr = round(max(0, soll_t - ist_t), 2)
@@ -1147,7 +1157,7 @@ EVENT_TYPEN = {"wartung", "versicherung", "grundsteuer", "mieterhoehung", "sonst
 
 
 def _tenancy_arrears(db, uid, t, year):
-    ma = _months_active_in_year(t, year)
+    ma = _months_due_to_date(t, year)
     soll = ma * float(t.kaltmiete or 0)
     rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, ImmoRent.tenancy_id == t.id, _notdel(ImmoRent),
                                       ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all()
@@ -1445,7 +1455,7 @@ def _old_debtors(db, uid: int, year: int) -> list:
     ist_by = _old_ist_by_tenancy(db, uid, pids, year)
     out = []
     for t in tens:
-        soll_t = _months_active_in_year(t, year) * float(t.kaltmiete or 0)
+        soll_t = _months_due_to_date(t, year) * float(t.kaltmiete or 0)
         ist_t = round(ist_by.get(t.id, 0), 2)
         arr = round(max(0, soll_t - ist_t), 2)
         if arr > 0:
@@ -1462,7 +1472,7 @@ def _parity_old(db, uid: int, year: int) -> dict:
     ist_by = _old_ist_by_tenancy(db, uid, pids, year)
     per_saldo = {}
     for t in tens:
-        soll_t = _months_active_in_year(t, year) * float(t.kaltmiete or 0)
+        soll_t = _months_due_to_date(t, year) * float(t.kaltmiete or 0)
         per_saldo[t.id] = round(soll_t - round(ist_by.get(t.id, 0), 2), 2)
     debtor_count = len(_old_debtors(db, uid, year))
     C = _cockpit(db, uid, year)
