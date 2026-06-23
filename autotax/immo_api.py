@@ -166,6 +166,16 @@ class ExpensePatch(BaseModel):
     document_id: Optional[int] = None
 
 
+def _mahnung_status(db, uid, tid):
+    """Last Mahnung for a tenancy (stufe + datum) for the Mieter card; None if none."""
+    m = db.query(ImmoMahnung).filter(ImmoMahnung.tenancy_id == tid, ImmoMahnung.user_id == uid,
+                                     _notdel(ImmoMahnung)).order_by(ImmoMahnung.datum.desc(), ImmoMahnung.id.desc()).first()
+    if not m:
+        return None
+    return {"stufe": m.stufe, "stufe_text": _STUFE_TXT.get(m.stufe, "Mahnung"),
+            "datum": str(m.datum) if m.datum else None}
+
+
 # ── MIETER (tenant-centric card data) ─────────────────────────────────
 @router.get("/mieter")
 def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_user)):
@@ -215,6 +225,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "anmeldung_done": bool(t.anmeldung_done),
                 "wgb_done": t.wgb_erstellt_am is not None,
                 "wgb_erstellt_am": str(t.wgb_erstellt_am) if t.wgb_erstellt_am else None,
+                "letzte_mahnung": _mahnung_status(db, uid, t.id),
             })
         out.sort(key=lambda x: (-(x["offene_forderung"] or 0), (x["mieter_name"] or "")))
         return {"mieter": out, "year": y}

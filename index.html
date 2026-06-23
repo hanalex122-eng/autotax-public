@@ -708,6 +708,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     {id:"angebote",icon:I.invoice,label:_gl==="de"?"Angebote":_gl==="tr"?"Teklifler":"Quotes"},
     {id:"bookkeeping",icon:I.tax,label:_gl==="de"?"💰 Kasse":_gl==="tr"?"💰 Kasa":"💰 Cash Book"},
     {id:"immobilien_dash",icon:I.tax,label:_gl==="de"?"🏠 Immobilien Cockpit":_gl==="tr"?"🏠 Gayrimenkul Kokpiti":"🏠 Property Cockpit"},
+    {id:"mieter",icon:I.invoice,label:_gl==="de"?"👥 Mieter":_gl==="tr"?"👥 Kiracılar":"👥 Tenants"},
     {id:"immobilien",icon:I.invoice,label:_gl==="de"?"🏠 Immobilien":_gl==="tr"?"🏠 Gayrimenkul":"🏠 Properties"},
     ...(F.kasse_v2===true?[{id:"kasse_v2",icon:I.upload,label:_gl==="de"?"Kasse":_gl==="tr"?"Kasa":"Cash",badge:"NEU"}]:[]),
     {id:"export",icon:I.export,label:_t("export")},
@@ -2462,6 +2463,64 @@ function ImmoTenancyForm({initial,onSave,onCancel}){
     <_ImmoActions onSave={submit} onCancel={onCancel}/>
   </div>);
 }
+
+// ── MIETER (tenant-centric main view) — landlord günlük ana ekranı ──
+function MieterView({onNav,showToast}){
+  const _gl=getLang();
+  const _L=(de,tr,en)=>_gl==="tr"?tr:(_gl==="en"?en:de);
+  const _e=n=>"€"+(Number(n)||0).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const isMob=useIsMobile();
+  const [rows,setRows]=React.useState([]);
+  const [loading,setLoading]=React.useState(true);
+  const [filter,setFilter]=React.useState("alle");
+  const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setLoading(false);}).catch(()=>setLoading(false));};
+  React.useEffect(()=>{load();},[]);
+  const today=new Date().toISOString().slice(0,10);
+  const phaseOf=(m)=>{
+    if(m.auszug&&m.auszug<today) return {k:"ausgezogen",lbl:_L("Ausgezogen","Çıktı","Moved out"),c:theme.textDim,bg:theme.surfaceAlt};
+    if(m.auszug) return {k:"kuendigung",lbl:_L("Kündigung läuft","Çıkış sürüyor","Ending"),c:"#f59e0b",bg:"rgba(245,158,11,0.12)"};
+    if((m.offene_forderung||0)>0) return {k:"rueckstand",lbl:_L("Im Rückstand","Borçlu","In arrears"),c:theme.danger,bg:"rgba(239,68,68,0.12)"};
+    return {k:"aktiv",lbl:_L("Aktiv","Aktif","Active"),c:theme.accent,bg:"rgba(16,185,129,0.12)"};
+  };
+  const FILTERS=[["alle",_L("Alle","Tümü","All")],["aktiv",_L("Aktiv","Aktif","Active")],["rueckstand",_L("Im Rückstand","Borçlu","Arrears")],["kuendigung",_L("Kündigung","Çıkış","Ending")],["ausgezogen",_L("Ausgezogen","Çıktı","Moved out")]];
+  const shown=rows.filter(m=>filter==="alle"||phaseOf(m).k===filter);
+  const dlWgb=async(tid)=>{try{const r=await fetch(API+"/immo/tenancies/"+tid+"/wohnungsgeberbestaetigung/pdf?art=einzug",{headers:{Authorization:"Bearer "+localStorage.getItem("atx_token")}});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();if(j&&j.detail)msg=j.detail;}catch(e){}alert(msg);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="wohnungsgeberbestaetigung_"+tid+".pdf";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}catch(e){alert(e.message);}};
+  const chip=(active,label,c)=>(<span style={{...css.badge(active?"rgba(16,185,129,0.12)":theme.surfaceAlt,active?theme.accent:theme.textDim)}}>{active?"✓":"○"} {label}</span>);
+  const tmBadge=(s)=>s==="paid"?<b style={{color:theme.accent}}>✓ {_L("bezahlt","ödendi","paid")}</b>:s==="partial"?<b style={{color:"#f59e0b"}}>~ {_L("teilweise","kısmi","partial")}</b>:s==="open"?<b style={{color:theme.danger}}>✗ {_L("offen","ödenmedi","open")}</b>:<span style={{color:theme.textDim}}>—</span>;
+  return(<div style={{maxWidth:1000,margin:"0 auto"}}>
+    <div style={{marginBottom:12}}>
+      <div style={{fontSize:22,fontWeight:800,color:theme.text}}>👥 {_L("Mieter","Kiracılar","Tenants")}</div>
+      <div style={{fontSize:13,color:theme.textMuted}}>{rows.length} {_L("Mieter","kiracı","tenants")} · {rows.filter(m=>m.debtor).length} {_L("im Rückstand","borçlu","in arrears")}</div>
+    </div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{FILTERS.map(([k,l])=><button key={k} onClick={()=>setFilter(k)} style={{padding:"6px 12px",borderRadius:20,border:"1px solid "+theme.border,background:filter===k?theme.accent:theme.surfaceAlt,color:filter===k?"#fff":theme.textMuted,fontSize:13,fontWeight:600,cursor:"pointer"}}>{l}</button>)}</div>
+    {loading&&<div style={{...css.card,textAlign:"center",color:theme.textMuted}}>…</div>}
+    {!loading&&!shown.length&&<div style={{...css.card,textAlign:"center",color:theme.textMuted}}>{_L("Keine Mieter in dieser Ansicht.","Bu görünümde kiracı yok.","No tenants here.")}</div>}
+    <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:12,alignItems:"start"}}>
+      {shown.map(m=>{const ph=phaseOf(m);return(<div key={m.tenancy_id} style={{...css.card}}>
+        <div><span style={css.badge(ph.bg,ph.c)}>{ph.lbl}</span></div>
+        <div style={{fontSize:17,fontWeight:800,color:theme.text,marginTop:6}}>{m.mieter_name}</div>
+        <div style={{fontSize:13,color:theme.textMuted}}>{[m.property_name,m.unit_name,(m.wohnflaeche!=null?m.wohnflaeche+" m²":null)].filter(Boolean).join(" · ")}</div>
+        <div style={{display:"flex",gap:"4px 14px",flexWrap:"wrap",fontSize:13,marginTop:10,paddingTop:10,borderTop:"1px solid "+theme.border}}>
+          <span style={{color:theme.textMuted}}>Kalt <b style={{color:theme.text}}>{_e(m.kaltmiete)}</b></span>
+          <span style={{color:theme.textMuted}}>NK <b style={{color:theme.text}}>{_e(m.nk_vorauszahlung)}</b></span>
+          <span style={{color:theme.textMuted}}>Gesamt <b style={{color:theme.accent}}>{_e(m.gesamtmiete)}</b></span>
+        </div>
+        <div style={{fontSize:12,color:theme.textDim,marginTop:6}}>Einzug {m.einzug||"—"}{m.auszug?" → "+m.auszug:""}</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{chip(m.anmeldung_done,"Anmeldung")}{chip(m.wgb_done,"WGB")}</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,paddingTop:10,borderTop:"1px solid "+theme.border,flexWrap:"wrap",gap:8}}>
+          <span style={{fontSize:13,color:theme.textMuted}}>{_L("Diesen Monat","Bu ay","This month")}: {tmBadge(m.this_month_status)}</span>
+          <span style={{fontSize:13,color:theme.textMuted}}>{_L("Offen","Açık","Open")}: <b style={{color:(m.offene_forderung||0)>0?theme.danger:theme.accent}}>{_e(m.offene_forderung)}</b></span>
+        </div>
+        {m.letzte_mahnung&&<div style={{fontSize:12,color:"#f59e0b",marginTop:6}}>⚠ {m.letzte_mahnung.stufe_text} · {m.letzte_mahnung.datum}</div>}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
+          <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>dlWgb(m.tenancy_id)}>📄 WGB</button>
+          <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>onNav&&onNav("immobilien")}>📊 {_L("Mietkonto","Hesap","Account")}</button>
+        </div>
+      </div>);})}
+    </div>
+  </div>);
+}
+
 
 function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
@@ -6921,7 +6980,7 @@ function App(){
   }}/><CookieConsent/></Fragment>;
   // SendInvoicesView: InvoicesView'in sendOnly=true ile kopyasi — sadece email gonder buton'u
   const SendInvoicesView=(props)=><InvoicesView {...props} sendOnly={true}/>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,angebote:AngeboteView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,immobilien_dash:ImmoDashboardView,immobilien:ImmobilienView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView,kasse_v2:KasseAppView};
+  const views={dashboard:DashboardView,invoices:InvoicesView,angebote:AngeboteView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,immobilien_dash:ImmoDashboardView,immobilien:ImmobilienView,mieter:MieterView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView,kasse_v2:KasseAppView};
   const _t=typeof t==="function"?t:k=>k;
   const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),send_invoices:(getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),immobilien_dash:(getLang()==="de"?"🏠 Immobilien Cockpit":getLang()==="tr"?"🏠 Gayrimenkul Kokpiti":"🏠 Property Cockpit"),immobilien:(getLang()==="de"?"🏠 Immobilien":getLang()==="tr"?"🏠 Gayrimenkul":"🏠 Properties"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.
