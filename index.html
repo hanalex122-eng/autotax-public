@@ -2482,6 +2482,13 @@ function MieterView({onNav,showToast}){
   const openPay=(m)=>{setPayDate(new Date().toISOString().slice(0,10));setPayAmt(String(m.gesamtmiete||""));setPayFor(m.tenancy_id);};
   const confirmPay=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:curY,monat:curM,datum:payDate,betrag:parseFloat(payAmt)||m.gesamtmiete})});setPayFor(null);load();if(showToast)showToast(_L("Als bezahlt markiert","Ödendi işaretlendi","Marked paid"),"success");}catch(e){alert(e.message);}};
   const markUnpaid=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt?jahr="+curY+"&monat="+curM,{method:"DELETE"});setPayFor(null);load();}catch(e){alert(e.message);}};
+  const MON=["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+  const [sel,setSel]=React.useState(null);
+  const [mk,setMk]=React.useState(null);
+  const fetchMk=(m)=>api("/immo/tenancies/"+m.tenancy_id+"/mietkonto?year="+curY).then(setMk).catch(()=>{});
+  const openDetail=(m)=>{setSel(m);setMk(null);fetchMk(m);};
+  const payMonth=async(m,mon)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:curY,monat:mon,betrag:m.gesamtmiete})});fetchMk(m);load();}catch(e){alert(e.message);}};
+  const unpayMonth=async(m,mon)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt?jahr="+curY+"&monat="+mon,{method:"DELETE"});fetchMk(m);load();}catch(e){alert(e.message);}};
   const today=new Date().toISOString().slice(0,10);
   const phaseOf=(m)=>{
     if(m.auszug&&m.auszug<today) return {k:"ausgezogen",lbl:_L("Ausgezogen","Çıktı","Moved out"),c:theme.textDim,bg:theme.surfaceAlt};
@@ -2494,6 +2501,46 @@ function MieterView({onNav,showToast}){
   const dlWgb=async(tid)=>{try{const r=await fetch(API+"/immo/tenancies/"+tid+"/wohnungsgeberbestaetigung/pdf?art=einzug",{headers:{Authorization:"Bearer "+localStorage.getItem("atx_token")}});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();if(j&&j.detail)msg=j.detail;}catch(e){}alert(msg);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="wohnungsgeberbestaetigung_"+tid+".pdf";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}catch(e){alert(e.message);}};
   const chip=(active,label,c)=>(<span style={{...css.badge(active?"rgba(16,185,129,0.12)":theme.surfaceAlt,active?theme.accent:theme.textDim)}}>{active?"✓":"○"} {label}</span>);
   const tmBadge=(s)=>s==="paid"?<b style={{color:theme.accent}}>✓ {_L("bezahlt","ödendi","paid")}</b>:s==="partial"?<b style={{color:"#f59e0b"}}>~ {_L("teilweise","kısmi","partial")}</b>:s==="open"?<b style={{color:theme.danger}}>✗ {_L("offen","ödenmedi","open")}</b>:<span style={{color:theme.textDim}}>—</span>;
+  if(sel){const m=sel;const ph=phaseOf(m);const _row=(k,v)=>(<div style={{display:"flex",justifyContent:"space-between",fontSize:14,margin:"4px 0"}}><span style={{color:theme.textMuted}}>{k}</span><b style={{color:theme.text}}>{v}</b></div>);
+    return(<div style={{maxWidth:720,margin:"0 auto"}}>
+      <button onClick={()=>setSel(null)} style={{...css.btnOutline,padding:"6px 12px",fontSize:13,marginBottom:12}}>← {_L("Zurück zu Mieter","Kiracılara dön","Back")}</button>
+      <div style={{...css.card,marginBottom:12}}>
+        <span style={css.badge(ph.bg,ph.c)}>{ph.lbl}</span>
+        <div style={{fontSize:22,fontWeight:800,color:theme.text,marginTop:6}}>{m.mieter_name}</div>
+        <div style={{fontSize:13,color:theme.textMuted}}>{[m.property_name,m.unit_name,(m.wohnflaeche!=null?m.wohnflaeche+" m²":null)].filter(Boolean).join(" · ")}</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{chip(m.anmeldung_done,"Anmeldung")}{chip(m.wgb_done,"WGB")}</div>
+      </div>
+      <div style={{...css.card,marginBottom:12}}>
+        <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>Stammdaten</div>
+        {_row("Kaltmiete",_e(m.kaltmiete))}{_row("NK Vorauszahlung",_e(m.nk_vorauszahlung))}
+        <div style={{borderTop:"1px solid "+theme.border,margin:"6px 0",paddingTop:6}}>{_row(_L("Gesamt / Monat","Toplam / Ay","Total / mo"),<span style={{color:theme.accent}}>{_e(m.gesamtmiete)}</span>)}</div>
+        {_row("Einzug",m.einzug||"—")}{_row("Auszug",m.auszug||"—")}
+      </div>
+      <div style={{...css.card,marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em"}}>Mietkonto {curY}</div>
+          <span style={{fontSize:13,color:theme.textMuted}}>{_L("Offen","Açık","Open")}: <b style={{color:(mk&&mk.summe.offen>0)?theme.danger:theme.accent}}>{_e(mk?mk.summe.offen:0)}</b></span>
+        </div>
+        {!mk&&<div style={{color:theme.textMuted,fontSize:13}}>…</div>}
+        {mk&&mk.rows.filter(r=>r.status!=="inactive").map(r=><div key={r.monat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"8px 0",borderTop:"1px solid "+theme.border,flexWrap:"wrap"}}>
+          <span style={{fontSize:14}}>{MON[r.monat-1]} {curY} · <b style={{color:theme.text}}>{_e(r.soll)}</b></span>
+          {r.status==="future"?<span style={{fontSize:12,color:theme.textDim,fontStyle:"italic"}}>{_L("noch nicht fällig","henüz değil","not due")}</span>
+           :<span style={{display:"flex",gap:8,alignItems:"center"}}>
+             {r.status==="paid"&&<b style={{color:theme.accent,fontSize:13}}>✓ {_L("bezahlt","ödendi","paid")}</b>}
+             {r.status==="partial"&&<b style={{color:"#f59e0b",fontSize:13}}>~ {_e(r.bezahlt)}</b>}
+             {r.status==="open"&&<b style={{color:theme.danger,fontSize:13}}>✗ {_L("offen","açık","open")}</b>}
+             {r.status==="paid"
+               ?<button style={{padding:"5px 10px",background:"transparent",border:"1.5px solid "+theme.danger,color:theme.danger,borderRadius:7,fontSize:12,cursor:"pointer"}} onClick={()=>unpayMonth(m,r.monat)}>✗ {_L("Ödenmedi","Ödenmedi","Unpaid")}</button>
+               :<button style={{padding:"5px 10px",background:theme.accent,color:"#fff",border:"none",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={()=>payMonth(m,r.monat)}>✓ {_L("Ödendi","Ödendi","Paid")}</button>}
+           </span>}
+        </div>)}
+      </div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        <button style={{...css.btnOutline,padding:"8px 12px",fontSize:13}} onClick={()=>dlWgb(m.tenancy_id)}>📄 Wohnungsgeberbestätigung</button>
+        <button style={{...css.btnOutline,padding:"8px 12px",fontSize:13}} onClick={()=>onNav&&onNav("immobilien")}>📨 Mahnung</button>
+        <button style={{...css.btnOutline,padding:"8px 12px",fontSize:13}} onClick={()=>onNav&&onNav("immobilien")}>✏️ {_L("Bearbeiten","Düzenle","Edit")}</button>
+      </div>
+    </div>);}
   return(<div style={{maxWidth:1000,margin:"0 auto"}}>
     <div style={{marginBottom:12}}>
       <div style={{fontSize:22,fontWeight:800,color:theme.text}}>👥 {_L("Mieter","Kiracılar","Tenants")}</div>
@@ -2535,7 +2582,7 @@ function MieterView({onNav,showToast}){
         {m.letzte_mahnung&&<div style={{fontSize:12,color:"#f59e0b",marginTop:6}}>⚠ {m.letzte_mahnung.stufe_text} · {m.letzte_mahnung.datum}</div>}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
           <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>dlWgb(m.tenancy_id)}>📄 WGB</button>
-          <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>onNav&&onNav("immobilien")}>📊 {_L("Mietkonto","Hesap","Account")}</button>
+          <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>openDetail(m)}>📊 {_L("Mietkonto","Hesap","Account")}</button>
         </div>
       </div>);})}
     </div>

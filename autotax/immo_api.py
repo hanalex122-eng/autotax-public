@@ -297,6 +297,55 @@ def unmark_monat_bezahlt(tid: int, jahr: int, monat: int, user: dict = Depends(g
         db.close()
 
 
+@router.get("/tenancies/{tid}/mietkonto")
+def tenancy_mietkonto(tid: int, year: Optional[int] = None, user: dict = Depends(get_current_user)):
+    """Month-by-month Mietkonto for one tenancy (Tenancy Detail screen). Per month:
+    soll (Kaltmiete if active), bezahlt (immo_rent in that month), status
+    (paid|partial|open|future|inactive). immo_rent = payment source of truth, so it
+    matches the Mieter card and reflects Ödendi/Ödenmedi instantly. READ-ONLY."""
+    uid = _uid(user)
+    now = datetime.now(timezone.utc).date()
+    y = year or now.year
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        kalt = float(t.kaltmiete or 0)
+        rents = db.query(ImmoRent).filter(ImmoRent.tenancy_id == tid, ImmoRent.user_id == uid, _notdel(ImmoRent),
+                                          ImmoRent.datum != None).all()  # noqa: E711
+        paid_by_m = {}
+        for r in rents:
+            if r.datum and r.datum.year == y:
+                paid_by_m[r.datum.month] = paid_by_m.get(r.datum.month, 0.0) + float(r.betrag or 0)
+        rows = []
+        soll_due = ist_due = 0.0
+        for m in range(1, 13):
+            active = _tenancy_active_in_month(t, y, m)
+            soll = round(kalt, 2) if active else 0.0
+            paid = round(paid_by_m.get(m, 0.0), 2)
+            is_future = (y > now.year) or (y == now.year and m > now.month)
+            if not active:
+                status = "inactive"
+            elif is_future:
+                status = "future"
+            elif soll > 0 and paid >= soll:
+                status = "paid"
+            elif paid > 0:
+                status = "partial"
+            else:
+                status = "open"
+            if active and not is_future:
+                soll_due += soll
+                ist_due += soll if status == "paid" else min(paid, soll)
+            rows.append({"monat": m, "soll": soll, "bezahlt": paid, "status": status})
+        offen = round(max(0.0, soll_due - ist_due), 2)
+        return {"tenancy_id": tid, "year": y, "rows": rows,
+                "summe": {"soll_faellig": round(soll_due, 2), "bezahlt": round(ist_due, 2), "offen": offen}}
+    finally:
+        db.close()
+
+
 # ── PROPERTIES ────────────────────────────────────────────────────────
 @router.get("/properties")
 def list_properties(user: dict = Depends(get_current_user)):
