@@ -31,7 +31,7 @@ from autotax.auth import get_current_user
 logger = logging.getLogger("autotax")
 from autotax.db import SessionLocal
 from autotax.models import (ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, ImmoDocument,
-                            ImmoUnit, ImmoTenancy, ImmoMahnung, ImmoEvent, ImmoLedgerEntry)
+                            ImmoUnit, ImmoTenancy, ImmoMahnung, ImmoEvent, ImmoLedgerEntry, UserCompany)
 
 router = APIRouter(prefix="/immo", tags=["immobilien"])
 
@@ -1204,6 +1204,58 @@ def list_mahnungen(tid: int, user: dict = Depends(get_current_user)):
         return {"mahnungen": [{"id": m.id, "datum": str(m.datum) if m.datum else "", "betrag": m.betrag,
                                "stufe": m.stufe, "stufe_text": _STUFE_TXT.get(m.stufe, "Mahnung"),
                                "notiz": m.notiz or ""} for m in rows]}
+    finally:
+        db.close()
+
+
+@router.get("/tenancies/{tid}/wohnungsgeberbestaetigung/pdf")
+def wohnungsgeber_pdf(tid: int, art: str = Query("einzug"), user: dict = Depends(get_current_user)):
+    """Wohnungsgeberbestätigung (§19 BMG) PDF for a tenancy. art=einzug|auszug.
+    Single meldepflichtige Person (tenancy.mieter_name). Wohnungsgeber = the user's
+    default UserCompany; 400 if none is set. Additive — does not touch ledger/Mahnung."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        u = db.query(ImmoUnit).filter(ImmoUnit.id == t.unit_id).first()
+        p = db.query(ImmoProperty).filter(ImmoProperty.id == u.property_id).first() if u else None
+        comp = (db.query(UserCompany).filter(UserCompany.user_id == uid, UserCompany.is_default == True).first()  # noqa: E712
+                or db.query(UserCompany).filter(UserCompany.user_id == uid).order_by(UserCompany.id.desc()).first())
+        if not comp:
+            raise HTTPException(status_code=400, detail="Bitte zuerst Firmendaten (Wohnungsgeber) unter 'Firmen' hinterlegen.")
+        art = "auszug" if str(art).lower() == "auszug" else "einzug"
+        art_lbl = "Auszug" if art == "auszug" else "Einzug"
+        dat = (t.bis if art == "auszug" else t.von)
+        dat_s = dat.strftime("%d.%m.%Y") if dat else "—"
+        wohnung = (p.adresse if (p and p.adresse) else (p.name if p else "")) or "—"
+        lage = u.name if u else ""
+        wg_addr = (comp.address or "").replace("\n", "<br/>")
+        ss = getSampleStyleSheet()
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=22 * mm, bottomMargin=18 * mm, leftMargin=22 * mm, rightMargin=22 * mm)
+        heute = date.today().strftime("%d.%m.%Y")
+        body_txt = (
+            "<b>Wohnungsgeberbestätigung</b> (§ 19 Bundesmeldegesetz)<br/><br/>"
+            f"<b>Wohnungsgeber:</b><br/>{comp.company_name}<br/>{wg_addr}<br/><br/>"
+            f"<b>Anschrift der Wohnung:</b><br/>{wohnung}" + (f"<br/>Lage: {lage}" if lage else "") + "<br/><br/>"
+            f"<b>Art des meldepflichtigen Vorgangs:</b> {art_lbl}<br/>"
+            f"<b>Datum des {art_lbl}s:</b> {dat_s}<br/><br/>"
+            f"<b>Meldepflichtige Person:</b><br/>{t.mieter_name}<br/><br/>"
+            f"Hiermit wird der {art_lbl} der oben genannten Person in die bzw. aus der "
+            "genannten Wohnung bestätigt.<br/><br/><br/>"
+            f"________________________________<br/>Ort, Datum: {heute}<br/><br/><br/>"
+            "________________________________<br/>Unterschrift Wohnungsgeber"
+        )
+        doc.build([Paragraph(body_txt, ss["Normal"]), Spacer(1, 4 * mm)])
+        buf.seek(0)
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": f'attachment; filename="wohnungsgeberbestaetigung_{tid}.pdf"'})
     finally:
         db.close()
 
