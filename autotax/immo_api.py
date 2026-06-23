@@ -182,8 +182,9 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
     """Tenant-centric card feed — one row per active tenancy across all properties.
     Aggregates tenancy + unit + property + derived gesamtmiete + arrears (source
     adapter → due-to-date) + this-month payment status + last payment date.
-    READ-ONLY: no ledger / Soll / Ist / Rückstand / Mahnung logic touched."""
-    from autotax.immo_source import src_tenancy_arrears
+    READ-ONLY: no ledger / Soll / Ist / Rückstand / Mahnung logic touched.
+    Arrears come from the OLD immo_rent path (due-to-date) so the card reflects
+    quick Ödendi/Ödenmedi payments immediately (immo_rent = payment source of truth)."""
     uid = _uid(user)
     now = datetime.now(timezone.utc).date()
     y = year or now.year
@@ -198,7 +199,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
             p = props.get(u.property_id) if u else None
             kalt = float(t.kaltmiete or 0)
             nk = float(t.nk_voraus or 0)
-            offen = src_tenancy_arrears(db, uid, t, y)
+            offen = _tenancy_arrears(db, uid, t, y)
             # last payment (immo_rent = payment source of truth)
             lp_row = db.query(ImmoRent.datum).filter(ImmoRent.tenancy_id == t.id, ImmoRent.user_id == uid,
                                                      ImmoRent.datum != None).order_by(ImmoRent.datum.desc()).first()  # noqa: E711
@@ -210,7 +211,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 active = (t.von or date(1900, 1, 1)) <= now and (t.bis is None or t.bis >= mstart)
                 if active:
                     paid_m = sum(float(r.betrag or 0) for r in db.query(ImmoRent).filter(
-                        ImmoRent.tenancy_id == t.id, ImmoRent.user_id == uid,
+                        ImmoRent.tenancy_id == t.id, ImmoRent.user_id == uid, _notdel(ImmoRent),
                         ImmoRent.datum >= mstart, ImmoRent.datum <= now).all())
                     tm = "paid" if (kalt > 0 and paid_m >= kalt) else ("partial" if paid_m > 0 else "open")
             out.append({
@@ -229,6 +230,69 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
             })
         out.sort(key=lambda x: (-(x["offene_forderung"] or 0), (x["mieter_name"] or "")))
         return {"mieter": out, "year": y}
+    finally:
+        db.close()
+
+
+class MonatBezahltIn(BaseModel):
+    jahr: int
+    monat: int = Field(..., ge=1, le=12)
+    datum: Optional[str] = None
+    betrag: Optional[float] = None
+
+
+@router.post("/tenancies/{tid}/monat-bezahlt")
+def mark_monat_bezahlt(tid: int, body: MonatBezahltIn, user: dict = Depends(get_current_user)):
+    """UX 'Ödendi' — record a month's rent as a quick payment (source='quick').
+    Default amount = Gesamtmiete (Kalt+NK); idempotent per month. immo_rent ONLY
+    (payment source of truth) — no ledger/Soll/Ist/Rückstand logic touched."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        u = db.query(ImmoUnit).filter(ImmoUnit.id == t.unit_id).first()
+        if not u:
+            raise HTTPException(status_code=400, detail="Einheit fehlt")
+        amt = body.betrag if body.betrag is not None else round(float(t.kaltmiete or 0) + float(t.nk_voraus or 0), 2)
+        dt = _pdate(body.datum) or date(body.jahr, body.monat, 1)
+        mstart = date(body.jahr, body.monat, 1)
+        mend = date(body.jahr, body.monat, monthrange(body.jahr, body.monat)[1])
+        existing = db.query(ImmoRent).filter(ImmoRent.tenancy_id == tid, ImmoRent.user_id == uid, _notdel(ImmoRent),
+                                             ImmoRent.source == "quick", ImmoRent.datum >= mstart, ImmoRent.datum <= mend).first()
+        if existing:
+            existing.betrag = amt; existing.datum = dt
+        else:
+            db.add(ImmoRent(property_id=u.property_id, tenancy_id=tid, user_id=uid, datum=dt,
+                            betrag=amt, source="quick", notiz="Schnellzahlung (Ödendi)"))
+        db.commit()
+        return {"success": True, "betrag": amt, "jahr": body.jahr, "monat": body.monat}
+    finally:
+        db.close()
+
+
+@router.delete("/tenancies/{tid}/monat-bezahlt")
+def unmark_monat_bezahlt(tid: int, jahr: int, monat: int, user: dict = Depends(get_current_user)):
+    """UX 'Ödenmedi' — soft-delete the quick payment(s) for that month. Only
+    source='quick' rows are removed; manual Mieteingänge are never touched."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        if not (1 <= monat <= 12):
+            raise HTTPException(status_code=400, detail="monat 1-12")
+        mstart = date(jahr, monat, 1)
+        mend = date(jahr, monat, monthrange(jahr, monat)[1])
+        rows = db.query(ImmoRent).filter(ImmoRent.tenancy_id == tid, ImmoRent.user_id == uid, _notdel(ImmoRent),
+                                         ImmoRent.source == "quick", ImmoRent.datum >= mstart, ImmoRent.datum <= mend).all()
+        n = 0
+        for r in rows:
+            r.is_deleted = True; r.deleted_at = datetime.now(timezone.utc); n += 1
+        db.commit()
+        return {"success": True, "removed": n}
     finally:
         db.close()
 

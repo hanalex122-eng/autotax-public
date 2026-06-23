@@ -945,6 +945,7 @@ class ImmoRent(Base):
     datum = Column(Date, nullable=True)
     betrag = Column(Float, nullable=False, default=0.0)
     notiz = Column(String(300), nullable=True)
+    source = Column(String(20), nullable=True)        # manual|quick (Ödendi/Ödenmedi schnell) — UX layer tag
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)

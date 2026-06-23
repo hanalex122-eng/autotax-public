@@ -2473,8 +2473,15 @@ function MieterView({onNav,showToast}){
   const [rows,setRows]=React.useState([]);
   const [loading,setLoading]=React.useState(true);
   const [filter,setFilter]=React.useState("alle");
+  const _now=new Date(); const curY=_now.getFullYear(); const curM=_now.getMonth()+1;
+  const [payFor,setPayFor]=React.useState(null);
+  const [payDate,setPayDate]=React.useState(_now.toISOString().slice(0,10));
+  const [payAmt,setPayAmt]=React.useState("");
   const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setLoading(false);}).catch(()=>setLoading(false));};
   React.useEffect(()=>{load();},[]);
+  const openPay=(m)=>{setPayDate(new Date().toISOString().slice(0,10));setPayAmt(String(m.gesamtmiete||""));setPayFor(m.tenancy_id);};
+  const confirmPay=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:curY,monat:curM,datum:payDate,betrag:parseFloat(payAmt)||m.gesamtmiete})});setPayFor(null);load();if(showToast)showToast(_L("Als bezahlt markiert","Ödendi işaretlendi","Marked paid"),"success");}catch(e){alert(e.message);}};
+  const markUnpaid=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt?jahr="+curY+"&monat="+curM,{method:"DELETE"});setPayFor(null);load();}catch(e){alert(e.message);}};
   const today=new Date().toISOString().slice(0,10);
   const phaseOf=(m)=>{
     if(m.auszug&&m.auszug<today) return {k:"ausgezogen",lbl:_L("Ausgezogen","Çıktı","Moved out"),c:theme.textDim,bg:theme.surfaceAlt};
@@ -2507,9 +2514,23 @@ function MieterView({onNav,showToast}){
         </div>
         <div style={{fontSize:12,color:theme.textDim,marginTop:6}}>Einzug {m.einzug||"—"}{m.auszug?" → "+m.auszug:""}</div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{chip(m.anmeldung_done,"Anmeldung")}{chip(m.wgb_done,"WGB")}</div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,paddingTop:10,borderTop:"1px solid "+theme.border,flexWrap:"wrap",gap:8}}>
-          <span style={{fontSize:13,color:theme.textMuted}}>{_L("Diesen Monat","Bu ay","This month")}: {tmBadge(m.this_month_status)}</span>
-          <span style={{fontSize:13,color:theme.textMuted}}>{_L("Offen","Açık","Open")}: <b style={{color:(m.offene_forderung||0)>0?theme.danger:theme.accent}}>{_e(m.offene_forderung)}</b></span>
+        <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid "+theme.border}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+            <span style={{fontSize:13,color:theme.textMuted}}>{_L("Diesen Monat","Bu ay","This month")}: {tmBadge(m.this_month_status)}</span>
+            <span style={{fontSize:13,color:theme.textMuted}}>{_L("Offen","Açık","Open")}: <b style={{color:(m.offene_forderung||0)>0?theme.danger:theme.accent}}>{_e(m.offene_forderung)}</b></span>
+          </div>
+          <div style={{display:"flex",gap:6,marginTop:8}}>
+            <button style={{padding:"7px 14px",background:theme.accent,color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer"}} onClick={()=>openPay(m)}>✓ {_L("Ödendi","Ödendi","Paid")}</button>
+            <button style={{padding:"7px 14px",background:"transparent",border:"1.5px solid "+theme.danger,color:theme.danger,borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer"}} onClick={()=>markUnpaid(m)}>✗ {_L("Ödenmedi","Ödenmedi","Unpaid")}</button>
+          </div>
+          {payFor===m.tenancy_id&&<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginTop:8,padding:"8px 10px",background:theme.surfaceAlt,borderRadius:8}}>
+            <label style={{fontSize:12,color:theme.textDim}}>{_L("Datum","Tarih","Date")}</label>
+            <input type="date" value={payDate} onChange={e=>setPayDate(e.target.value)} style={{padding:"6px 8px",background:theme.card,border:"1px solid "+theme.border,borderRadius:6,color:theme.text,fontSize:13}}/>
+            <label style={{fontSize:12,color:theme.textDim}}>{_L("Betrag €","Tutar €","Amount €")}</label>
+            <input type="number" value={payAmt} onChange={e=>setPayAmt(e.target.value)} style={{width:90,padding:"6px 8px",background:theme.card,border:"1px solid "+theme.border,borderRadius:6,color:theme.text,fontSize:13}}/>
+            <button style={{padding:"6px 12px",background:theme.accent,color:"#fff",border:"none",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={()=>confirmPay(m)}>💾 {_L("Speichern","Kaydet","Save")}</button>
+            <button style={{padding:"6px 12px",background:"transparent",border:"1px solid "+theme.border,color:theme.textMuted,borderRadius:6,fontSize:12,cursor:"pointer"}} onClick={()=>setPayFor(null)}>{_L("Abbrechen","İptal","Cancel")}</button>
+          </div>}
         </div>
         {m.letzte_mahnung&&<div style={{fontSize:12,color:"#f59e0b",marginTop:6}}>⚠ {m.letzte_mahnung.stufe_text} · {m.letzte_mahnung.datum}</div>}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>

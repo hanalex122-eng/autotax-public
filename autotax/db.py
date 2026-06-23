@@ -48,10 +48,13 @@ def init_db():
         _ii = inspect(engine)
         if "immo_rent" in _ii.get_table_names():
             _rc = [c["name"] for c in _ii.get_columns("immo_rent")]
-            if "tenancy_id" not in _rc:
-                with engine.begin() as conn:
+            with engine.begin() as conn:
+                if "tenancy_id" not in _rc:
                     conn.execute(text("ALTER TABLE immo_rent ADD COLUMN tenancy_id INTEGER"))
-                logger.info("Added 'tenancy_id' column to immo_rent")
+                    logger.info("Added 'tenancy_id' column to immo_rent")
+                if "source" not in _rc:
+                    conn.execute(text("ALTER TABLE immo_rent ADD COLUMN source VARCHAR(20)"))
+                    logger.info("Added 'source' column to immo_rent")
     except Exception as e:
         logger.warning("immo_rent tenancy_id migration skipped: %s", e)
     # Immobilien tenant-centric UX: immo_tenancy status columns (additive, nullable).
