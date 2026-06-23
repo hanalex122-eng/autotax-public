@@ -54,6 +54,20 @@ def init_db():
                 logger.info("Added 'tenancy_id' column to immo_rent")
     except Exception as e:
         logger.warning("immo_rent tenancy_id migration skipped: %s", e)
+    # Immobilien tenant-centric UX: immo_tenancy status columns (additive, nullable).
+    try:
+        _it = inspect(engine)
+        if "immo_tenancy" in _it.get_table_names():
+            _tc = [c["name"] for c in _it.get_columns("immo_tenancy")]
+            with engine.begin() as conn:
+                if "anmeldung_done" not in _tc:
+                    conn.execute(text("ALTER TABLE immo_tenancy ADD COLUMN anmeldung_done BOOLEAN DEFAULT FALSE"))
+                    logger.info("Added 'anmeldung_done' column to immo_tenancy")
+                if "wgb_erstellt_am" not in _tc:
+                    conn.execute(text("ALTER TABLE immo_tenancy ADD COLUMN wgb_erstellt_am TIMESTAMP"))
+                    logger.info("Added 'wgb_erstellt_am' column to immo_tenancy")
+    except Exception as e:
+        logger.warning("immo_tenancy status-column migration skipped: %s", e)
     # Immobilien Ledger (Ledger-First Migration, Faz 0). The immo_ledger_entry
     # table is created by create_all; only the partial-unique indexes (backfill
     # idempotency) must be ensured explicitly. Best-effort — never block startup.

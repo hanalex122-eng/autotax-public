@@ -212,6 +212,9 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "einzug": str(t.von) if t.von else None, "auszug": str(t.bis) if t.bis else None,
                 "offene_forderung": offen, "debtor": offen > 0,
                 "this_month_status": tm, "last_payment_date": last_payment,
+                "anmeldung_done": bool(t.anmeldung_done),
+                "wgb_done": t.wgb_erstellt_am is not None,
+                "wgb_erstellt_am": str(t.wgb_erstellt_am) if t.wgb_erstellt_am else None,
             })
         out.sort(key=lambda x: (-(x["offene_forderung"] or 0), (x["mieter_name"] or "")))
         return {"mieter": out, "year": y}
@@ -651,7 +654,9 @@ def _unit_dict(u):
 def _tenancy_dict(t):
     return {"id": t.id, "unit_id": t.unit_id, "mieter_name": t.mieter_name,
             "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
-            "kaltmiete": t.kaltmiete, "kaution": t.kaution, "nk_voraus": t.nk_voraus}
+            "kaltmiete": t.kaltmiete, "kaution": t.kaution, "nk_voraus": t.nk_voraus,
+            "anmeldung_done": bool(getattr(t, "anmeldung_done", False)),
+            "wgb_erstellt_am": str(t.wgb_erstellt_am) if getattr(t, "wgb_erstellt_am", None) else None}
 
 
 def _tenancy_active_in_month(t, y, m):
@@ -706,6 +711,7 @@ class TenancyPatch(BaseModel):
     kaltmiete: Optional[float] = None
     kaution: Optional[float] = None
     nk_voraus: Optional[float] = None
+    anmeldung_done: Optional[bool] = None
 
 
 # ── UNITS ─────────────────────────────────────────────────────────────
@@ -802,6 +808,7 @@ def update_tenancy(tid: int, body: TenancyPatch, user: dict = Depends(get_curren
         if body.kaltmiete is not None: t.kaltmiete = body.kaltmiete
         if body.kaution is not None: t.kaution = body.kaution
         if body.nk_voraus is not None: t.nk_voraus = body.nk_voraus
+        if body.anmeldung_done is not None: t.anmeldung_done = body.anmeldung_done
         db.commit(); db.refresh(t)
         return {"success": True, **_tenancy_dict(t)}
     finally:
@@ -1316,6 +1323,10 @@ def wohnungsgeber_pdf(tid: int, art: str = Query("einzug"), user: dict = Depends
             "________________________________<br/>Unterschrift Wohnungsgeber"
         )
         doc.build([Paragraph(body_txt, ss["Normal"]), Spacer(1, 4 * mm)])
+        try:
+            t.wgb_erstellt_am = datetime.now(timezone.utc); db.commit()  # UI status: WGB erzeugt
+        except Exception:
+            db.rollback()
         buf.seek(0)
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": f'attachment; filename="wohnungsgeberbestaetigung_{tid}.pdf"'})

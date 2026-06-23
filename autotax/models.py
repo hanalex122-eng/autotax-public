@@ -911,6 +911,8 @@ class ImmoTenancy(Base):
     kaltmiete = Column(Float, nullable=True)
     kaution = Column(Float, nullable=True)
     nk_voraus = Column(Float, nullable=True)          # NK-Vorauszahlung pro Monat
+    anmeldung_done = Column(Boolean, nullable=True, default=False)  # Anmeldung beim Amt erledigt (UI status)
+    wgb_erstellt_am = Column(DateTime, nullable=True)  # Wohnungsgeberbestätigung zuletzt erzeugt (UI status)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
