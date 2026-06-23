@@ -2486,8 +2486,15 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const [tFull,setTFull]=React.useState({});            // {tenancy_id: full tenancy incl. nk_voraus}
   const isMob=useIsMobile();
   const _tk=()=>localStorage.getItem("atx_token");
-  const loadProps=()=>api("/immo/properties").then(d=>setProps(d.properties||[])).catch(()=>{});
+  const [psum,setPsum]=React.useState({});  // {pid:{einheiten,belegung,ist,offen,mieter}} — list-card summary
+  const loadProps=()=>api("/immo/properties").then(d=>{
+    const ps=d.properties||[]; setProps(ps);
+    ps.forEach(p=>api("/immo/properties/"+p.id+"/accounting?year="+year).then(a=>{
+      const s=a.summe||{}; setPsum(m=>({...m,[p.id]:{einheiten:s.einheiten||0,belegung:s.belegungsquote||0,ist:s.ist_miete||0,offen:s.zahlungsausfall||0,mieter:(a.tenancies||[]).length}}));
+    }).catch(()=>{}));
+  }).catch(()=>{});
   React.useEffect(()=>{loadProps();},[refreshKey]);
+  const delProp=async(pid,e)=>{if(e)e.stopPropagation();if(!confirm(_L("Immobilie löschen?","Mülkü sil?","Delete property?")))return;try{await api("/immo/properties/"+pid,{method:"DELETE"});loadProps();if(showToast)showToast(_L("Gelöscht","Silindi","Deleted"),"info");}catch(ex){alert(ex.message);}};
   const openProp=(p)=>{setSel(p);setTab("uebersicht");refreshDetail(p.id,year);};
   const refreshDetail=(pid,yr)=>{
     setEditUnit(null);setEditTen(null);setShowAddUnit(false);setAddTenFor(null);
@@ -2529,12 +2536,23 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
         <button style={_btn("linear-gradient(135deg,#10b981,#059669)")} onClick={()=>setShowNewProp(!showNewProp)}>➕ {_L("Neue Immobilie","Yeni mülk","New property")}</button>
       </div>
       {showNewProp&&<ImmoPropForm onSave={createProp} onCancel={()=>setShowNewProp(false)}/>}
-      {props_.map(p=><div key={p.id} style={{...css.card,cursor:"pointer"}} onClick={()=>openProp(p)}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
-          <div><div style={{fontSize:16,fontWeight:700,color:theme.text}}>{p.name}</div><div style={{fontSize:13,color:theme.textMuted}}>{p.adresse||""}</div></div>
-          <span style={{fontSize:13,color:theme.accent}}>→</span>
+      {props_.map(p=>{const su=psum[p.id]||{};const _ib={cursor:"pointer",border:"1px solid "+theme.border,borderRadius:8,padding:"6px 10px",fontSize:13,background:theme.surfaceAlt};return(<div key={p.id} style={{...css.card}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+          <div style={{minWidth:0}}><div style={{fontSize:16,fontWeight:700,color:theme.text}}>{p.name} <span style={{fontSize:11,fontWeight:500,color:theme.textDim}}>#{p.id}</span></div><div style={{fontSize:13,color:theme.textMuted}}>{p.adresse||""}</div></div>
+          <div style={{display:"flex",gap:8,flexShrink:0}}>
+            <span style={{..._ib,color:theme.textMuted}} title={_L("Bearbeiten","Düzenle","Edit")} onClick={()=>{openProp(p);setEditProp(true);}}>✏️</span>
+            <span style={{..._ib,color:theme.danger}} title={_L("Löschen","Sil","Delete")} onClick={e=>delProp(p.id,e)}>🗑️</span>
+            <span style={{...css.btn(theme.accent),padding:"6px 12px",fontSize:13}} title={_L("Details","Detay","Details")} onClick={()=>openProp(p)}>👁️ {_L("Details","Detay","Details")}</span>
+          </div>
         </div>
-      </div>)}
+        <div style={{display:"flex",flexWrap:"wrap",gap:"6px 16px",marginTop:10,paddingTop:10,borderTop:"1px solid "+theme.border,fontSize:13}}>
+          <span style={{color:theme.textMuted}}>🏘️ {su.einheiten||0} {_L("Einheiten","daire","units")}</span>
+          <span style={{color:theme.textMuted}}>👤 {su.mieter||0} {_L("Mieter","kiracı","tenants")}</span>
+          <span style={{color:theme.textMuted}}>📊 {_L("Belegung","Doluluk","Occ")} {su.belegung||0}%</span>
+          <span style={{color:theme.accent}}>📈 {_e(su.ist||0)}</span>
+          {su.offen>0&&<span style={{color:theme.danger,fontWeight:600}}>⚠ {_L("Offen","Açık","Open")} {_e(su.offen)}</span>}
+        </div>
+      </div>);})}
       {!props_.length&&!showNewProp&&<div style={{...css.card,textAlign:"center",color:theme.textMuted}}>{_L("Noch keine Immobilie. Lege die erste an.","Henüz mülk yok.","No properties yet.")}</div>}
     </div>);
   }
