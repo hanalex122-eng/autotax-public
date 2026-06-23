@@ -166,6 +166,59 @@ class ExpensePatch(BaseModel):
     document_id: Optional[int] = None
 
 
+# ── MIETER (tenant-centric card data) ─────────────────────────────────
+@router.get("/mieter")
+def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_user)):
+    """Tenant-centric card feed — one row per active tenancy across all properties.
+    Aggregates tenancy + unit + property + derived gesamtmiete + arrears (source
+    adapter → due-to-date) + this-month payment status + last payment date.
+    READ-ONLY: no ledger / Soll / Ist / Rückstand / Mahnung logic touched."""
+    from autotax.immo_source import src_tenancy_arrears
+    uid = _uid(user)
+    now = datetime.now(timezone.utc).date()
+    y = year or now.year
+    db = SessionLocal()
+    try:
+        tncs = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all()
+        units = {u.id: u for u in db.query(ImmoUnit).filter(ImmoUnit.user_id == uid, _notdel(ImmoUnit)).all()}
+        props = {p.id: p for p in db.query(ImmoProperty).filter(ImmoProperty.user_id == uid, _notdel(ImmoProperty)).all()}
+        out = []
+        for t in tncs:
+            u = units.get(t.unit_id)
+            p = props.get(u.property_id) if u else None
+            kalt = float(t.kaltmiete or 0)
+            nk = float(t.nk_voraus or 0)
+            offen = src_tenancy_arrears(db, uid, t, y)
+            # last payment (immo_rent = payment source of truth)
+            lp_row = db.query(ImmoRent.datum).filter(ImmoRent.tenancy_id == t.id, ImmoRent.user_id == uid,
+                                                     ImmoRent.datum != None).order_by(ImmoRent.datum.desc()).first()  # noqa: E711
+            last_payment = str(lp_row[0]) if lp_row and lp_row[0] else None
+            # this-month status (current calendar month, current year only) — from immo_rent
+            tm = None
+            if y == now.year:
+                mstart = now.replace(day=1)
+                active = (t.von or date(1900, 1, 1)) <= now and (t.bis is None or t.bis >= mstart)
+                if active:
+                    paid_m = sum(float(r.betrag or 0) for r in db.query(ImmoRent).filter(
+                        ImmoRent.tenancy_id == t.id, ImmoRent.user_id == uid,
+                        ImmoRent.datum >= mstart, ImmoRent.datum <= now).all())
+                    tm = "paid" if (kalt > 0 and paid_m >= kalt) else ("partial" if paid_m > 0 else "open")
+            out.append({
+                "tenancy_id": t.id, "mieter_name": t.mieter_name,
+                "property_name": (p.name if p else None), "property_address": (p.adresse if p else None),
+                "unit_name": (u.name if u else None), "wohnflaeche": (u.wohnflaeche if u else None),
+                "kaltmiete": round(kalt, 2), "nk_vorauszahlung": round(nk, 2),
+                "gesamtmiete": round(kalt + nk, 2),
+                "einzug": str(t.von) if t.von else None, "auszug": str(t.bis) if t.bis else None,
+                "offene_forderung": offen, "debtor": offen > 0,
+                "this_month_status": tm, "last_payment_date": last_payment,
+            })
+        out.sort(key=lambda x: (-(x["offene_forderung"] or 0), (x["mieter_name"] or "")))
+        return {"mieter": out, "year": y}
+    finally:
+        db.close()
+
+
 # ── PROPERTIES ────────────────────────────────────────────────────────
 @router.get("/properties")
 def list_properties(user: dict = Depends(get_current_user)):
