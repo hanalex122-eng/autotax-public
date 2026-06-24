@@ -996,11 +996,12 @@ def _accounting(db, uid, pid, year):
         for t in u_ten:
             ma = _months_due_to_date(t, year)
             soll_t = ma * float(t.kaltmiete or 0)
-            ist_t = round(ist_by_tenancy.get(t.id, 0), 2)
+            arr = _arrears_auto(db, uid, t, year)            # AUTO-PAID aware: default 0, debt only from offene_monate
+            ist_t = round(max(0.0, soll_t - arr), 2)         # auto: assumed paid; manual: ≈ real Ist (capped)
             tenancy_results.append({"tenancy_id": t.id, "unit_id": u.id, "mieter_name": t.mieter_name,
                                     "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
                                     "kaltmiete": t.kaltmiete, "monate": ma, "soll": round(soll_t, 2),
-                                    "ist": ist_t, "rueckstand": round(max(0, soll_t - ist_t), 2),
+                                    "ist": ist_t, "rueckstand": round(arr, 2),
                                     "kaution": t.kaution})
     exps = db.query(ImmoExpense).filter(ImmoExpense.property_id == pid, ImmoExpense.user_id == uid, _notdel(ImmoExpense),
                                         ImmoExpense.datum >= date(year, 1, 1), ImmoExpense.datum <= date(year, 12, 31)).all()
@@ -1008,15 +1009,15 @@ def _accounting(db, uid, pid, year):
     for e in exps:
         by_kat[e.kategorie] = round(by_kat.get(e.kategorie, 0) + float(e.betrag or 0), 2)
     ausgaben = round(sum(by_kat.values()), 2)
-    gewinn = round(ist_total - ausgaben, 2)
-    rendite = round(gewinn / float(p.kaufpreis) * 100, 2) if (p and p.kaufpreis) else None
     soll_sum = round(sum(t["soll"] for t in tenancy_results), 2)
-    ist_sum = round(sum(t["ist"] for t in tenancy_results), 2)
-    zahlungsausfall = round(max(0, soll_sum - ist_sum), 2)
+    zahlungsausfall = round(sum(t["rueckstand"] for t in tenancy_results), 2)  # AUTO-PAID: Σ offene Monate
+    ist_collected = round(max(0.0, soll_sum - zahlungsausfall), 2)             # auto: assumed collected
+    gewinn = round(ist_collected - ausgaben, 2)
+    rendite = round(gewinn / float(p.kaufpreis) * 100, 2) if (p and p.kaufpreis) else None
     total_unit_months = (len(units) * 12) or 1
     return {
         "year": year, "property": _prop_dict(p) if p else None,
-        "summe": {"soll_miete": round(total_soll, 2), "ist_miete": round(ist_total, 2),
+        "summe": {"soll_miete": round(total_soll, 2), "ist_miete": ist_collected,
                   "leerstandsverlust": round(total_leer, 2), "zahlungsausfall": zahlungsausfall,
                   "ausgaben": ausgaben, "gewinn": gewinn, "rendite_prozent": rendite,
                   "belegungsquote": round(total_occ / total_unit_months * 100, 1),
@@ -1104,10 +1105,7 @@ def _portfolio(db, uid, year):
     top_debtors = []
     ausfall_total = 0.0
     for t in tenancies:
-        ma = _months_due_to_date(t, year)
-        soll_t = ma * float(t.kaltmiete or 0)
-        ist_t = round(ist_by_ten.get(t.id, 0), 2)
-        arr = round(max(0, soll_t - ist_t), 2)
+        arr = _tenancy_arrears(db, uid, t, year)
         if arr > 0:
             ausfall_total += arr
             mo = round(arr / float(t.kaltmiete)) if t.kaltmiete else None
@@ -1340,13 +1338,51 @@ _STUFE_TXT = {1: "Zahlungserinnerung", 2: "1. Mahnung", 3: "2. Mahnung"}
 EVENT_TYPEN = {"wartung", "versicherung", "grundsteuer", "mieterhoehung", "sonstige"}
 
 
+def _offene_monate_count(t, year):
+    """AUTO-PAID model: count of months explicitly marked UNPAID (offene_monate JSON)
+    for `year`, limited to due-to-date active months. Everything else = paid."""
+    import json
+    raw = getattr(t, "offene_monate", None)
+    if not raw:
+        return 0
+    try:
+        lst = json.loads(raw) if isinstance(raw, str) else list(raw or [])
+    except Exception:
+        return 0
+    today = date.today()
+    cnt = 0
+    for s in lst:
+        try:
+            yy = int(str(s)[:4]); mm = int(str(s)[5:7])
+        except Exception:
+            continue
+        if yy != year:
+            continue
+        due = (year < today.year) or (year == today.year and mm <= today.month)
+        if due and _tenancy_active_in_month(t, year, mm):
+            cnt += 1
+    return cnt
+
+
 def _tenancy_arrears(db, uid, t, year):
+    # MANUAL / parity-truth: Soll(due-to-date) − Ist(real immo_rent). Drives the ledger
+    # PARITY gate — keep stable. User-facing screens use _arrears_auto() instead.
     ma = _months_due_to_date(t, year)
     soll = ma * float(t.kaltmiete or 0)
     rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, ImmoRent.tenancy_id == t.id, _notdel(ImmoRent),
                                       ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all()
     ist = sum(float(r.betrag or 0) for r in rents)
     return round(max(0, soll - ist), 2)
+
+
+def _arrears_auto(db, uid, t, year):
+    # AUTO-PAID (Dauerzahlung) DEFAULT for user screens: tenant assumed to pay every
+    # due month → debt ONLY from months explicitly marked unpaid (offene_monate).
+    # auto_paid NULL (legacy) = auto. auto_paid False → classic manual _tenancy_arrears.
+    # Parity/ledger paths keep using _tenancy_arrears, so the gate is unaffected.
+    if getattr(t, "auto_paid", None) in (True, None):
+        return round(_offene_monate_count(t, year) * float(t.kaltmiete or 0), 2)
+    return _tenancy_arrears(db, uid, t, year)
 
 
 def _mahnung_betrag(db, uid, t, year) -> float:

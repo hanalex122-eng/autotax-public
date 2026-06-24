@@ -69,6 +69,12 @@ def init_db():
                 if "wgb_erstellt_am" not in _tc:
                     conn.execute(text("ALTER TABLE immo_tenancy ADD COLUMN wgb_erstellt_am TIMESTAMP"))
                     logger.info("Added 'wgb_erstellt_am' column to immo_tenancy")
+                if "auto_paid" not in _tc:
+                    conn.execute(text("ALTER TABLE immo_tenancy ADD COLUMN auto_paid BOOLEAN DEFAULT TRUE"))
+                    logger.info("Added 'auto_paid' column to immo_tenancy")
+                if "offene_monate" not in _tc:
+                    conn.execute(text("ALTER TABLE immo_tenancy ADD COLUMN offene_monate TEXT"))
+                    logger.info("Added 'offene_monate' column to immo_tenancy")
     except Exception as e:
         logger.warning("immo_tenancy status-column migration skipped: %s", e)
     # Immobilien Ledger (Ledger-First Migration, Faz 0). The immo_ledger_entry
