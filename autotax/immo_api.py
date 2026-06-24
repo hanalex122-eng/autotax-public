@@ -996,12 +996,11 @@ def _accounting(db, uid, pid, year):
         for t in u_ten:
             ma = _months_due_to_date(t, year)
             soll_t = ma * float(t.kaltmiete or 0)
-            arr = _arrears_auto(db, uid, t, year)            # AUTO-PAID aware: default 0, debt only from offene_monate
-            ist_t = round(max(0.0, soll_t - arr), 2)         # auto: assumed paid; manual: ≈ real Ist (capped)
+            ist_t = round(ist_by_tenancy.get(t.id, 0), 2)   # SINGLE SOURCE: Soll − Ist (real payments) — partial-capable
             tenancy_results.append({"tenancy_id": t.id, "unit_id": u.id, "mieter_name": t.mieter_name,
                                     "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
                                     "kaltmiete": t.kaltmiete, "monate": ma, "soll": round(soll_t, 2),
-                                    "ist": ist_t, "rueckstand": round(arr, 2),
+                                    "ist": ist_t, "rueckstand": round(max(0, soll_t - ist_t), 2),
                                     "kaution": t.kaution})
     exps = db.query(ImmoExpense).filter(ImmoExpense.property_id == pid, ImmoExpense.user_id == uid, _notdel(ImmoExpense),
                                         ImmoExpense.datum >= date(year, 1, 1), ImmoExpense.datum <= date(year, 12, 31)).all()
@@ -1009,15 +1008,15 @@ def _accounting(db, uid, pid, year):
     for e in exps:
         by_kat[e.kategorie] = round(by_kat.get(e.kategorie, 0) + float(e.betrag or 0), 2)
     ausgaben = round(sum(by_kat.values()), 2)
-    soll_sum = round(sum(t["soll"] for t in tenancy_results), 2)
-    zahlungsausfall = round(sum(t["rueckstand"] for t in tenancy_results), 2)  # AUTO-PAID: Σ offene Monate
-    ist_collected = round(max(0.0, soll_sum - zahlungsausfall), 2)             # auto: assumed collected
-    gewinn = round(ist_collected - ausgaben, 2)
+    gewinn = round(ist_total - ausgaben, 2)
     rendite = round(gewinn / float(p.kaufpreis) * 100, 2) if (p and p.kaufpreis) else None
+    soll_sum = round(sum(t["soll"] for t in tenancy_results), 2)
+    ist_sum = round(sum(t["ist"] for t in tenancy_results), 2)
+    zahlungsausfall = round(max(0, soll_sum - ist_sum), 2)  # SINGLE SOURCE: Soll − Ist
     total_unit_months = (len(units) * 12) or 1
     return {
         "year": year, "property": _prop_dict(p) if p else None,
-        "summe": {"soll_miete": round(total_soll, 2), "ist_miete": ist_collected,
+        "summe": {"soll_miete": round(total_soll, 2), "ist_miete": round(ist_total, 2),
                   "leerstandsverlust": round(total_leer, 2), "zahlungsausfall": zahlungsausfall,
                   "ausgaben": ausgaben, "gewinn": gewinn, "rendite_prozent": rendite,
                   "belegungsquote": round(total_occ / total_unit_months * 100, 1),
