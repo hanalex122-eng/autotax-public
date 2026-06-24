@@ -2501,6 +2501,11 @@ function MieterView({onNav,showToast}){
   const _efl={display:"block",fontSize:12,color:theme.textMuted,fontWeight:600,marginBottom:5};
   const _efR=(n,lbl,key,extra)=>(<div style={{marginBottom:12}}><label style={_efl}>{n?<b style={{color:theme.textDim}}>{n}. </b>:""}{lbl}</label><input style={_ef} value={erf[key]} onChange={e=>setErf({...erf,[key]:e.target.value})} {...(extra||{})}/></div>);
   const delTenant=async(m)=>{if(!window.confirm(_L("Mieter \""+m.mieter_name+"\" löschen?","Kiracı \""+m.mieter_name+"\" silinsin mi?","Delete tenant \""+m.mieter_name+"\"?")))return;try{await api("/immo/tenancies/"+m.tenancy_id,{method:"DELETE"});if(sel&&sel.tenancy_id===m.tenancy_id)setSel(null);load();if(showToast)showToast(_L("Gelöscht","Silindi","Deleted"),"info");}catch(e){alert(e.message);}};
+  // ── Bearbeiten: von/bis/Kaltmiete/NK düzenle (bis boş = aktif, çıkış yok) ──
+  const [editFor,setEditFor]=React.useState(null);
+  const [editF,setEditF]=React.useState({name:"",von:"",bis:"",kalt:"",nk:""});
+  const openEdit=(m)=>{setEditF({name:m.mieter_name||"",von:m.einzug||"",bis:m.auszug||"",kalt:String(m.kaltmiete==null?"":m.kaltmiete),nk:String(m.nk_vorauszahlung==null?"":m.nk_vorauszahlung)});setEditFor(editFor===m.tenancy_id?null:m.tenancy_id);};
+  const saveEdit=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id,{method:"PATCH",body:JSON.stringify({mieter_name:editF.name.trim()||m.mieter_name,von:editF.von||"",bis:editF.bis||"",kaltmiete:editF.kalt===""?null:parseFloat(editF.kalt),nk_voraus:editF.nk===""?null:parseFloat(editF.nk)})});setEditFor(null);load();if(showToast)showToast(_L("Gespeichert ✓","Kaydedildi ✓","Saved ✓"),"success");}catch(e){alert(e.message);}};
   const openPay=(m)=>{setPayDate(new Date().toISOString().slice(0,10));setPayAmt(String(m.gesamtmiete||""));setPayFor(m.tenancy_id);};
   const confirmPay=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:curY,monat:curM,datum:payDate,betrag:parseFloat(payAmt)||m.gesamtmiete})});setPayFor(null);load();if(showToast)showToast(_L("Als bezahlt markiert","Ödendi işaretlendi","Marked paid"),"success");}catch(e){alert(e.message);}};
   const markUnpaid=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt?jahr="+curY+"&monat="+curM,{method:"DELETE"});setPayFor(null);load();}catch(e){alert(e.message);}};
@@ -2637,8 +2642,24 @@ function MieterView({onNav,showToast}){
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
           <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>dlWgb(m.tenancy_id)}>📄 WGB</button>
           <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>openDetail(m)}>📊 {_L("Mietkonto","Hesap","Account")}</button>
+          <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>openEdit(m)}>✎ {_L("Bearbeiten","Düzenle","Edit")}</button>
           <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12,color:theme.danger,borderColor:theme.danger}} onClick={()=>delTenant(m)}>🗑️ {_L("Löschen","Sil","Delete")}</button>
         </div>
+        {editFor===m.tenancy_id&&<div style={{marginTop:10,paddingTop:10,borderTop:"1px solid "+theme.border,display:"flex",flexDirection:"column",gap:8}}>
+          <input style={{padding:"9px 11px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13}} value={editF.name} onChange={e=>setEditF({...editF,name:e.target.value})} placeholder={_L("Mieter Name","Kiracı adı","Name")}/>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Einzug","Giriş","Move-in")}</label><input style={{width:"100%",boxSizing:"border-box",padding:"9px 11px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13}} type="date" value={editF.von} onChange={e=>setEditF({...editF,von:e.target.value})}/></div>
+            <div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Auszug (leer = aktiv)","Çıkış (boş = aktif)","Move-out (empty=active)")}</label><input style={{width:"100%",boxSizing:"border-box",padding:"9px 11px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13}} type="date" value={editF.bis} onChange={e=>setEditF({...editF,bis:e.target.value})}/></div>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Kaltmiete €","Kira €","Cold rent €")}</label><input style={{width:"100%",boxSizing:"border-box",padding:"9px 11px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13}} type="number" value={editF.kalt} onChange={e=>setEditF({...editF,kalt:e.target.value})}/></div>
+            <div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Nebenkosten €","NK €","NK €")}</label><input style={{width:"100%",boxSizing:"border-box",padding:"9px 11px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13}} type="number" value={editF.nk} onChange={e=>setEditF({...editF,nk:e.target.value})}/></div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{padding:"9px 14px",background:theme.accent,color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer"}} onClick={()=>saveEdit(m)}>✓ {_L("Speichern","Kaydet","Save")}</button>
+            <button style={{padding:"9px 14px",background:"transparent",border:"1px solid "+theme.border,color:theme.textMuted,borderRadius:8,fontSize:13,cursor:"pointer"}} onClick={()=>setEditFor(null)}>{_L("Abbrechen","İptal","Cancel")}</button>
+          </div>
+        </div>}
       </div>);})}
     </div>
   </div>);
