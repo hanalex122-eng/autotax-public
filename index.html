@@ -2479,6 +2479,27 @@ function MieterView({onNav,showToast}){
   const [payAmt,setPayAmt]=React.useState("");
   const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setLoading(false);}).catch(()=>setLoading(false));};
   React.useEffect(()=>{load();},[]);
+  // ── Tek-sayfa Erfassung: daire + adres + kiracı bir kerede ──
+  const _erf0=()=>({daire:"",adresse:"",qm:"",name:"",von:new Date().toISOString().slice(0,10),kalt:"",nk:""});
+  const [showErf,setShowErf]=React.useState(false);
+  const [erf,setErf]=React.useState(_erf0());
+  const [erfBusy,setErfBusy]=React.useState(false);
+  const erfGesamt=(parseFloat(erf.kalt)||0)+(parseFloat(erf.nk)||0);
+  const saveErf=async()=>{
+    if(!erf.adresse.trim()||!erf.name.trim()){alert(_L("Adresse und Mieter-Name sind nötig.","Adres ve kiracı adı gerekli.","Address and tenant name required."));return;}
+    const kalt=parseFloat(erf.kalt)||0;
+    setErfBusy(true);
+    try{
+      const p=await api("/immo/properties",{method:"POST",body:JSON.stringify({name:erf.adresse.trim(),adresse:erf.adresse.trim()})});
+      const u=await api("/immo/units",{method:"POST",body:JSON.stringify({property_id:p.id,name:erf.daire.trim()||"Wohnung",wohnflaeche:parseFloat(erf.qm)||null,soll_miete:kalt})});
+      await api("/immo/tenancies",{method:"POST",body:JSON.stringify({unit_id:u.id,mieter_name:erf.name.trim(),von:erf.von||null,kaltmiete:kalt,nk_voraus:parseFloat(erf.nk)||null})});
+      setErf(_erf0());setShowErf(false);load();
+      if(showToast)showToast(_L("Mieter angelegt ✓","Kiracı eklendi ✓","Tenant added ✓"),"success");
+    }catch(e){alert(e.message||"Fehler");}finally{setErfBusy(false);}
+  };
+  const _ef={width:"100%",boxSizing:"border-box",padding:"11px 13px",background:theme.surfaceAlt,border:"1.5px solid "+theme.border,borderRadius:10,color:theme.text,fontSize:14,fontFamily:"inherit"};
+  const _efl={display:"block",fontSize:12,color:theme.textMuted,fontWeight:600,marginBottom:5};
+  const _efR=(n,lbl,key,extra)=>(<div style={{marginBottom:12}}><label style={_efl}>{n?<b style={{color:theme.textDim}}>{n}. </b>:""}{lbl}</label><input style={_ef} value={erf[key]} onChange={e=>setErf({...erf,[key]:e.target.value})} {...(extra||{})}/></div>);
   const openPay=(m)=>{setPayDate(new Date().toISOString().slice(0,10));setPayAmt(String(m.gesamtmiete||""));setPayFor(m.tenancy_id);};
   const confirmPay=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:curY,monat:curM,datum:payDate,betrag:parseFloat(payAmt)||m.gesamtmiete})});setPayFor(null);load();if(showToast)showToast(_L("Als bezahlt markiert","Ödendi işaretlendi","Marked paid"),"success");}catch(e){alert(e.message);}};
   const markUnpaid=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt?jahr="+curY+"&monat="+curM,{method:"DELETE"});setPayFor(null);load();}catch(e){alert(e.message);}};
@@ -2540,10 +2561,35 @@ function MieterView({onNav,showToast}){
       </div>
     </div>);}
   return(<div style={{maxWidth:1000,margin:"0 auto"}}>
-    <div style={{marginBottom:12}}>
-      <div style={{fontSize:22,fontWeight:800,color:theme.text}}>👥 {_L("Mieter","Kiracılar","Tenants")}</div>
-      <div style={{fontSize:13,color:theme.textMuted}}>{rows.length} {_L("Mieter","kiracı","tenants")} · {rows.filter(m=>m.debtor).length} {_L("im Rückstand","borçlu","in arrears")}</div>
+    <div style={{marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
+      <div>
+        <div style={{fontSize:22,fontWeight:800,color:theme.text}}>👥 {_L("Mieter","Kiracılar","Tenants")}</div>
+        <div style={{fontSize:13,color:theme.textMuted}}>{rows.length} {_L("Mieter","kiracı","tenants")} · {rows.filter(m=>m.debtor).length} {_L("im Rückstand","borçlu","in arrears")}</div>
+      </div>
+      <button onClick={()=>setShowErf(!showErf)} style={{padding:"10px 16px",background:theme.accent,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}}>➕ {_L("Neuer Mieter","Yeni kiracı","New tenant")}</button>
     </div>
+    {showErf&&<div style={{...css.card,marginBottom:14,maxWidth:560}}>
+      <div style={{fontSize:16,fontWeight:800,marginBottom:2}}>➕ {_L("Neuer Mieter erfassen","Yeni kiracı kaydet","Add tenant")}</div>
+      <div style={{fontSize:12,color:theme.textDim,marginBottom:14}}>{_L("Einmal eingeben, fertig. Keine monatliche Eingabe.","Bir kez gir, bitti. Aylık tekrar yok.","Enter once, done.")}</div>
+      {_efR(1,_L("Wohnung / Daire ID","Daire ID","Unit ID"),"daire",{placeholder:"WHG-01 · EG links"})}
+      {_efR(2,_L("Immobilie · Adresse","Adres","Address"),"adresse",{placeholder:"Wiesenstr. 10, 66115 Saarbrücken"})}
+      {_efR(3,_L("Wohnfläche (m²)","m²","m²"),"qm",{type:"number",placeholder:"57"})}
+      {_efR(4,_L("Mieter Name","Kiracı adı","Tenant name"),"name",{placeholder:"Ahmet Yılmaz"})}
+      {_efR(null,_L("Einzug","Giriş tarihi","Move-in"),"von",{type:"date"})}
+      <div style={{borderTop:"1px solid "+theme.border,margin:"6px 0 12px"}}></div>
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:1,marginBottom:12}}><label style={_efl}><b style={{color:theme.textDim}}>5. </b>{_L("Kaltmiete €","Kira €","Cold rent €")}</label><input style={_ef} type="number" value={erf.kalt} onChange={e=>setErf({...erf,kalt:e.target.value})} placeholder="400"/></div>
+        <div style={{flex:1,marginBottom:12}}><label style={_efl}><b style={{color:theme.textDim}}>6. </b>{_L("Nebenkosten €","NK €","NK €")}</label><input style={_ef} type="number" value={erf.nk} onChange={e=>setErf({...erf,nk:e.target.value})} placeholder="70"/></div>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:10,padding:"12px 15px"}}>
+        <span style={{fontSize:13,color:theme.textMuted}}><b style={{color:theme.textDim}}>7. </b><b style={{color:theme.text}}>{_L("Gesamtmiete / Monat","Toplam / Ay","Total / mo")}</b> ({_L("automatisch","otomatik","auto")})</span>
+        <span style={{fontSize:22,fontWeight:800,color:theme.accent}}>{_e(erfGesamt)}</span>
+      </div>
+      <div style={{display:"flex",gap:10,marginTop:16}}>
+        <button disabled={erfBusy} onClick={saveErf} style={{flex:1,padding:"13px",background:theme.accent,color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:800,cursor:"pointer",opacity:erfBusy?0.6:1}}>{erfBusy?"…":"✓ "+_L("Speichern","Kaydet","Save")}</button>
+        <button onClick={()=>{setShowErf(false);setErf(_erf0());}} style={{padding:"13px 20px",background:"transparent",border:"1.5px solid "+theme.border,color:theme.textMuted,borderRadius:10,fontSize:14,cursor:"pointer"}}>{_L("Abbrechen","İptal","Cancel")}</button>
+      </div>
+    </div>}
     <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{FILTERS.map(([k,l])=><button key={k} onClick={()=>setFilter(k)} style={{padding:"6px 12px",borderRadius:20,border:"1px solid "+theme.border,background:filter===k?theme.accent:theme.surfaceAlt,color:filter===k?"#fff":theme.textMuted,fontSize:13,fontWeight:600,cursor:"pointer"}}>{l}</button>)}</div>
     {loading&&<div style={{...css.card,textAlign:"center",color:theme.textMuted}}>…</div>}
     {!loading&&!shown.length&&<div style={{...css.card,textAlign:"center",color:theme.textMuted}}>{_L("Keine Mieter in dieser Ansicht.","Bu görünümde kiracı yok.","No tenants here.")}</div>}

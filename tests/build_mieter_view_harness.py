@@ -30,11 +30,11 @@ const MK={tenancy_id:1,year:2026,rows:[
   {monat:9,soll:330,bezahlt:0,status:"future"},{monat:10,soll:330,bezahlt:0,status:"future"},
   {monat:11,soll:330,bezahlt:0,status:"future"},{monat:12,soll:330,bezahlt:0,status:"future"}],
   summe:{soll_faellig:1980,bezahlt:1650,offen:330}};
-function api(p){if(String(p).indexOf("/mietkonto")>=0)return Promise.resolve(MK);return Promise.resolve(MOCK);}
+function api(p,o){if(String(p).indexOf("/mietkonto")>=0)return Promise.resolve(MK);if(o&&o.method==="POST")return Promise.resolve({success:true,id:99});return Promise.resolve(MOCK);}
 """
 
 CLICK = """
-setTimeout(function(){var bs=[].slice.call(document.querySelectorAll('button'));var b=bs.filter(function(x){return x.textContent.indexOf('Mietkonto')>=0;})[0];if(b)b.click();},1600);
+setTimeout(function(){var bs=[].slice.call(document.querySelectorAll('button'));var b=bs.filter(function(x){return x.textContent.indexOf('Neuer Mieter')>=0;})[0];if(b)b.click();},1600);
 """ if AUTO else ""
 
 html = """<!doctype html><html><head><meta charset="utf-8">
