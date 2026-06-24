@@ -2519,7 +2519,16 @@ function MieterView({onNav,showToast}){
     return {k:"aktiv",lbl:_L("Aktiv","Aktif","Active"),c:theme.accent,bg:"rgba(16,185,129,0.12)"};
   };
   const FILTERS=[["alle",_L("Alle","Tümü","All")],["aktiv",_L("Aktiv","Aktif","Active")],["rueckstand",_L("Im Rückstand","Borçlu","Arrears")],["kuendigung",_L("Kündigung","Çıkış","Ending")],["ausgezogen",_L("Ausgezogen","Çıktı","Moved out")]];
-  const shown=rows.filter(m=>filter==="alle"||phaseOf(m).k===filter);
+  // Filtreler ÖRTÜŞEBİLİR: borçlu bir kiracı HEM "Aktiv" HEM "Im Rückstand"tır (oturuyor + borçlu).
+  const matchFilter=(m)=>{
+    if(filter==="alle") return true;
+    if(filter==="ausgezogen") return !!(m.auszug && m.auszug<today);
+    if(filter==="kuendigung") return !!(m.auszug && m.auszug>=today);
+    if(filter==="rueckstand") return (m.offene_forderung||0)>0;
+    if(filter==="aktiv") return !(m.auszug && m.auszug<today);   // oturuyor (çıkmamış) — borçlu olsa bile
+    return true;
+  };
+  const shown=rows.filter(matchFilter);
   const dlWgb=async(tid)=>{try{const r=await fetch(API+"/immo/tenancies/"+tid+"/wohnungsgeberbestaetigung/pdf?art=einzug",{headers:{Authorization:"Bearer "+localStorage.getItem("atx_token")}});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();if(j&&j.detail)msg=j.detail;}catch(e){}alert(msg);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="wohnungsgeberbestaetigung_"+tid+".pdf";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}catch(e){alert(e.message);}};
   const chip=(active,label,c)=>(<span style={{...css.badge(active?"rgba(16,185,129,0.12)":theme.surfaceAlt,active?theme.accent:theme.textDim)}}>{active?"✓":"○"} {label}</span>);
   const tmBadge=(s)=>s==="paid"?<b style={{color:theme.accent}}>✓ {_L("bezahlt","ödendi","paid")}</b>:s==="partial"?<b style={{color:"#f59e0b"}}>~ {_L("teilweise","kısmi","partial")}</b>:s==="open"?<b style={{color:theme.danger}}>✗ {_L("offen","ödenmedi","open")}</b>:<span style={{color:theme.textDim}}>—</span>;
