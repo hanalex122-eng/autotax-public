@@ -922,6 +922,7 @@ class ImmoTenancy(Base):
     email = Column(String(200), nullable=True)
     notiz = Column(Text, nullable=True)
     miete_historie = Column(Text, nullable=True)               # JSON [{"ab":"2026-07-01","kalt":450}] — kira değişiklikleri (tarihli)
+    erstmonat_betrag = Column(Float, nullable=True)            # vereinbarte Erstmiete (anlaşılan ilk-ay kira) — boşsa gün-oranı
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)

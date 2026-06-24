@@ -76,7 +76,8 @@ def init_db():
                     conn.execute(text("ALTER TABLE immo_tenancy ADD COLUMN offene_monate TEXT"))
                     logger.info("Added 'offene_monate' column to immo_tenancy")
                 for _c, _t in (("telefon", "VARCHAR(50)"), ("email", "VARCHAR(200)"),
-                               ("notiz", "TEXT"), ("miete_historie", "TEXT")):
+                               ("notiz", "TEXT"), ("miete_historie", "TEXT"),
+                               ("erstmonat_betrag", "DOUBLE PRECISION")):
                     if _c not in _tc:
                         conn.execute(text(f"ALTER TABLE immo_tenancy ADD COLUMN {_c} {_t}"))
                         logger.info("Added '%s' column to immo_tenancy", _c)

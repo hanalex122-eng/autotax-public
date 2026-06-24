@@ -226,6 +226,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "telefon": getattr(t, "telefon", None), "email": getattr(t, "email", None),
                 "kaution": (round(float(t.kaution), 2) if t.kaution is not None else None),
                 "miete_historie": (getattr(t, "miete_historie", None) or None),
+                "erstmonat_betrag": getattr(t, "erstmonat_betrag", None),
                 "anmeldung_done": bool(t.anmeldung_done),
                 "wgb_done": t.wgb_erstellt_am is not None,
                 "wgb_erstellt_am": str(t.wgb_erstellt_am) if t.wgb_erstellt_am else None,
@@ -325,7 +326,7 @@ def tenancy_mietkonto(tid: int, year: Optional[int] = None, user: dict = Depends
         soll_due = ist_due = 0.0
         for m in range(1, 13):
             active = _tenancy_active_in_month(t, y, m)
-            soll = round(kalt * _month_proration(t, y, m), 2) if active else 0.0  # Teilmonat anteilig
+            soll = _monat_soll(t, y, m) if active else 0.0  # Erstmiete / anteilig / Mieterhöhung
             paid = round(paid_by_m.get(m, 0.0), 2)
             is_future = (y > now.year) or (y == now.year and m > now.month)
             if not active:
@@ -785,7 +786,7 @@ def _tenancy_dict(t):
             "anmeldung_done": bool(getattr(t, "anmeldung_done", False)),
             "wgb_erstellt_am": str(t.wgb_erstellt_am) if getattr(t, "wgb_erstellt_am", None) else None,
             "telefon": getattr(t, "telefon", None), "email": getattr(t, "email", None),
-            "notiz": getattr(t, "notiz", None)}
+            "notiz": getattr(t, "notiz", None), "erstmonat_betrag": getattr(t, "erstmonat_betrag", None)}
 
 
 def _tenancy_active_in_month(t, y, m):
@@ -850,15 +851,24 @@ def _effective_kalt(t, y, m):
     return best
 
 
+def _monat_soll(t, y, m):
+    """Soll für EINEN Monat: vereinbarte Erstmiete (erstmonat_betrag) im Einzugsmonat
+    falls gesetzt; sonst effektive Kaltmiete × Tagesanteil (anteilig)."""
+    em = getattr(t, "erstmonat_betrag", None)
+    if em is not None and t.von and t.von.year == y and t.von.month == m:
+        return round(float(em), 2)
+    return round(_effective_kalt(t, y, m) * _month_proration(t, y, m), 2)
+
+
 def _soll_faellig(t, y, as_of=None):
-    """Fälliges Soll bis heute, MIT anteiliger Miete (Teilmonat) UND dated
-    Mieterhöhung (pro Monat die gültige Kaltmiete). Single source of truth."""
+    """Fälliges Soll bis heute: pro Monat _monat_soll (vereinbarte Erstmiete /
+    anteilig / Mieterhöhung). Single source of truth."""
     as_of = as_of or date.today()
     last = 12 if y < as_of.year else (as_of.month if y == as_of.year else 0)
     total = 0.0
     for m in range(1, last + 1):
         if _tenancy_active_in_month(t, y, m):
-            total += _effective_kalt(t, y, m) * _month_proration(t, y, m)
+            total += _monat_soll(t, y, m)
     return round(total, 2)
 
 
@@ -896,6 +906,7 @@ class TenancyPatch(BaseModel):
     telefon: Optional[str] = Field(None, max_length=50)
     email: Optional[str] = Field(None, max_length=200)
     notiz: Optional[str] = None
+    erstmonat_betrag: Optional[float] = None    # vereinbarte Erstmiete; -1 = löschen (zurück zu Tagesanteil)
 
 
 # ── UNITS ─────────────────────────────────────────────────────────────
@@ -996,6 +1007,8 @@ def update_tenancy(tid: int, body: TenancyPatch, user: dict = Depends(get_curren
         if body.telefon is not None: t.telefon = body.telefon.strip() or None
         if body.email is not None: t.email = body.email.strip() or None
         if body.notiz is not None: t.notiz = body.notiz
+        if body.erstmonat_betrag is not None:
+            t.erstmonat_betrag = None if body.erstmonat_betrag < 0 else body.erstmonat_betrag
         db.commit(); db.refresh(t)
         return {"success": True, **_tenancy_dict(t)}
     finally:

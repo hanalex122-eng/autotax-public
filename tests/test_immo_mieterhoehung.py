@@ -85,7 +85,27 @@ def main():
     ok(m["kaution"] == 900, "Kaution im /mieter")
     ok(m["kaltmiete"] == 450, f"aktuelle Kaltmiete = 450 (nach Erhöhung) — got {m['kaltmiete']}")
 
-    print(f"\n=== Mieterhöhung + Info: {PASS} passed, {FAIL} failed ===")
+    print("\n[Vereinbarte Erstmiete: Einzug 15.06, Kalt 470 — Halbmonat 270]")
+    db.add(ImmoTenancy(id=102, unit_id=1, user_id=1, mieter_name="Erstmonat",
+                       von=date(2026, 6, 15), kaltmiete=470, nk_voraus=70))
+    db.commit()
+    t2 = db.query(ImmoTenancy).get(102)
+    ok(immo_api._monat_soll(t2, 2026, 6) == 250.67, f"Juni OHNE Vereinbarung = 250.67 (Tagesanteil 16/30) — got {immo_api._monat_soll(t2,2026,6)}")
+    cl.patch("/immo/tenancies/102", json={"erstmonat_betrag": 270})
+    db.refresh(t2)
+    ok(immo_api._monat_soll(t2, 2026, 6) == 270, f"Juni MIT Vereinbarung = 270 — got {immo_api._monat_soll(t2,2026,6)}")
+    ok(immo_api._monat_soll(t2, 2026, 7) == 470, f"Juli = 470 (voller Monat unberührt) — got {immo_api._monat_soll(t2,2026,7)}")
+    ok(immo_api._soll_faellig(t2, 2026) == 3090, f"Soll 2026 = 3090 (270 + 6×470) — got {immo_api._soll_faellig(t2,2026)}")
+    L.ensure_sollbuchungen(db, 1, 2026); db.commit()
+    sal2 = R.saldo_by_tenancy(db, 1, 2026).get(102, {})
+    ok(sal2.get("soll") == 3090, f"Ledger soll = 3090 (Erstmiete im Ledger, parity) — got {sal2.get('soll')}")
+    m2 = next(x for x in cl.get("/immo/mieter").json()["mieter"] if x["tenancy_id"] == 102)
+    ok(m2.get("erstmonat_betrag") == 270, "erstmonat_betrag im /mieter")
+    cl.patch("/immo/tenancies/102", json={"erstmonat_betrag": -1})
+    db.refresh(t2)
+    ok(immo_api._monat_soll(t2, 2026, 6) == 250.67, f"Löschen (-1) → zurück zu Tagesanteil 250.67 — got {immo_api._monat_soll(t2,2026,6)}")
+
+    print(f"\n=== Mieterhöhung + Info + Erstmiete: {PASS} passed, {FAIL} failed ===")
     sys.exit(1 if FAIL else 0)
 
 

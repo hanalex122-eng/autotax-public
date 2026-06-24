@@ -209,6 +209,16 @@ def _eff_kalt(t, y, m) -> float:
     return best
 
 
+def _monat_betrag(t, y, m) -> float:
+    """Soll-Betrag eines Monats: vereinbarte Erstmiete (erstmonat_betrag) im
+    Einzugsmonat, sonst effektive Kaltmiete × Tagesanteil. MUST match
+    immo_api._monat_soll für die Parität."""
+    em = getattr(t, "erstmonat_betrag", None)
+    if em is not None and t.von and t.von.year == y and t.von.month == m:
+        return round(float(em), 2)
+    return round(_eff_kalt(t, y, m) * _proration(t, y, m), 2)
+
+
 def ensure_sollbuchungen(db, uid: int, year: int, *, faellig_tag: int = 3) -> int:
     """Idempotently post one konto_art=miete Sollbuchung per ACTIVE month for
     every tenancy of the user in `year`.
@@ -241,7 +251,7 @@ def ensure_sollbuchungen(db, uid: int, year: int, *, faellig_tag: int = 3) -> in
                 continue
             if (t.id, m) in existing:
                 continue
-            betrag = round(_eff_kalt(t, year, m) * _proration(t, year, m), 2)  # Teilmonat + Mieterhöhung
+            betrag = _monat_betrag(t, year, m)  # Erstmiete / Teilmonat / Mieterhöhung (= immo_api._monat_soll)
             if betrag <= 0:
                 continue
             post_entry(db, user_id=uid, typ=TYP_SOLLBUCHUNG, betrag=betrag, jahr=year, monat=m,
