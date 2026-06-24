@@ -2537,8 +2537,6 @@ function MieterView({onNav,showToast}){
       </div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
         <button style={{...css.btnOutline,padding:"8px 12px",fontSize:13}} onClick={()=>dlWgb(m.tenancy_id)}>📄 Wohnungsgeberbestätigung</button>
-        <button style={{...css.btnOutline,padding:"8px 12px",fontSize:13}} onClick={()=>onNav&&onNav("immobilien")}>📨 Mahnung</button>
-        <button style={{...css.btnOutline,padding:"8px 12px",fontSize:13}} onClick={()=>onNav&&onNav("immobilien")}>✏️ {_L("Bearbeiten","Düzenle","Edit")}</button>
       </div>
     </div>);}
   return(<div style={{maxWidth:1000,margin:"0 auto"}}>
@@ -2650,6 +2648,12 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const addRent=async(b)=>{await api("/immo/rent",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});refreshDetail(sel.id,year);};
   const addExp=async(b)=>{await api("/immo/expenses",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});refreshDetail(sel.id,year);};
   const delItem=async(kind,id)=>{if(!confirm(_L("Löschen?","Sil?","Delete?")))return;await api("/immo/"+kind+"/"+id,{method:"DELETE"});refreshDetail(sel.id,year);};
+  // Controlled form state — eski IIFE-local (let b,d) re-render'da sıfırlanıp kaydı yutuyordu.
+  const _today=()=>new Date().toISOString().slice(0,10);
+  const [rf,setRf]=React.useState({tid:"",betrag:"",datum:_today()});
+  const [xf,setXf]=React.useState({k:"nebenkosten",betrag:"",be:"",datum:_today()});
+  const saveRent=async()=>{const amt=parseFloat(rf.betrag);if(!rf.betrag||isNaN(amt)||amt<=0){alert(_L("Bitte gültigen Betrag eingeben.","Geçerli tutar gir.","Enter a valid amount."));return;}await addRent({tenancy_id:rf.tid?parseInt(rf.tid):null,betrag:amt,datum:rf.datum||_today()});setRf({tid:"",betrag:"",datum:_today()});if(showToast)showToast(_L("Mieteingang gespeichert","Kira girişi kaydedildi","Rent saved"),"success");};
+  const saveExp=async()=>{const amt=parseFloat(xf.betrag);if(!xf.betrag||isNaN(amt)||amt<=0){alert(_L("Bitte gültigen Betrag eingeben.","Geçerli tutar gir.","Enter a valid amount."));return;}await addExp({kategorie:xf.k,betrag:amt,beschreibung:xf.be,datum:xf.datum||_today()});setXf({k:"nebenkosten",betrag:"",be:"",datum:_today()});if(showToast)showToast(_L("Ausgabe gespeichert","Gider kaydedildi","Expense saved"),"success");};
   const upDoc=async(file,typ)=>{const fd=new FormData();fd.append("file",file);fd.append("property_id",sel.id);fd.append("typ",typ||"other");await fetch(API+"/immo/documents",{method:"POST",headers:{Authorization:"Bearer "+_tk()},body:fd});refreshDetail(sel.id,year);};
   const setYr=(y)=>{setYear(y);if(sel)refreshDetail(sel.id,y);};
   const _btn=(bg)=>({background:bg,color:"#fff",border:"none",borderRadius:10,padding:"12px 18px",fontSize:14,fontWeight:700,cursor:"pointer"});
@@ -2743,23 +2747,23 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       </div>);})}
       {!units.length&&!showAddUnit&&<div style={{...css.card,textAlign:"center",color:theme.textMuted}}>{_L("Lege zuerst eine Einheit an, dann Mieter mit Ein-/Auszug.","Önce daire ekle.","Add a unit first.")}</div>}
     </div>}
-    {tab==="einnahmen"&&(()=>{let b,d,tid="";return(<div>
+    {tab==="einnahmen"&&(<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Mieteingang erfassen","Kira girişi","Add rent payment")}</div>
-        <select style={_inp} defaultValue="" onChange={e=>tid=e.target.value}><option value="">{_L("— Mieter wählen —","— Kiracı seç —","— Select tenant —")}</option>{tncs.map(t=><option key={t.tenancy_id} value={t.tenancy_id}>{t.mieter_name} ({t.von}→{t.bis||"…"})</option>)}</select>
-        <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} onChange={e=>b=e.target.value}/>
-        <input style={_inp} type="date" defaultValue={new Date().toISOString().slice(0,10)} onChange={e=>d=e.target.value}/>
-        <button style={_btn("#10b981")} onClick={()=>{if(b)addRent({tenancy_id:tid?parseInt(tid):null,betrag:parseFloat(b),datum:d||new Date().toISOString().slice(0,10)});}}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
+        <select style={_inp} value={rf.tid} onChange={e=>setRf({...rf,tid:e.target.value})}><option value="">{_L("— Mieter wählen —","— Kiracı seç —","— Select tenant —")}</option>{tncs.map(t=><option key={t.tenancy_id} value={t.tenancy_id}>{t.mieter_name} ({t.von}→{t.bis||"…"})</option>)}</select>
+        <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} value={rf.betrag} onChange={e=>setRf({...rf,betrag:e.target.value})}/>
+        <input style={_inp} type="date" value={rf.datum} onChange={e=>setRf({...rf,datum:e.target.value})}/>
+        <button style={_btn("#10b981")} onClick={saveRent}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
       {rents.map(r=>{const tn=tncs.find(t=>t.tenancy_id===r.tenancy_id);return(<div key={r.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div><b style={{color:theme.accent}}>{_e(r.betrag)}</b> <span style={{fontSize:12,color:theme.textMuted}}>{r.datum}{tn?" · "+tn.mieter_name:""}</span></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("rent",r.id)}>✕</span></div>);})}
-    </div>);})()}
-    {tab==="ausgaben"&&(()=>{let b,d,k="nebenkosten",be;return(<div>
+    </div>)}
+    {tab==="ausgaben"&&(<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Ausgabe erfassen","Gider ekle","Add expense")}</div>
-        <select style={_inp} defaultValue="nebenkosten" onChange={e=>k=e.target.value}>{KAT.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
-        <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} onChange={e=>b=e.target.value}/>
-        <input style={_inp} placeholder={_L("Beschreibung","Açıklama","Description")} onChange={e=>be=e.target.value}/>
-        <input style={_inp} type="date" defaultValue={new Date().toISOString().slice(0,10)} onChange={e=>d=e.target.value}/>
-        <button style={_btn("#ef4444")} onClick={()=>{if(b)addExp({kategorie:k,betrag:parseFloat(b),beschreibung:be,datum:d||new Date().toISOString().slice(0,10)});}}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
+        <select style={_inp} value={xf.k} onChange={e=>setXf({...xf,k:e.target.value})}>{KAT.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
+        <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} value={xf.betrag} onChange={e=>setXf({...xf,betrag:e.target.value})}/>
+        <input style={_inp} placeholder={_L("Beschreibung","Açıklama","Description")} value={xf.be} onChange={e=>setXf({...xf,be:e.target.value})}/>
+        <input style={_inp} type="date" value={xf.datum} onChange={e=>setXf({...xf,datum:e.target.value})}/>
+        <button style={_btn("#ef4444")} onClick={saveExp}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
       {exps.map(x=><div key={x.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div><b style={{color:theme.danger}}>{_e(x.betrag)}</b> <span style={css.badge(theme.blueSoft,theme.blue)}>{katLbl(x.kategorie)}</span><div style={{fontSize:12,color:theme.textMuted}}>{x.datum} · {x.beschreibung}</div></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("expenses",x.id)}>✕</span></div>)}
-    </div>);})()}
+    </div>)}
     {tab==="dokumente"&&<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Dokument hochladen","Belge yükle","Upload document")}</div>
         <label style={{..._btn("#6366f1"),display:"inline-block"}}>📎 {_L("Datei wählen","Dosya seç","Choose file")}<input type="file" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)upDoc(f,"other");e.target.value="";}}/></label></div>
