@@ -183,6 +183,32 @@ def _proration(t, y, m) -> float:
     return max(0.0, min(1.0, ((occ_end - occ_start).days + 1) / dim))
 
 
+def _eff_kalt(t, y, m) -> float:
+    """Effective Kaltmiete for month (y,m) honoring dated Mieterhöhung (miete_historie).
+    MUST stay identical to immo_api._effective_kalt for the parity gate."""
+    base = float(t.kaltmiete or 0)
+    raw = getattr(t, "miete_historie", None)
+    if not raw:
+        return base
+    import json
+    from datetime import datetime as _dt
+    try:
+        hist = json.loads(raw) if isinstance(raw, str) else list(raw or [])
+    except Exception:
+        return base
+    mend = date(y, m, monthrange(y, m)[1])
+    best_ab, best = None, base
+    for c in (hist or []):
+        try:
+            ab = _dt.strptime(str(c.get("ab"))[:10], "%Y-%m-%d").date()
+            k = float(c.get("kalt"))
+        except Exception:
+            continue
+        if ab <= mend and (best_ab is None or ab > best_ab):
+            best_ab, best = ab, k
+    return best
+
+
 def ensure_sollbuchungen(db, uid: int, year: int, *, faellig_tag: int = 3) -> int:
     """Idempotently post one konto_art=miete Sollbuchung per ACTIVE month for
     every tenancy of the user in `year`.
@@ -215,7 +241,7 @@ def ensure_sollbuchungen(db, uid: int, year: int, *, faellig_tag: int = 3) -> in
                 continue
             if (t.id, m) in existing:
                 continue
-            betrag = round(kalt * _proration(t, year, m), 2)  # Teilmonat anteilig (Einzug/Auszug)
+            betrag = round(_eff_kalt(t, year, m) * _proration(t, year, m), 2)  # Teilmonat + Mieterhöhung
             if betrag <= 0:
                 continue
             post_entry(db, user_id=uid, typ=TYP_SOLLBUCHUNG, betrag=betrag, jahr=year, monat=m,

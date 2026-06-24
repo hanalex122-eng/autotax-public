@@ -197,7 +197,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
         for t in tncs:
             u = units.get(t.unit_id)
             p = props.get(u.property_id) if u else None
-            kalt = float(t.kaltmiete or 0)
+            kalt = _effective_kalt(t, now.year, now.month)   # güncel kira (Mieterhöhung sonrası)
             nk = float(t.nk_voraus or 0)
             offen = _tenancy_arrears(db, uid, t, y)
             # last payment (immo_rent = payment source of truth)
@@ -223,6 +223,9 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "einzug": str(t.von) if t.von else None, "auszug": str(t.bis) if t.bis else None,
                 "offene_forderung": offen, "debtor": offen > 0,
                 "this_month_status": tm, "last_payment_date": last_payment,
+                "telefon": getattr(t, "telefon", None), "email": getattr(t, "email", None),
+                "kaution": (round(float(t.kaution), 2) if t.kaution is not None else None),
+                "miete_historie": (getattr(t, "miete_historie", None) or None),
                 "anmeldung_done": bool(t.anmeldung_done),
                 "wgb_done": t.wgb_erstellt_am is not None,
                 "wgb_erstellt_am": str(t.wgb_erstellt_am) if t.wgb_erstellt_am else None,
@@ -780,7 +783,9 @@ def _tenancy_dict(t):
             "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
             "kaltmiete": t.kaltmiete, "kaution": t.kaution, "nk_voraus": t.nk_voraus,
             "anmeldung_done": bool(getattr(t, "anmeldung_done", False)),
-            "wgb_erstellt_am": str(t.wgb_erstellt_am) if getattr(t, "wgb_erstellt_am", None) else None}
+            "wgb_erstellt_am": str(t.wgb_erstellt_am) if getattr(t, "wgb_erstellt_am", None) else None,
+            "telefon": getattr(t, "telefon", None), "email": getattr(t, "email", None),
+            "notiz": getattr(t, "notiz", None)}
 
 
 def _tenancy_active_in_month(t, y, m):
@@ -819,17 +824,41 @@ def _month_proration(t, y, m):
     return max(0.0, min(1.0, days / dim))
 
 
+def _effective_kalt(t, y, m):
+    """Effective Kaltmiete for month (y,m), honoring DATED Mieterhöhungen
+    (t.miete_historie JSON [{ab, kalt}]). Base = t.kaltmiete; the latest change whose
+    ab-date is on/before month-end wins → past months keep the old rent."""
+    base = float(t.kaltmiete or 0)
+    raw = getattr(t, "miete_historie", None)
+    if not raw:
+        return base
+    import json
+    try:
+        hist = json.loads(raw) if isinstance(raw, str) else list(raw or [])
+    except Exception:
+        return base
+    mend = date(y, m, monthrange(y, m)[1])
+    best_ab, best = None, base
+    for c in (hist or []):
+        try:
+            ab = datetime.strptime(str(c.get("ab"))[:10], "%Y-%m-%d").date()
+            k = float(c.get("kalt"))
+        except Exception:
+            continue
+        if ab <= mend and (best_ab is None or ab > best_ab):
+            best_ab, best = ab, k
+    return best
+
+
 def _soll_faellig(t, y, as_of=None):
-    """Fälliges Soll (Kaltmiete) bis heute, MIT anteiliger Miete für Teilmonate
-    (Einzug/Auszug). Volle Monate = Kaltmiete, Teilmonat = Kaltmiete × Tagesanteil.
-    Single source of truth for arrears across all screens."""
+    """Fälliges Soll bis heute, MIT anteiliger Miete (Teilmonat) UND dated
+    Mieterhöhung (pro Monat die gültige Kaltmiete). Single source of truth."""
     as_of = as_of or date.today()
     last = 12 if y < as_of.year else (as_of.month if y == as_of.year else 0)
-    kalt = float(t.kaltmiete or 0)
     total = 0.0
     for m in range(1, last + 1):
         if _tenancy_active_in_month(t, y, m):
-            total += kalt * _month_proration(t, y, m)
+            total += _effective_kalt(t, y, m) * _month_proration(t, y, m)
     return round(total, 2)
 
 
@@ -864,6 +893,9 @@ class TenancyPatch(BaseModel):
     kaution: Optional[float] = None
     nk_voraus: Optional[float] = None
     anmeldung_done: Optional[bool] = None
+    telefon: Optional[str] = Field(None, max_length=50)
+    email: Optional[str] = Field(None, max_length=200)
+    notiz: Optional[str] = None
 
 
 # ── UNITS ─────────────────────────────────────────────────────────────
@@ -961,8 +993,47 @@ def update_tenancy(tid: int, body: TenancyPatch, user: dict = Depends(get_curren
         if body.kaution is not None: t.kaution = body.kaution
         if body.nk_voraus is not None: t.nk_voraus = body.nk_voraus
         if body.anmeldung_done is not None: t.anmeldung_done = body.anmeldung_done
+        if body.telefon is not None: t.telefon = body.telefon.strip() or None
+        if body.email is not None: t.email = body.email.strip() or None
+        if body.notiz is not None: t.notiz = body.notiz
         db.commit(); db.refresh(t)
         return {"success": True, **_tenancy_dict(t)}
+    finally:
+        db.close()
+
+
+class MieterhoehungIn(BaseModel):
+    ab: str                      # ab-Datum, z.B. "2026-07-01"
+    kalt: float                  # neue Kaltmiete
+
+
+@router.post("/tenancies/{tid}/mieterhoehung")
+def add_mieterhoehung(tid: int, body: MieterhoehungIn, user: dict = Depends(get_current_user)):
+    """Dated rent change (Mieterhöhung): append {ab, kalt} to miete_historie. Past
+    months keep the old rent; from `ab`'s month the new rent applies (Soll per month
+    via _effective_kalt). Does NOT change t.kaltmiete (= initial rent)."""
+    import json
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        d = _pdate(body.ab)
+        if not d:
+            raise HTTPException(status_code=400, detail="Ungültiges ab-Datum (JJJJ-MM-TT)")
+        if not body.kalt or body.kalt <= 0:
+            raise HTTPException(status_code=400, detail="Neue Kaltmiete muss > 0 sein")
+        try:
+            hist = json.loads(t.miete_historie) if t.miete_historie else []
+        except Exception:
+            hist = []
+        hist = [c for c in hist if str(c.get("ab", ""))[:10] != str(d)]  # gleiche ab-Datum überschreiben
+        hist.append({"ab": str(d), "kalt": round(float(body.kalt), 2)})
+        hist.sort(key=lambda c: str(c.get("ab", "")))
+        t.miete_historie = json.dumps(hist)
+        db.commit()
+        return {"success": True, "miete_historie": hist}
     finally:
         db.close()
 

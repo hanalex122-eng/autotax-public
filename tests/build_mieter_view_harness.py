@@ -19,7 +19,7 @@ const css = { card:{background:theme.card,borderRadius:14,border:"1px solid "+th
 const getLang=()=>"de"; const API="";
 function useIsMobile(bp){const[m,setM]=React.useState(window.innerWidth<(bp||768));return m;}
 const MOCK={mieter:[
-  {tenancy_id:1,mieter_name:"Ahmet Yilmaz",property_name:"Musterstr. 12",unit_name:"EG Links",wohnflaeche:57,kaltmiete:330,nk_vorauszahlung:70,gesamtmiete:400,einzug:"2026-01-01",auszug:null,offene_forderung:400,debtor:true,this_month_status:"open",last_payment_date:"2026-05-03",anmeldung_done:true,wgb_done:true,letzte_mahnung:null},
+  {tenancy_id:1,mieter_name:"Ahmet Yilmaz",property_name:"Musterstr. 12",unit_name:"EG Links",wohnflaeche:57,kaltmiete:330,nk_vorauszahlung:70,gesamtmiete:400,einzug:"2026-01-01",auszug:null,offene_forderung:400,debtor:true,this_month_status:"open",last_payment_date:"2026-05-03",anmeldung_done:true,wgb_done:true,letzte_mahnung:null,telefon:"0176 1234567",email:"ahmet@mail.de",kaution:800,miete_historie:null},
   {tenancy_id:2,mieter_name:"Maria Müller",property_name:"Hauptweg 3",unit_name:"OG Rechts",wohnflaeche:72,kaltmiete:500,nk_vorauszahlung:40,gesamtmiete:540,einzug:"2026-06-15",auszug:null,offene_forderung:540,debtor:true,this_month_status:"open",last_payment_date:null,anmeldung_done:true,wgb_done:false,letzte_mahnung:{stufe:1,stufe_text:"Zahlungserinnerung",datum:"2026-06-12"}},
 ]};
 const MK={tenancy_id:1,year:2026,rows:[
@@ -34,7 +34,7 @@ function api(p,o){if(String(p).indexOf("/mietkonto")>=0)return Promise.resolve(M
 """
 
 CLICK = """
-setTimeout(function(){var bs=[].slice.call(document.querySelectorAll('button'));var b=bs.filter(function(x){return x.textContent.indexOf('Neuer Mieter')>=0;})[0];if(b)b.click();},1600);
+setTimeout(function(){var bs=[].slice.call(document.querySelectorAll('button'));var b=bs.filter(function(x){return x.textContent.indexOf('Bearbeiten')>=0;})[0];if(b)b.click();},1600);
 """ if AUTO else ""
 
 html = """<!doctype html><html><head><meta charset="utf-8">

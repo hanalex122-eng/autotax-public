@@ -2503,9 +2503,10 @@ function MieterView({onNav,showToast}){
   const delTenant=async(m)=>{if(!window.confirm(_L("Mieter \""+m.mieter_name+"\" löschen?","Kiracı \""+m.mieter_name+"\" silinsin mi?","Delete tenant \""+m.mieter_name+"\"?")))return;try{await api("/immo/tenancies/"+m.tenancy_id,{method:"DELETE"});if(sel&&sel.tenancy_id===m.tenancy_id)setSel(null);load();if(showToast)showToast(_L("Gelöscht","Silindi","Deleted"),"info");}catch(e){alert(e.message);}};
   // ── Bearbeiten: von/bis/Kaltmiete/NK düzenle (bis boş = aktif, çıkış yok) ──
   const [editFor,setEditFor]=React.useState(null);
-  const [editF,setEditF]=React.useState({name:"",von:"",bis:"",kalt:"",nk:""});
-  const openEdit=(m)=>{setEditF({name:m.mieter_name||"",von:m.einzug||"",bis:m.auszug||"",kalt:String(m.kaltmiete==null?"":m.kaltmiete),nk:String(m.nk_vorauszahlung==null?"":m.nk_vorauszahlung)});setEditFor(editFor===m.tenancy_id?null:m.tenancy_id);};
-  const saveEdit=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id,{method:"PATCH",body:JSON.stringify({mieter_name:editF.name.trim()||m.mieter_name,von:editF.von||"",bis:editF.bis||"",kaltmiete:editF.kalt===""?null:parseFloat(editF.kalt),nk_voraus:editF.nk===""?null:parseFloat(editF.nk)})});setEditFor(null);load();if(showToast)showToast(_L("Gespeichert ✓","Kaydedildi ✓","Saved ✓"),"success");}catch(e){alert(e.message);}};
+  const [editF,setEditF]=React.useState({name:"",von:"",bis:"",kalt:"",nk:"",telefon:"",email:"",kaution:"",erhAb:"",erhKalt:""});
+  const openEdit=(m)=>{setEditF({name:m.mieter_name||"",von:m.einzug||"",bis:m.auszug||"",kalt:String(m.kaltmiete==null?"":m.kaltmiete),nk:String(m.nk_vorauszahlung==null?"":m.nk_vorauszahlung),telefon:m.telefon||"",email:m.email||"",kaution:String(m.kaution==null?"":m.kaution),erhAb:"",erhKalt:""});setEditFor(editFor===m.tenancy_id?null:m.tenancy_id);};
+  const saveEdit=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id,{method:"PATCH",body:JSON.stringify({mieter_name:editF.name.trim()||m.mieter_name,von:editF.von||"",bis:editF.bis||"",kaltmiete:editF.kalt===""?null:parseFloat(editF.kalt),nk_voraus:editF.nk===""?null:parseFloat(editF.nk),kaution:editF.kaution===""?null:parseFloat(editF.kaution),telefon:editF.telefon,email:editF.email})});setEditFor(null);load();if(showToast)showToast(_L("Gespeichert ✓","Kaydedildi ✓","Saved ✓"),"success");}catch(e){alert(e.message);}};
+  const saveErhoehung=async(m)=>{if(!editF.erhAb||!(parseFloat(editF.erhKalt)>0)){alert(_L("Datum und neue Kaltmiete nötig.","Tarih ve yeni kira gerekli.","Date and new rent required."));return;}try{await api("/immo/tenancies/"+m.tenancy_id+"/mieterhoehung",{method:"POST",body:JSON.stringify({ab:editF.erhAb,kalt:parseFloat(editF.erhKalt)})});setEditF({...editF,erhAb:"",erhKalt:""});setEditFor(null);load();if(showToast)showToast(_L("Mieterhöhung gespeichert ✓","Kira artışı kaydedildi ✓","Rent increase saved ✓"),"success");}catch(e){alert(e.message);}};
   const openPay=(m)=>{setPayDate(new Date().toISOString().slice(0,10));setPayAmt(String(m.gesamtmiete||""));setPayFor(m.tenancy_id);};
   const confirmPay=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:curY,monat:curM,datum:payDate,betrag:parseFloat(payAmt)||m.gesamtmiete})});setPayFor(null);load();if(showToast)showToast(_L("Als bezahlt markiert","Ödendi işaretlendi","Marked paid"),"success");}catch(e){alert(e.message);}};
   const markUnpaid=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt?jahr="+curY+"&monat="+curM,{method:"DELETE"});setPayFor(null);load();}catch(e){alert(e.message);}};
@@ -2544,6 +2545,7 @@ function MieterView({onNav,showToast}){
         <span style={css.badge(ph.bg,ph.c)}>{ph.lbl}</span>
         <div style={{fontSize:22,fontWeight:800,color:theme.text,marginTop:6}}>{m.mieter_name}</div>
         <div style={{fontSize:13,color:theme.textMuted}}>{[m.property_name,m.unit_name,(m.wohnflaeche!=null?m.wohnflaeche+" m²":null)].filter(Boolean).join(" · ")}</div>
+        {(m.telefon||m.email)&&<div style={{fontSize:12,color:theme.textDim,marginTop:2}}>{[m.telefon?"📞 "+m.telefon:null,m.email?"✉️ "+m.email:null].filter(Boolean).join("   ·   ")}</div>}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{chip(m.anmeldung_done,"Anmeldung")}{chip(m.wgb_done,"WGB")}</div>
       </div>
       <div style={{...css.card,marginBottom:12}}>
@@ -2613,6 +2615,7 @@ function MieterView({onNav,showToast}){
         <div><span style={css.badge(ph.bg,ph.c)}>{ph.lbl}</span></div>
         <div style={{fontSize:17,fontWeight:800,color:theme.text,marginTop:6}}>{m.mieter_name}</div>
         <div style={{fontSize:13,color:theme.textMuted}}>{[m.property_name,m.unit_name,(m.wohnflaeche!=null?m.wohnflaeche+" m²":null)].filter(Boolean).join(" · ")}</div>
+        {(m.telefon||m.email)&&<div style={{fontSize:12,color:theme.textDim,marginTop:2}}>{[m.telefon?"📞 "+m.telefon:null,m.email?"✉️ "+m.email:null].filter(Boolean).join("   ·   ")}</div>}
         <div style={{display:"flex",gap:"4px 14px",flexWrap:"wrap",fontSize:13,marginTop:10,paddingTop:10,borderTop:"1px solid "+theme.border}}>
           <span style={{color:theme.textMuted}}>Kalt <b style={{color:theme.text}}>{_e(m.kaltmiete)}</b></span>
           <span style={{color:theme.textMuted}}>NK <b style={{color:theme.text}}>{_e(m.nk_vorauszahlung)}</b></span>
@@ -2654,6 +2657,20 @@ function MieterView({onNav,showToast}){
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Kaltmiete €","Kira €","Cold rent €")}</label><input style={{width:"100%",boxSizing:"border-box",padding:"9px 11px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13}} type="number" value={editF.kalt} onChange={e=>setEditF({...editF,kalt:e.target.value})}/></div>
             <div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Nebenkosten €","NK €","NK €")}</label><input style={{width:"100%",boxSizing:"border-box",padding:"9px 11px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13}} type="number" value={editF.nk} onChange={e=>setEditF({...editF,nk:e.target.value})}/></div>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>📞 {_L("Telefon","Telefon","Phone")}</label><input style={_ef} value={editF.telefon} onChange={e=>setEditF({...editF,telefon:e.target.value})}/></div>
+            <div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>✉️ E-Mail</label><input style={_ef} value={editF.email} onChange={e=>setEditF({...editF,email:e.target.value})}/></div>
+          </div>
+          <div><label style={{fontSize:11,color:theme.textDim}}>{_L("Kaution €","Depozito €","Deposit €")}</label><input style={_ef} type="number" value={editF.kaution} onChange={e=>setEditF({...editF,kaution:e.target.value})}/></div>
+          <div style={{borderTop:"1px solid "+theme.border,paddingTop:8,marginTop:2}}>
+            <div style={{fontSize:12,fontWeight:700,color:theme.text,marginBottom:2}}>📈 {_L("Mieterhöhung","Kira artışı","Rent increase")}</div>
+            <div style={{fontSize:11,color:theme.textDim,marginBottom:6}}>{_L("Ab diesem Datum gilt die neue Miete — vergangene Monate bleiben unverändert.","Bu tarihten itibaren yeni kira — geçmiş aylar değişmez.","From this date the new rent applies; past months unchanged.")}</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
+              <div style={{flex:1,minWidth:110}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Ab Datum","Tarihten","From")}</label><input style={_ef} type="date" value={editF.erhAb} onChange={e=>setEditF({...editF,erhAb:e.target.value})}/></div>
+              <div style={{flex:1,minWidth:110}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Neue Kaltmiete €","Yeni kira €","New rent €")}</label><input style={_ef} type="number" value={editF.erhKalt} onChange={e=>setEditF({...editF,erhKalt:e.target.value})}/></div>
+              <button style={{padding:"11px 14px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer"}} onClick={()=>saveErhoehung(m)}>📈 {_L("Erhöhen","Artır","Increase")}</button>
+            </div>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button style={{padding:"9px 14px",background:theme.accent,color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer"}} onClick={()=>saveEdit(m)}>✓ {_L("Speichern","Kaydet","Save")}</button>

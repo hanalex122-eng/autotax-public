@@ -915,8 +915,13 @@ class ImmoTenancy(Base):
     wgb_erstellt_am = Column(DateTime, nullable=True)  # Wohnungsgeberbestätigung zuletzt erzeugt (UI status)
     # AUTO-PAID model (Dauerzahlung): tenant assumed to pay every due month automatically.
     # Landlord enters NOTHING monthly — only marks the exception (a month NOT paid).
-    auto_paid = Column(Boolean, nullable=True, default=True)   # True = her ay otomatik ödendi say
-    offene_monate = Column(Text, nullable=True)                # JSON ["2026-03","2026-05"] = ödenmeyen aylar (istisna)
+    auto_paid = Column(Boolean, nullable=True, default=True)   # (dormant) eski Dauerzahlung denemesi — kullanılmıyor
+    offene_monate = Column(Text, nullable=True)                # (dormant)
+    # Mieter-Info + Mieterhöhung (dated rent history)
+    telefon = Column(String(50), nullable=True)
+    email = Column(String(200), nullable=True)
+    notiz = Column(Text, nullable=True)
+    miete_historie = Column(Text, nullable=True)               # JSON [{"ab":"2026-07-01","kalt":450}] — kira değişiklikleri (tarihli)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
