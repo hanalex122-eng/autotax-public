@@ -322,7 +322,7 @@ def tenancy_mietkonto(tid: int, year: Optional[int] = None, user: dict = Depends
         soll_due = ist_due = 0.0
         for m in range(1, 13):
             active = _tenancy_active_in_month(t, y, m)
-            soll = round(kalt, 2) if active else 0.0
+            soll = round(kalt * _month_proration(t, y, m), 2) if active else 0.0  # Teilmonat anteilig
             paid = round(paid_by_m.get(m, 0.0), 2)
             is_future = (y > now.year) or (y == now.year and m > now.month)
             if not active:
@@ -805,6 +805,34 @@ def _months_due_to_date(t, y, as_of=None):
     return sum(1 for m in range(1, last + 1) if _tenancy_active_in_month(t, y, m))
 
 
+def _month_proration(t, y, m):
+    """Anteil (0..1) des Monats, den der Mieter bewohnt — für anteilige Miete bei
+    Einzug/Auszug mitten im Monat (z.B. Einzug 15.06 → ~16/30). Voller Monat = 1.0."""
+    dim = monthrange(y, m)[1]
+    mstart = date(y, m, 1); mend = date(y, m, dim)
+    von = t.von or date(1900, 1, 1)
+    bis = t.bis or date(2999, 12, 31)
+    occ_start = max(von, mstart); occ_end = min(bis, mend)
+    if occ_end < occ_start:
+        return 0.0
+    days = (occ_end - occ_start).days + 1
+    return max(0.0, min(1.0, days / dim))
+
+
+def _soll_faellig(t, y, as_of=None):
+    """Fälliges Soll (Kaltmiete) bis heute, MIT anteiliger Miete für Teilmonate
+    (Einzug/Auszug). Volle Monate = Kaltmiete, Teilmonat = Kaltmiete × Tagesanteil.
+    Single source of truth for arrears across all screens."""
+    as_of = as_of or date.today()
+    last = 12 if y < as_of.year else (as_of.month if y == as_of.year else 0)
+    kalt = float(t.kaltmiete or 0)
+    total = 0.0
+    for m in range(1, last + 1):
+        if _tenancy_active_in_month(t, y, m):
+            total += kalt * _month_proration(t, y, m)
+    return round(total, 2)
+
+
 class UnitIn(BaseModel):
     property_id: int
     name: Optional[str] = None
@@ -995,7 +1023,7 @@ def _accounting(db, uid, pid, year):
         total_soll += soll_u; total_occ += occ; total_vac += vac; total_leer += leer
         for t in u_ten:
             ma = _months_due_to_date(t, year)
-            soll_t = ma * float(t.kaltmiete or 0)
+            soll_t = _soll_faellig(t, year)                 # anteilig (Teilmonat pro-rata)
             ist_t = round(ist_by_tenancy.get(t.id, 0), 2)   # SINGLE SOURCE: Soll − Ist (real payments) — partial-capable
             tenancy_results.append({"tenancy_id": t.id, "unit_id": u.id, "mieter_name": t.mieter_name,
                                     "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
@@ -1364,10 +1392,9 @@ def _offene_monate_count(t, year):
 
 
 def _tenancy_arrears(db, uid, t, year):
-    # MANUAL / parity-truth: Soll(due-to-date) − Ist(real immo_rent). Drives the ledger
-    # PARITY gate — keep stable. User-facing screens use _arrears_auto() instead.
-    ma = _months_due_to_date(t, year)
-    soll = ma * float(t.kaltmiete or 0)
+    # SINGLE SOURCE: Soll(due-to-date, anteilig) − Ist(real immo_rent). Pro-rated
+    # partial months (Einzug/Auszug). Parity-stable: full-month tenancies unchanged.
+    soll = _soll_faellig(t, year)
     rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, ImmoRent.tenancy_id == t.id, _notdel(ImmoRent),
                                       ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all()
     ist = sum(float(r.betrag or 0) for r in rents)

@@ -57,7 +57,7 @@ def main():
     db.add(ImmoProperty(id=10, user_id=1, name="Haus", adresse="Str 1, 10115 Berlin"))
     db.add(ImmoUnit(id=1, property_id=10, user_id=1, name="WHG-01", soll_miete=500))
     db.add(ImmoTenancy(id=101, unit_id=1, user_id=1, mieter_name="Neuer Mieter",
-                       von=date(2026, 6, 15), bis=None, kaltmiete=500))
+                       von=date(2026, 6, 1), bis=None, kaltmiete=500))
     db.add(ImmoRent(id=1, property_id=10, tenancy_id=101, user_id=1, betrag=500, datum=date(2026, 6, 5)))
     db.commit()
     t = db.query(ImmoTenancy).get(101)

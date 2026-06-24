@@ -170,6 +170,19 @@ def _active_in_month(t, y, m) -> bool:
     return von <= mend and bis >= mstart
 
 
+def _proration(t, y, m) -> float:
+    """Tagesanteil (0..1) für anteilige Miete bei Teilmonat (Einzug/Auszug). MUST stay
+    identical to immo_api._month_proration so the parity gate matches OLD vs LEDGER."""
+    dim = monthrange(y, m)[1]
+    mstart = date(y, m, 1); mend = date(y, m, dim)
+    von = t.von or date(1900, 1, 1)
+    bis = t.bis or date(2999, 12, 31)
+    occ_start = max(von, mstart); occ_end = min(bis, mend)
+    if occ_end < occ_start:
+        return 0.0
+    return max(0.0, min(1.0, ((occ_end - occ_start).days + 1) / dim))
+
+
 def ensure_sollbuchungen(db, uid: int, year: int, *, faellig_tag: int = 3) -> int:
     """Idempotently post one konto_art=miete Sollbuchung per ACTIVE month for
     every tenancy of the user in `year`.
@@ -202,7 +215,10 @@ def ensure_sollbuchungen(db, uid: int, year: int, *, faellig_tag: int = 3) -> in
                 continue
             if (t.id, m) in existing:
                 continue
-            post_entry(db, user_id=uid, typ=TYP_SOLLBUCHUNG, betrag=kalt, jahr=year, monat=m,
+            betrag = round(kalt * _proration(t, year, m), 2)  # Teilmonat anteilig (Einzug/Auszug)
+            if betrag <= 0:
+                continue
+            post_entry(db, user_id=uid, typ=TYP_SOLLBUCHUNG, betrag=betrag, jahr=year, monat=m,
                        property_id=pid, unit_id=t.unit_id, tenancy_id=t.id,
                        faellig_am=date(year, m, min(faellig_tag, monthrange(year, m)[1])),
                        source="auto", konto_art="miete", commit=False)
