@@ -2500,6 +2500,7 @@ function MieterView({onNav,showToast}){
   const _ef={width:"100%",boxSizing:"border-box",padding:"11px 13px",background:theme.surfaceAlt,border:"1.5px solid "+theme.border,borderRadius:10,color:theme.text,fontSize:14,fontFamily:"inherit"};
   const _efl={display:"block",fontSize:12,color:theme.textMuted,fontWeight:600,marginBottom:5};
   const _efR=(n,lbl,key,extra)=>(<div style={{marginBottom:12}}><label style={_efl}>{n?<b style={{color:theme.textDim}}>{n}. </b>:""}{lbl}</label><input style={_ef} value={erf[key]} onChange={e=>setErf({...erf,[key]:e.target.value})} {...(extra||{})}/></div>);
+  const delTenant=async(m)=>{if(!window.confirm(_L("Mieter \""+m.mieter_name+"\" löschen?","Kiracı \""+m.mieter_name+"\" silinsin mi?","Delete tenant \""+m.mieter_name+"\"?")))return;try{await api("/immo/tenancies/"+m.tenancy_id,{method:"DELETE"});if(sel&&sel.tenancy_id===m.tenancy_id)setSel(null);load();if(showToast)showToast(_L("Gelöscht","Silindi","Deleted"),"info");}catch(e){alert(e.message);}};
   const openPay=(m)=>{setPayDate(new Date().toISOString().slice(0,10));setPayAmt(String(m.gesamtmiete||""));setPayFor(m.tenancy_id);};
   const confirmPay=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:curY,monat:curM,datum:payDate,betrag:parseFloat(payAmt)||m.gesamtmiete})});setPayFor(null);load();if(showToast)showToast(_L("Als bezahlt markiert","Ödendi işaretlendi","Marked paid"),"success");}catch(e){alert(e.message);}};
   const markUnpaid=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt?jahr="+curY+"&monat="+curM,{method:"DELETE"});setPayFor(null);load();}catch(e){alert(e.message);}};
@@ -2627,6 +2628,7 @@ function MieterView({onNav,showToast}){
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
           <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>dlWgb(m.tenancy_id)}>📄 WGB</button>
           <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>openDetail(m)}>📊 {_L("Mietkonto","Hesap","Account")}</button>
+          <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12,color:theme.danger,borderColor:theme.danger}} onClick={()=>delTenant(m)}>🗑️ {_L("Löschen","Sil","Delete")}</button>
         </div>
       </div>);})}
     </div>
