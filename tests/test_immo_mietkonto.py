@@ -1,8 +1,10 @@
-"""Step 5a — GET /immo/tenancies/{tid}/mietkonto (monthly Mietkonto, Tenancy Detail).
+"""Step 5a — GET /immo/tenancies/{tid}/mietkonto (monthly Mietkonto), EXCEPTION ENGINE.
 
-today pinned 2026-06-23. Tenancy von=2026-04-01, kalt 500, one payment in April.
-Expect: Jan-Mar inactive, Apr paid, May/Jun open, Jul-Dec future; summe due=1500
-(Apr+May+Jun), bezahlt 500, offen 1000.
+today pinned 2026-06-23. Tenancy von=2026-04-01, kalt 500. April has no reported
+problem (default OK → paid, bezahlt=soll). May and June are reported UNBEZAHLT
+exceptions (full month owed). Expect: Jan-Mar inactive, Apr paid, May/Jun open,
+Jul-Dec future; summe due=1500 (Apr+May+Jun), bezahlt 500 (only Apr), offen 1000
+(= the two reported exceptions). immo_rent rows no longer drive these numbers.
 Run:  PYTHONIOENCODING=utf-8 PYTHONPATH=. python tests/test_immo_mietkonto.py
 """
 import os
@@ -56,7 +58,11 @@ def main():
     db.add(ImmoProperty(id=10, user_id=1, name="Haus"))
     db.add(ImmoUnit(id=1, property_id=10, user_id=1, name="EG", soll_miete=500))
     db.add(ImmoTenancy(id=101, unit_id=1, user_id=1, mieter_name="Test", von=date(2026, 4, 1), kaltmiete=500))
-    db.add(ImmoRent(id=1, property_id=10, tenancy_id=101, user_id=1, betrag=500, datum=date(2026, 4, 10)))
+    db.commit()
+    t = db.query(ImmoTenancy).get(101)
+    # April: no problem reported → default OK (paid). May+June reported UNBEZAHLT.
+    immo_api._set_problem(t, 2026, 5, "unpaid")
+    immo_api._set_problem(t, 2026, 6, "unpaid")
     db.commit(); db.close()
 
     immo_api.SessionLocal = S

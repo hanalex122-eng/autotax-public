@@ -71,21 +71,23 @@ def main():
     ok(rt.status_code == 200, f"tenancy created (got {rt.status_code})")
     tid = rt.json().get("id")
 
-    print("[4] /immo/mieter — neuer Mieter erscheint korrekt")
+    print("[4] /immo/mieter — neuer Mieter, KEINE Aktion → Schuld 0 (EXCEPTION ENGINE default OK)")
     rm = cl.get("/immo/mieter")
     ok(rm.status_code == 200, f"/mieter 200 (got {rm.status_code})")
     m = next((x for x in rm.json()["mieter"] if x["tenancy_id"] == tid), None)
     ok(m is not None and m["gesamtmiete"] == 540, "Gesamt = 540 (470+70)")
-    ok(abs(m["offene_forderung"] - round(470 * 16 / 30, 2)) < 0.02, f"offen = anteilig Juni ~250.67 (noch keine Zahlung) — got {m['offene_forderung']}")
+    ok(m["offene_forderung"] == 0, f"offen = 0 (kein Problem gemeldet, 0 Eingaben) — got {m['offene_forderung']}")
 
-    print("[5] Mieteingang erfassen (270) — speichert + bleibt")
-    rr = cl.post("/immo/rent", json={"property_id": pid, "tenancy_id": tid, "betrag": 270, "datum": "2026-06-10"})
-    ok(rr.status_code == 200, f"rent saved (got {rr.status_code})")
-
-    print("[6] Nach Zahlung → Rückstand 0 (Halbmonat gedeckt)")
+    print("[5] Juni als UNBEZAHLT melden → Rückstand = anteilig ~250.67")
+    cl.delete(f"/immo/tenancies/{tid}/monat-bezahlt", params={"jahr": 2026, "monat": 6})
     acc = cl.get(f"/immo/properties/{pid}/accounting?year=2026").json()
     tr = acc["tenancies"][0]
-    ok(tr["rueckstand"] == 0, f"Rückstand = 0 (got {tr['rueckstand']})")
+    ok(abs(tr["rueckstand"] - round(470 * 16 / 30, 2)) < 0.02, f"Rückstand = anteilig Juni ~250.67 — got {tr['rueckstand']}")
+
+    print("[6] Juni als BEZAHLT markieren → Rückstand 0")
+    cl.post(f"/immo/tenancies/{tid}/monat-bezahlt", json={"jahr": 2026, "monat": 6})
+    acc = cl.get(f"/immo/properties/{pid}/accounting?year=2026").json()
+    ok(acc["tenancies"][0]["rueckstand"] == 0, f"Rückstand = 0 — got {acc['tenancies'][0]['rueckstand']}")
     ok(rm.status_code == 200, "kein Fehler im gesamten Flow")
 
     print(f"\n=== Create-Flow (neue Immobilie ohne Fehler): {PASS} passed, {FAIL} failed ===")

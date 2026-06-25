@@ -1,9 +1,20 @@
-"""Faz 4.1 proof — source adapter (IMMO_LEDGER_READ flag) OFF==OLD, ON==ledger.
+"""immo_source adapter under the EXCEPTION ENGINE — flag toggles two DISTINCT domains.
 
-Seeds the realistic landlord fixture (year 2025), backfills, then verifies each
-adapter returns the OLD value with the flag OFF, the ledger value with it ON, and
-that OFF==ON (cutover is safe). Adapters are INERT (no consumer wired) — this
-only exercises them directly. No prod DB / network.
+MODEL CHANGE: user-facing debt is now exception-based ('no problem reported' = paid),
+NOT Soll−Ist over immo_rent. The old "OFF==ON cutover is safe" parity premise is
+therefore RETIRED: the two sources now mean different things and are EXPECTED to
+differ.
+
+  • IMMO_LEDGER_READ OFF (default, the live consumer path)
+        src_arrears_total / src_tenancy_arrears  →  OLD engine = EXCEPTION debt
+        (reported exceptions only; immo_rent rows do NOT drive it).
+  • IMMO_LEDGER_READ ON
+        →  the LEDGER read model, a SEPARATE audit domain over real immo_rent
+        payments (Soll−Ist), kept for reconciliation — not the user surface.
+
+This test seeds the realistic fixture (immo_rent → 18300 audit debt) AND reports a
+DIFFERENT set of exceptions (→ 13900 user debt, 2 debtors) precisely to prove the
+flag selects two independent domains. No prod DB / network.
 Run:  PYTHONIOENCODING=utf-8 PYTHONPATH=. python tests/test_immo_source.py
 """
 import os
@@ -19,6 +30,7 @@ from sqlalchemy.orm import sessionmaker
 from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent
 from autotax import immo_ledger as L
 from autotax import immo_source as S
+from autotax import immo_api
 
 PASS, FAIL = 0, 0
 
@@ -67,40 +79,39 @@ def main():
     L.run_backfill(db, 1, dry_run=False)
     t105 = db.query(ImmoTenancy).filter(ImmoTenancy.id == 105).first()
     t101 = db.query(ImmoTenancy).filter(ImmoTenancy.id == 101).first()
+    t102 = db.query(ImmoTenancy).filter(ImmoTenancy.id == 102).first()
+    t103 = db.query(ImmoTenancy).filter(ImmoTenancy.id == 103).first()
 
-    def measure():
-        return {
-            "arrears_total": S.src_arrears_total(db, 1, 2025),
-            "debtors": S.src_debtors(db, 1, 2025),
-            "arr_105": S.src_tenancy_arrears(db, 1, t105, 2025),
-            "arr_101": S.src_tenancy_arrears(db, 1, t101, 2025),
-        }
+    # EXCEPTION ENGINE user-facing debt: report ONLY T102 (4900) and T103 (9000) as
+    # problems → user total 13900, 2 debtors. T105/T101 have NO problem reported →
+    # user debt 0 EVEN THOUGH immo_rent (the audit domain) shows 3200 / overpaid.
+    immo_api._set_problem(t102, 2025, 1, "partial", offen=4900.0)
+    immo_api._set_problem(t103, 2025, 1, "partial", offen=9000.0)
+    db.commit()
 
-    print("\n[1] flag OFF → OLD engine values")
+    print("\n[1] flag OFF (live path) → EXCEPTION debt (reported problems only)")
     os.environ["IMMO_LEDGER_READ"] = "0"
-    off = measure()
-    ok(off["arrears_total"] == 18300.0, f"OFF arrears_total 18300 (got {off['arrears_total']})")
-    ok(len(off["debtors"]) == 4, f"OFF 4 debtors (got {len(off['debtors'])})")
-    ok([d["tenant"] for d in off["debtors"]] == ["Test Mieter 3", "Test Mieter 2", "Test Mieter 5", "Test Mieter 4"],
-       f"OFF debtors sorted by debt desc (got {[d['tenant'] for d in off['debtors']]})")
-    ok(off["arr_105"] == 3200.0, f"OFF tenancy 105 arrears 3200 (got {off['arr_105']})")
-    ok(off["arr_101"] == 0.0, f"OFF tenancy 101 (overpaid) arrears 0 (got {off['arr_101']})")
+    off_total = S.src_arrears_total(db, 1, 2025)
+    ok(off_total == 13900.0, f"OFF arrears_total = 13900 (reported exceptions) (got {off_total})")
+    ok(S.src_tenancy_arrears(db, 1, t103, 2025) == 9000.0, f"OFF T103 = 9000 (reported) (got {S.src_tenancy_arrears(db,1,t103,2025)})")
+    ok(S.src_tenancy_arrears(db, 1, t102, 2025) == 4900.0, f"OFF T102 = 4900 (reported) (got {S.src_tenancy_arrears(db,1,t102,2025)})")
+    ok(S.src_tenancy_arrears(db, 1, t105, 2025) == 0.0,
+       f"OFF T105 = 0 (no problem reported, even though immo_rent underpaid) (got {S.src_tenancy_arrears(db,1,t105,2025)})")
+    ok(S.src_tenancy_arrears(db, 1, t101, 2025) == 0.0, f"OFF T101 = 0 (no problem) (got {S.src_tenancy_arrears(db,1,t101,2025)})")
 
-    print("\n[2] flag ON → ledger values")
+    print("\n[2] flag ON → LEDGER audit domain (Soll−Ist over immo_rent, independent)")
     os.environ["IMMO_LEDGER_READ"] = "1"
-    on = measure()
-    ok(on["arrears_total"] == 18300.0, f"ON arrears_total 18300 (got {on['arrears_total']})")
-    ok(len(on["debtors"]) == 4, f"ON 4 debtors (got {len(on['debtors'])})")
-    ok(on["arr_105"] == 3200.0, f"ON tenancy 105 arrears 3200 (got {on['arr_105']})")
+    on_total = S.src_arrears_total(db, 1, 2025)
+    ok(on_total == 18300.0, f"ON arrears_total = 18300 (immo_rent audit domain) (got {on_total})")
+    ok(S.src_tenancy_arrears(db, 1, t105, 2025) == 3200.0, f"ON T105 = 3200 (immo_rent Soll−Ist) (got {S.src_tenancy_arrears(db,1,t105,2025)})")
 
-    print("\n[3] OFF == ON (cutover safe)")
-    ok(off["arrears_total"] == on["arrears_total"], "arrears_total OFF==ON")
-    ok(off["debtors"] == on["debtors"], "debtors OFF==ON (same shape+values+order)")
-    ok(off["arr_105"] == on["arr_105"] and off["arr_101"] == on["arr_101"], "tenancy_arrears OFF==ON")
+    print("\n[3] the two domains are INDEPENDENT (parity premise retired)")
+    ok(off_total != on_total, f"OFF (exceptions {off_total}) != ON (audit {on_total}) — distinct domains")
+    ok(S.src_tenancy_arrears(db, 1, t105, 2025) != 0.0, "T105: audit domain (ON) shows debt where user domain (OFF) shows 0")
 
     os.environ["IMMO_LEDGER_READ"] = "0"
     db.close()
-    print(f"\n=== Faz 4.1 source adapter: {PASS} passed, {FAIL} failed ===")
+    print(f"\n=== immo_source (exception engine vs audit domain): {PASS} passed, {FAIL} failed ===")
     sys.exit(1 if FAIL else 0)
 
 

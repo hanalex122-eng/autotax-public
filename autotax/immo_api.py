@@ -204,16 +204,16 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
             lp_row = db.query(ImmoRent.datum).filter(ImmoRent.tenancy_id == t.id, ImmoRent.user_id == uid,
                                                      ImmoRent.datum != None).order_by(ImmoRent.datum.desc()).first()  # noqa: E711
             last_payment = str(lp_row[0]) if lp_row and lp_row[0] else None
-            # this-month status (current calendar month, current year only) — from immo_rent
-            tm = None
-            if y == now.year:
-                mstart = now.replace(day=1)
-                active = (t.von or date(1900, 1, 1)) <= now and (t.bis is None or t.bis >= mstart)
-                if active:
-                    paid_m = sum(float(r.betrag or 0) for r in db.query(ImmoRent).filter(
-                        ImmoRent.tenancy_id == t.id, ImmoRent.user_id == uid, _notdel(ImmoRent),
-                        ImmoRent.datum >= mstart, ImmoRent.datum <= now).all())
-                    tm = "paid" if (kalt > 0 and paid_m >= kalt) else ("partial" if paid_m > 0 else "open")
+            # this-month status + open amount (current calendar month) — EXCEPTION ENGINE
+            tm = None; tm_offen = 0.0
+            if y == now.year and _tenancy_active_in_month(t, now.year, now.month):
+                exc = _exc_for(t, now.year, now.month)
+                if not exc:
+                    tm = "paid"
+                elif exc.get("typ") == "partial":
+                    tm = "partial"; tm_offen = round(float(exc.get("offen") or 0), 2)
+                else:
+                    tm = "open"; tm_offen = _monat_soll(t, now.year, now.month)
             out.append({
                 "tenancy_id": t.id, "mieter_name": t.mieter_name,
                 "property_name": (p.name if p else None), "property_address": (p.adresse if p else None),
@@ -222,7 +222,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "gesamtmiete": round(kalt + nk, 2),
                 "einzug": str(t.von) if t.von else None, "auszug": str(t.bis) if t.bis else None,
                 "offene_forderung": offen, "debtor": offen > 0,
-                "this_month_status": tm, "last_payment_date": last_payment,
+                "this_month_status": tm, "this_month_offen": round(tm_offen, 2), "last_payment_date": last_payment,
                 "telefon": getattr(t, "telefon", None), "email": getattr(t, "email", None),
                 "kaution": (round(float(t.kaution), 2) if t.kaution is not None else None),
                 "miete_historie": (getattr(t, "miete_historie", None) or None),
@@ -247,39 +247,30 @@ class MonatBezahltIn(BaseModel):
 
 @router.post("/tenancies/{tid}/monat-bezahlt")
 def mark_monat_bezahlt(tid: int, body: MonatBezahltIn, user: dict = Depends(get_current_user)):
-    """UX 'Ödendi' — record a month's rent as a quick payment (source='quick').
-    Default amount = Gesamtmiete (Kalt+NK); idempotent per month. immo_rent ONLY
-    (payment source of truth) — no ledger/Soll/Ist/Rückstand logic touched."""
+    """EXCEPTION ENGINE 'Ödendi / kein Problem' — clears the month's exception (default
+    OK). If a partial amount BELOW the month's Soll is given, records a PARTIAL
+    exception (offen = Soll − betrag). No payment row is created — the model is
+    'no problem reported', not 'money asserted received'."""
     uid = _uid(user)
     db = SessionLocal()
     try:
         t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).first()
         if not t:
             raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
-        u = db.query(ImmoUnit).filter(ImmoUnit.id == t.unit_id).first()
-        if not u:
-            raise HTTPException(status_code=400, detail="Einheit fehlt")
-        amt = body.betrag if body.betrag is not None else round(float(t.kaltmiete or 0) + float(t.nk_voraus or 0), 2)
-        dt = _pdate(body.datum) or date(body.jahr, body.monat, 1)
-        mstart = date(body.jahr, body.monat, 1)
-        mend = date(body.jahr, body.monat, monthrange(body.jahr, body.monat)[1])
-        existing = db.query(ImmoRent).filter(ImmoRent.tenancy_id == tid, ImmoRent.user_id == uid, _notdel(ImmoRent),
-                                             ImmoRent.source == "quick", ImmoRent.datum >= mstart, ImmoRent.datum <= mend).first()
-        if existing:
-            existing.betrag = amt; existing.datum = dt
+        soll_m = _monat_soll(t, body.jahr, body.monat)
+        if body.betrag is not None and round(float(body.betrag), 2) < round(soll_m, 2) - 0.001:
+            _set_problem(t, body.jahr, body.monat, "partial", offen=round(soll_m - float(body.betrag), 2))
         else:
-            db.add(ImmoRent(property_id=u.property_id, tenancy_id=tid, user_id=uid, datum=dt,
-                            betrag=amt, source="quick", notiz="Schnellzahlung (Ödendi)"))
+            _clear_problem(t, body.jahr, body.monat)
         db.commit()
-        return {"success": True, "betrag": amt, "jahr": body.jahr, "monat": body.monat}
+        return {"success": True, "jahr": body.jahr, "monat": body.monat, "exception": _exc_for(t, body.jahr, body.monat)}
     finally:
         db.close()
 
 
 @router.delete("/tenancies/{tid}/monat-bezahlt")
 def unmark_monat_bezahlt(tid: int, jahr: int, monat: int, user: dict = Depends(get_current_user)):
-    """UX 'Ödenmedi' — soft-delete the quick payment(s) for that month. Only
-    source='quick' rows are removed; manual Mieteingänge are never touched."""
+    """EXCEPTION ENGINE 'Ödenmedi' — report the month as a PROBLEM (unpaid, full owed)."""
     uid = _uid(user)
     db = SessionLocal()
     try:
@@ -288,15 +279,9 @@ def unmark_monat_bezahlt(tid: int, jahr: int, monat: int, user: dict = Depends(g
             raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
         if not (1 <= monat <= 12):
             raise HTTPException(status_code=400, detail="monat 1-12")
-        mstart = date(jahr, monat, 1)
-        mend = date(jahr, monat, monthrange(jahr, monat)[1])
-        rows = db.query(ImmoRent).filter(ImmoRent.tenancy_id == tid, ImmoRent.user_id == uid, _notdel(ImmoRent),
-                                         ImmoRent.source == "quick", ImmoRent.datum >= mstart, ImmoRent.datum <= mend).all()
-        n = 0
-        for r in rows:
-            r.is_deleted = True; r.deleted_at = datetime.now(timezone.utc); n += 1
+        _set_problem(t, jahr, monat, "unpaid")
         db.commit()
-        return {"success": True, "removed": n}
+        return {"success": True, "jahr": jahr, "monat": monat, "exception": _exc_for(t, jahr, monat)}
     finally:
         db.close()
 
@@ -315,37 +300,30 @@ def tenancy_mietkonto(tid: int, year: Optional[int] = None, user: dict = Depends
         t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).first()
         if not t:
             raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
-        kalt = float(t.kaltmiete or 0)
-        rents = db.query(ImmoRent).filter(ImmoRent.tenancy_id == tid, ImmoRent.user_id == uid, _notdel(ImmoRent),
-                                          ImmoRent.datum != None).all()  # noqa: E711
-        paid_by_m = {}
-        for r in rents:
-            if r.datum and r.datum.year == y:
-                paid_by_m[r.datum.month] = paid_by_m.get(r.datum.month, 0.0) + float(r.betrag or 0)
         rows = []
-        soll_due = ist_due = 0.0
+        soll_due = 0.0
         for m in range(1, 13):
             active = _tenancy_active_in_month(t, y, m)
             soll = _monat_soll(t, y, m) if active else 0.0  # Erstmiete / anteilig / Mieterhöhung
-            paid = round(paid_by_m.get(m, 0.0), 2)
             is_future = (y > now.year) or (y == now.year and m > now.month)
+            exc = _exc_for(t, y, m)
             if not active:
-                status = "inactive"
+                status, paid = "inactive", 0.0
             elif is_future:
-                status = "future"
-            elif soll > 0 and paid >= soll:
-                status = "paid"
-            elif paid > 0:
-                status = "partial"
+                status, paid = "future", 0.0
+            elif not exc:                                   # EXCEPTION ENGINE: default = OK
+                status, paid = "paid", soll
+            elif exc.get("typ") == "partial":
+                status, paid = "partial", round(max(0.0, soll - float(exc.get("offen") or 0)), 2)
             else:
-                status = "open"
+                status, paid = "open", 0.0                  # unpaid exception
             if active and not is_future:
                 soll_due += soll
-                ist_due += soll if status == "paid" else min(paid, soll)
             rows.append({"monat": m, "soll": soll, "bezahlt": paid, "status": status})
-        offen = round(max(0.0, soll_due - ist_due), 2)
+        offen = _exception_arrears(t, y)
+        ist_due = round(max(0.0, soll_due - offen), 2)
         return {"tenancy_id": tid, "year": y, "rows": rows,
-                "summe": {"soll_faellig": round(soll_due, 2), "bezahlt": round(ist_due, 2), "offen": offen}}
+                "summe": {"soll_faellig": round(soll_due, 2), "bezahlt": ist_due, "offen": offen}}
     finally:
         db.close()
 
@@ -1108,11 +1086,12 @@ def _accounting(db, uid, pid, year):
         for t in u_ten:
             ma = _months_due_to_date(t, year)
             soll_t = _soll_faellig(t, year)                 # anteilig (Teilmonat pro-rata)
-            ist_t = round(ist_by_tenancy.get(t.id, 0), 2)   # SINGLE SOURCE: Soll − Ist (real payments) — partial-capable
+            rueck_t = _exception_arrears(t, year)           # EXCEPTION ENGINE: debt = reported problems only
+            ist_t = round(max(0.0, soll_t - rueck_t), 2)    # effektiv = Soll − Ausnahmen ("kein Problem gemeldet")
             tenancy_results.append({"tenancy_id": t.id, "unit_id": u.id, "mieter_name": t.mieter_name,
                                     "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
                                     "kaltmiete": t.kaltmiete, "monate": ma, "soll": round(soll_t, 2),
-                                    "ist": ist_t, "rueckstand": round(max(0, soll_t - ist_t), 2),
+                                    "ist": ist_t, "rueckstand": round(rueck_t, 2),
                                     "kaution": t.kaution})
     exps = db.query(ImmoExpense).filter(ImmoExpense.property_id == pid, ImmoExpense.user_id == uid, _notdel(ImmoExpense),
                                         ImmoExpense.datum >= date(year, 1, 1), ImmoExpense.datum <= date(year, 12, 31)).all()
@@ -1120,11 +1099,12 @@ def _accounting(db, uid, pid, year):
     for e in exps:
         by_kat[e.kategorie] = round(by_kat.get(e.kategorie, 0) + float(e.betrag or 0), 2)
     ausgaben = round(sum(by_kat.values()), 2)
-    gewinn = round(ist_total - ausgaben, 2)
-    rendite = round(gewinn / float(p.kaufpreis) * 100, 2) if (p and p.kaufpreis) else None
     soll_sum = round(sum(t["soll"] for t in tenancy_results), 2)
     ist_sum = round(sum(t["ist"] for t in tenancy_results), 2)
-    zahlungsausfall = round(max(0, soll_sum - ist_sum), 2)  # SINGLE SOURCE: Soll − Ist
+    ist_total = ist_sum                                     # EXCEPTION ENGINE: erhalten = Soll − Ausnahmen
+    zahlungsausfall = round(sum(t["rueckstand"] for t in tenancy_results), 2)  # = gemeldete Ausnahmen
+    gewinn = round(ist_total - ausgaben, 2)
+    rendite = round(gewinn / float(p.kaufpreis) * 100, 2) if (p and p.kaufpreis) else None
     total_unit_months = (len(units) * 12) or 1
     return {
         "year": year, "property": _prop_dict(p) if p else None,
@@ -1449,81 +1429,95 @@ _STUFE_TXT = {1: "Zahlungserinnerung", 2: "1. Mahnung", 3: "2. Mahnung"}
 EVENT_TYPEN = {"wartung", "versicherung", "grundsteuer", "mieterhoehung", "sonstige"}
 
 
-def _offene_monate_count(t, year):
-    """AUTO-PAID model: count of months explicitly marked UNPAID (offene_monate JSON)
-    for `year`, limited to due-to-date active months. Everything else = paid."""
+# ── EXCEPTION ENGINE ────────────────────────────────────────────────────────
+# The product generates Soll for every due month and assumes each month is OK
+# unless a PROBLEM is reported. Debt surfaces ONLY from reported exceptions — this
+# is NOT an assertion that money arrived, just "no problem reported". One foundation
+# for delays, bank-matching, reminders, reporting. Stored per tenancy in
+# offene_monate (JSON): [{"ym":"2026-06","typ":"unpaid"},
+#                        {"ym":"2026-07","typ":"partial","offen":120.0}]
+def _exc_list(t):
+    """Parsed exception list of the tenancy. Each: {ym, typ:'unpaid'|'partial', offen?}."""
     import json
     raw = getattr(t, "offene_monate", None)
     if not raw:
-        return 0
+        return []
     try:
         lst = json.loads(raw) if isinstance(raw, str) else list(raw or [])
     except Exception:
-        return 0
-    today = date.today()
-    cnt = 0
-    for s in lst:
-        try:
-            yy = int(str(s)[:4]); mm = int(str(s)[5:7])
-        except Exception:
+        return []
+    out = []
+    for e in (lst or []):
+        if isinstance(e, dict) and e.get("ym"):
+            out.append({"ym": str(e["ym"])[:7], "typ": e.get("typ") or "unpaid", "offen": e.get("offen")})
+        elif isinstance(e, str) and len(e) >= 7:          # legacy bare "2026-06" = unpaid
+            out.append({"ym": e[:7], "typ": "unpaid", "offen": None})
+    return out
+
+
+def _exc_for(t, year, m):
+    ym = "%04d-%02d" % (year, m)
+    for e in _exc_list(t):
+        if e["ym"] == ym:
+            return e
+    return None
+
+
+def _save_exc(t, lst):
+    import json
+    t.offene_monate = json.dumps([{k: v for k, v in e.items() if v is not None} for e in lst]) if lst else None
+
+
+def _set_problem(t, year, m, typ, offen=None):
+    """Report a problem for (year,m): typ 'unpaid' (full owed) | 'partial' (offen owed)."""
+    ym = "%04d-%02d" % (year, m)
+    lst = [e for e in _exc_list(t) if e["ym"] != ym]
+    e = {"ym": ym, "typ": "partial" if typ == "partial" else "unpaid"}
+    if e["typ"] == "partial":
+        e["offen"] = round(float(offen or 0), 2)
+    lst.append(e)
+    _save_exc(t, lst)
+
+
+def _clear_problem(t, year, m):
+    """Mark (year,m) OK — remove any exception (default state)."""
+    ym = "%04d-%02d" % (year, m)
+    _save_exc(t, [e for e in _exc_list(t) if e["ym"] != ym])
+
+
+def _exception_arrears(t, year, as_of=None):
+    """EXCEPTION ENGINE debt: ONLY reported exceptions. Default month = OK → 0.
+    unpaid → full _monat_soll (anteilig/Mieterhöhung/Erstmiete); partial → offen.
+    Due-to-date, active months only."""
+    as_of = as_of or date.today()
+    last = 12 if year < as_of.year else (as_of.month if year == as_of.year else 0)
+    total = 0.0
+    for m in range(1, last + 1):
+        if not _tenancy_active_in_month(t, year, m):
             continue
-        if yy != year:
+        e = _exc_for(t, year, m)
+        if not e:
             continue
-        due = (year < today.year) or (year == today.year and mm <= today.month)
-        if due and _tenancy_active_in_month(t, year, mm):
-            cnt += 1
-    return cnt
+        total += (float(e["offen"] or 0) if e["typ"] == "partial" else _monat_soll(t, year, m))
+    return round(max(0.0, total), 2)
 
 
 def _tenancy_arrears(db, uid, t, year):
-    # SINGLE SOURCE: Soll(due-to-date, anteilig) − Ist(real immo_rent). Pro-rated
-    # partial months (Einzug/Auszug). Parity-stable: full-month tenancies unchanged.
-    soll = _soll_faellig(t, year)
-    rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, ImmoRent.tenancy_id == t.id, _notdel(ImmoRent),
-                                      ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all()
-    ist = sum(float(r.betrag or 0) for r in rents)
-    return round(max(0, soll - ist), 2)
-
-
-def _arrears_auto(db, uid, t, year):
-    # AUTO-PAID (Dauerzahlung) DEFAULT for user screens: tenant assumed to pay every
-    # due month → debt ONLY from months explicitly marked unpaid (offene_monate).
-    # auto_paid NULL (legacy) = auto. auto_paid False → classic manual _tenancy_arrears.
-    # Parity/ledger paths keep using _tenancy_arrears, so the gate is unaffected.
-    if getattr(t, "auto_paid", None) in (True, None):
-        return round(_offene_monate_count(t, year) * float(t.kaltmiete or 0), 2)
-    return _tenancy_arrears(db, uid, t, year)
+    # EXCEPTION ENGINE — user-facing debt = reported exceptions only (default = OK).
+    # immo_rent payments no longer drive debt (kept for history/bank-matching).
+    return _exception_arrears(t, year)
 
 
 def _mahnung_betrag(db, uid, t, year) -> float:
-    """Mahnung open amount with the Faz 4.3 per-Mahnung parity GUARD.
+    """Mahnung open amount = EXCEPTION ARREARS (operational debt).
 
-    Flag OFF → OLD _tenancy_arrears (today, bit-for-bit).
-    Flag ON  → ledger src_tenancy_arrears, but ONLY if it equals OLD to the cent.
-               Any mismatch OR lazy-ensure/read failure → OLD amount + WARN. A wrong
-               amount must NEVER reach a legal Mahnung; the guard always degrades to
-               the OLD value rather than trusting a divergent/stale ledger."""
-    old = _tenancy_arrears(db, uid, t, year)
-    from autotax.config import immo_ledger_mahnung_enabled
-    if not immo_ledger_mahnung_enabled():
-        return old
-    if _lazy_ledger_refresh(db, uid, year)["ledger_refresh_status"] != "ok":
-        logger.warning("mahnung_guard refresh_failed uid=%s tenancy=%s year=%s -> OLD amount", uid, t.id, year)
-        return old
-    try:
-        # Read the ledger DIRECTLY (not via src_tenancy_arrears, which is gated by
-        # the separate IMMO_LEDGER_READ flag). Mahnung has its own flag + guard.
-        _sal = _read.saldo_by_tenancy(db, uid, year).get(t.id, {})
-        led = round(max(0.0, float(_sal.get("saldo", 0.0))), 2)
-    except Exception as e:
-        logger.warning("mahnung_guard read_failed uid=%s tenancy=%s year=%s err=%s -> OLD amount", uid, t.id, year, e)
-        return old
-    if abs(round(old, 2) - led) > 0.01:
-        logger.warning("mahnung_parity_mismatch uid=%s tenancy=%s year=%s old=%s ledger=%s diff=%s -> OLD amount",
-                       uid, t.id, year, round(old, 2), led, round(led - old, 2))
-        return old
-    logger.info("mahnung_guard ok uid=%s tenancy=%s year=%s amount=%s (ledger==old)", uid, t.id, year, led)
-    return led
+    A Mahnung duns a tenant for a REPORTED problem (unpaid/partial) — never for an
+    un-flagged month. The former ledger parity GUARD is RETIRED: the ledger is now a
+    separate AUDIT domain (real payments / Soll−Ist), intentionally distinct from the
+    operational debt. Dunning must follow the operational view, so a tenant with no
+    reported problem is never dunned. (Audit integrity lives in parity_report =
+    audit-truth ↔ ledger, not here.)"""
+    return _exception_arrears(t, year)
 
 
 class MahnungIn(BaseModel):
@@ -1800,20 +1794,24 @@ def _old_debtors(db, uid: int, year: int) -> list:
 
 
 def _parity_old(db, uid: int, year: int) -> dict:
-    """OLD-engine metrics, mirroring _portfolio's scoping exactly."""
-    P = _portfolio(db, uid, year)
+    """AUDIT TRUTH — Soll (ledger posting basis = _soll_faellig: anteilig / Mieterhöhung
+    / Erstmiete, due-to-date) minus REAL immo_rent payments. Independent of the
+    operational EXCEPTION engine. parity_report verifies the audit LEDGER against THIS
+    direct recomputation (audit-truth ↔ ledger), NOT against user-facing exception debt
+    (a separate domain — see _mahnung_betrag / _exception_arrears)."""
     pids, tens = _old_scope(db, uid)
     ist_by = _old_ist_by_tenancy(db, uid, pids, year)
-    per_saldo = {}
+    per_saldo, rueckstand, ist_total, debtor_count = {}, 0.0, 0.0, 0
     for t in tens:
-        soll_t = _months_due_to_date(t, year) * float(t.kaltmiete or 0)
-        per_saldo[t.id] = round(soll_t - round(ist_by.get(t.id, 0), 2), 2)
-    debtor_count = len(_old_debtors(db, uid, year))
-    C = _cockpit(db, uid, year)
-    red = [a for a in C["actions"] if a.get("severity") == "red"]
-    return {"rueckstand": P["financial"]["rueckstand"], "ist": P["financial"]["ist"],
-            "debtor_count": debtor_count, "per_saldo": per_saldo,
-            "cockpit_red": len(red), "cockpit_red_nondebt": sum(1 for a in red if a.get("typ") != "debt")}
+        soll_t = _soll_faellig(t, year)
+        ist_t = round(ist_by.get(t.id, 0), 2)
+        bal = round(soll_t - ist_t, 2)
+        per_saldo[t.id] = bal
+        ist_total += ist_t
+        if bal > 0.01:
+            rueckstand += bal; debtor_count += 1
+    return {"rueckstand": round(rueckstand, 2), "ist": round(ist_total, 2),
+            "debtor_count": debtor_count, "per_saldo": per_saldo}
 
 
 def parity_report(db, uid: int, year: int) -> dict:
@@ -1829,7 +1827,6 @@ def parity_report(db, uid: int, year: int) -> dict:
         ImmoLedgerEntry.konto_art == "miete", ImmoLedgerEntry.jahr == year,
         (ImmoLedgerEntry.is_deleted == False) | (ImmoLedgerEntry.is_deleted == None)).all()  # noqa: E712
     ledger_ist = round(-sum(float(b or 0) for (b,) in imp), 2)
-    ledger_cockpit_red = old["cockpit_red_nondebt"] + sum(1 for d in Ldebt[:5] if d["risk_level"] == "high")
     # per-tenancy saldo
     o_sum = l_sum = 0.0
     mismatches = []
@@ -1849,11 +1846,12 @@ def parity_report(db, uid: int, year: int) -> dict:
             r["ok"] = bool(ok and not extra)
         return r
 
+    # AUDIT-DOMAIN integrity metrics: the ledger's financial records vs the direct
+    # audit-truth recomputation. UI-coupled metrics (cockpit_critical / mahnung_candidates)
+    # were retired — they are operational concerns, not audit invariants.
     metrics = [
         _row("offene_forderung", old["rueckstand"], Lf["total"], 0.01),
         _row("debtor_count", old["debtor_count"], len(Ldebt), 0),
-        _row("mahnung_candidates", old["debtor_count"], len(Ldebt), 0),
-        _row("cockpit_critical", old["cockpit_red"], ledger_cockpit_red, 0),
         _row("collected_rent", old["ist"], ledger_ist, 0.01),
         _row("tenancy_saldo", round(o_sum, 2), round(l_sum, 2), 0.01, mismatches),
     ]

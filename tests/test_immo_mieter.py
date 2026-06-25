@@ -1,8 +1,10 @@
-"""Step 1 — GET /immo/mieter (tenant-centric card feed).
+"""Step 1 — GET /immo/mieter (tenant-centric card feed), EXCEPTION ENGINE.
 
 Self-contained in-memory SQLite + TestClient, today pinned to 2026-06-23.
-Asserts the aggregated card fields for two tenancies: one paid (no debt) and one
-unpaid (debtor). READ-ONLY endpoint — no ledger/Soll/Ist logic touched.
+Asserts the aggregated card fields for two tenancies. Debt is exception-based:
+a tenant with NO reported problem is paid (offene 0, default OK) — even an
+immo_rent row no longer drives debt. A tenant with a reported June 'unpaid'
+exception is a debtor (offene = full Monatsmiete, this_month=open). READ-ONLY.
 Run:  PYTHONIOENCODING=utf-8 PYTHONPATH=. python tests/test_immo_mieter.py
 """
 import os
@@ -58,13 +60,17 @@ def main():
     db.add(ImmoProperty(id=10, user_id=1, name="Musterstr. 12", adresse="Musterstr. 12, 10115 Berlin"))
     db.add(ImmoUnit(id=1, property_id=10, user_id=1, name="EG Links", wohnflaeche=57, soll_miete=330))
     db.add(ImmoUnit(id=2, property_id=10, user_id=1, name="OG Rechts", wohnflaeche=72, soll_miete=500))
-    # TEN 101: moved in this month, paid → no debt
+    # TEN 101: no problem reported → default OK (no debt). The immo_rent row only
+    # supplies last_payment_date; it does NOT drive debt under the exception engine.
     db.add(ImmoTenancy(id=101, unit_id=1, user_id=1, mieter_name="Ahmet Yilmaz",
                        von=date(2026, 6, 1), bis=None, kaltmiete=330, nk_voraus=70))
     db.add(ImmoRent(id=1, property_id=10, tenancy_id=101, user_id=1, betrag=330, datum=date(2026, 6, 10)))
-    # TEN 102: moved in this month, NOT paid → debtor
+    # TEN 102: June reported UNBEZAHLT → debtor (offene = full Monatsmiete 500)
     db.add(ImmoTenancy(id=102, unit_id=2, user_id=1, mieter_name="Maria Mueller",
                        von=date(2026, 6, 1), bis=None, kaltmiete=500, nk_voraus=40))
+    db.commit()
+    t102 = db.query(ImmoTenancy).get(102)
+    immo_api._set_problem(t102, 2026, 6, "unpaid")
     db.commit(); db.close()
 
     immo_api.SessionLocal = S

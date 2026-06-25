@@ -693,31 +693,37 @@ function Sidebar({active,onNav,onLogout,collapsed}){
   };
   // Sidebar grouped into 4 sections (UX only — same ids/routes/state).
   const _gl=getLang();
+  const [moreOpen,setMoreOpen]=useState(()=>{try{return localStorage.getItem("nav_more_open")==="1";}catch(e){return false;}});
   const items=[
     {id:"dashboard",icon:I.dashboard,label:_t("dashboard")},
-    {id:"_hdr",label:_gl==="tr"?"BELGELER":_gl==="en"?"DOCUMENTS":"BELEGE"},
-    ...(F.upload!==false?[{id:"upload",icon:I.upload,label:_t("upload")}]:[]),
-    ...(F.email_import!==false?[{id:"email-import",icon:I.chat,label:"Email-Import",href:"/email-settings"}]:[]),
-    ...(F.tableimport!==false?[{id:"tableimport",icon:I.upload,label:_t("tableimport")}]:[]),
-    ...(F.beleg_manual!==false?[{id:"beleg",icon:I.invoice,label:"Neuen Beleg erfassen",href:"/beleg"}]:[]),
-    {id:"vault",icon:I.invoice,label:_t("vault")},
-    ...(F.editor!==false?[{id:"editor",icon:I.check,label:_t("editor")}]:[]),
-    {id:"_hdr",label:_gl==="tr"?"MUHASEBE":_gl==="en"?"ACCOUNTING":"BUCHHALTUNG"},
-    {id:"invoices",icon:I.invoice,label:_t("invoices"),badge:overdueCount>0?overdueCount:null},
-    {id:"send_invoices",icon:I.export,label:_gl==="de"?"Rechnungen senden":_gl==="tr"?"Faturaları gönder":"Send invoices"},
-    {id:"angebote",icon:I.invoice,label:_gl==="de"?"Angebote":_gl==="tr"?"Teklifler":"Quotes"},
-    {id:"bookkeeping",icon:I.tax,label:_gl==="de"?"💰 Kasse":_gl==="tr"?"💰 Kasa":"💰 Cash Book"},
-    {id:"immobilien_dash",icon:I.tax,label:_gl==="de"?"🏠 Immobilien Cockpit":_gl==="tr"?"🏠 Gayrimenkul Kokpiti":"🏠 Property Cockpit"},
-    {id:"mieter",icon:I.invoice,label:_gl==="de"?"👥 Mieter":_gl==="tr"?"👥 Kiracılar":"👥 Tenants"},
-    {id:"immobilien",icon:I.invoice,label:_gl==="de"?"🏠 Immobilien":_gl==="tr"?"🏠 Gayrimenkul":"🏠 Properties"},
-    ...(F.kasse_v2===true?[{id:"kasse_v2",icon:I.upload,label:_gl==="de"?"Kasse":_gl==="tr"?"Kasa":"Cash",badge:"NEU"}]:[]),
-    {id:"export",icon:I.export,label:_t("export")},
-    {id:"companies",icon:I.invoice,label:_t("companies")},
-    {id:"_hdr",label:_gl==="tr"?"VERGİ":_gl==="en"?"TAX":"STEUER"},
-    {id:"steuer_uebersicht",icon:I.tax,label:_gl==="de"?"Steuer-Übersicht":"Tax Overview"},
-    {id:"declaration",icon:I.invoice,label:_gl==="de"?"Steuererklärung 2025":_gl==="tr"?"Vergi Beyannamesi 2025":"Tax Return 2025",badge:"BETA"},
-    {id:"_hdr",label:_gl==="tr"?"ARAÇLAR":"TOOLS"},
-    ...(F.ai_chat!==false?[{id:"chat",icon:I.chat,label:_t("chat")}]:[]),
+    {id:"_hdr",label:_gl==="tr"?"GAYRİMENKUL":_gl==="en"?"PROPERTY":"VERMIETER"},
+    {id:"bu_ay",icon:I.dashboard,label:_gl==="de"?"💰 Diesen Monat":_gl==="tr"?"💰 Bu Ay":"💰 This Month"},
+    {id:"immobilien",icon:I.tax,label:_gl==="de"?"🏠 Meine Immobilien":_gl==="tr"?"🏠 Mülklerim":"🏠 My Properties"},
+    {id:"mieter",icon:I.invoice,label:_gl==="de"?"👥 Mieter":_gl==="tr"?"👥 Kiracılarım":"👥 Tenants"},
+    {id:"immobilien_dash",icon:I.tax,label:_gl==="de"?"📊 Berichte & Leerstand":_gl==="tr"?"📊 Raporlar":"📊 Reports"},
+    {id:"_more"},
+    ...(moreOpen?[
+      {id:"_hdr",label:_gl==="tr"?"BELGELER":_gl==="en"?"DOCUMENTS":"BELEGE"},
+      ...(F.upload!==false?[{id:"upload",icon:I.upload,label:_t("upload")}]:[]),
+      ...(F.email_import!==false?[{id:"email-import",icon:I.chat,label:"Email-Import",href:"/email-settings"}]:[]),
+      ...(F.tableimport!==false?[{id:"tableimport",icon:I.upload,label:_t("tableimport")}]:[]),
+      ...(F.beleg_manual!==false?[{id:"beleg",icon:I.invoice,label:"Neuen Beleg erfassen",href:"/beleg"}]:[]),
+      {id:"vault",icon:I.invoice,label:_t("vault")},
+      ...(F.editor!==false?[{id:"editor",icon:I.check,label:_t("editor")}]:[]),
+      {id:"_hdr",label:_gl==="tr"?"MUHASEBE":_gl==="en"?"ACCOUNTING":"BUCHHALTUNG"},
+      {id:"invoices",icon:I.invoice,label:_t("invoices"),badge:overdueCount>0?overdueCount:null},
+      {id:"send_invoices",icon:I.export,label:_gl==="de"?"Rechnungen senden":_gl==="tr"?"Faturaları gönder":"Send invoices"},
+      {id:"angebote",icon:I.invoice,label:_gl==="de"?"Angebote":_gl==="tr"?"Teklifler":"Quotes"},
+      {id:"bookkeeping",icon:I.tax,label:_gl==="de"?"💰 Kasse":_gl==="tr"?"💰 Kasa":"💰 Cash Book"},
+      ...(F.kasse_v2===true?[{id:"kasse_v2",icon:I.upload,label:_gl==="de"?"Kasse":_gl==="tr"?"Kasa":"Cash",badge:"NEU"}]:[]),
+      {id:"export",icon:I.export,label:_t("export")},
+      {id:"companies",icon:I.invoice,label:_t("companies")},
+      {id:"_hdr",label:_gl==="tr"?"VERGİ":_gl==="en"?"TAX":"STEUER"},
+      {id:"steuer_uebersicht",icon:I.tax,label:_gl==="de"?"Steuer-Übersicht":"Tax Overview"},
+      {id:"declaration",icon:I.invoice,label:_gl==="de"?"Steuererklärung 2025":_gl==="tr"?"Vergi Beyannamesi 2025":"Tax Return 2025",badge:"BETA"},
+      {id:"_hdr",label:_gl==="tr"?"ARAÇLAR":"TOOLS"},
+      ...(F.ai_chat!==false?[{id:"chat",icon:I.chat,label:_t("chat")}]:[]),
+    ]:[]),
     {id:"_sep"},
     {id:"pricing",icon:I.export,label:_t("pricing")},
     {id:"help",icon:I.help,label:_t("help")},
@@ -731,7 +737,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
       {!collapsed&&<div style={{display:"flex",flexDirection:"column",lineHeight:1}}><span style={{fontSize:15,fontWeight:700,color:theme.text,whiteSpace:"nowrap"}}>AutoTax <span style={{background:"#f59e0b",color:"#000",fontSize:8,fontWeight:700,padding:"1px 4px",borderRadius:3,verticalAlign:"middle"}}>BETA</span></span><span style={{fontSize:10,fontWeight:800,color:"#00a8cc",letterSpacing:2}}>HUB</span></div>}
     </div>
     <div style={{flex:1,padding:"14px 10px",display:"flex",flexDirection:"column",gap:2,overflowY:"auto"}}>
-      {items.map(it=>it.id==="_sep"?<div key="_sep" style={{height:1,background:theme.border,margin:"6px 8px"}}/>:it.id==="_hdr"?(collapsed?<div key={"h-"+it.label} style={{height:1,background:theme.border,margin:"8px 12px"}}/>:<div key={"h-"+it.label} style={{fontSize:10,fontWeight:700,letterSpacing:1,textTransform:"uppercase",opacity:0.6,color:theme.textMuted,padding:"0 14px",margin:"14px 0 8px"}}>{it.label}</div>):(<div key={it.id} onClick={()=>it.onClick?it.onClick():it.href?(window.location.href=it.href):onNav(it.id)} onMouseEnter={()=>setHovered(it.id)} onMouseLeave={()=>setHovered(null)}
+      {items.map(it=>it.id==="_sep"?<div key="_sep" style={{height:1,background:theme.border,margin:"6px 8px"}}/>:it.id==="_more"?(collapsed?null:<div key="_more" onClick={()=>{const v=!moreOpen;setMoreOpen(v);try{localStorage.setItem("nav_more_open",v?"1":"0");}catch(e){}}} style={{fontSize:11,fontWeight:600,letterSpacing:0.5,color:theme.textMuted,padding:"9px 14px",margin:"10px 0 2px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,userSelect:"none",borderTop:"1px solid "+theme.border}}>{moreOpen?"▾":"▸"} {_gl==="tr"?"Daha fazla (Muhasebe, Vergi…)":_gl==="en"?"More (Accounting, Tax…)":"Mehr (Buchhaltung, Steuer…)"}</div>):it.id==="_hdr"?(collapsed?<div key={"h-"+it.label} style={{height:1,background:theme.border,margin:"8px 12px"}}/>:<div key={"h-"+it.label} style={{fontSize:10,fontWeight:700,letterSpacing:1,textTransform:"uppercase",opacity:0.6,color:theme.textMuted,padding:"0 14px",margin:"14px 0 8px"}}>{it.label}</div>):(<div key={it.id} onClick={()=>it.onClick?it.onClick():it.href?(window.location.href=it.href):onNav(it.id)} onMouseEnter={()=>setHovered(it.id)} onMouseLeave={()=>setHovered(null)}
         style={{display:"flex",alignItems:"center",gap:12,padding:collapsed?"10px 16px":"8px 14px",borderRadius:10,cursor:"pointer",
         transition:"all 0.2s cubic-bezier(0.4,0,0.2,1)",
         transitionDelay:hovered===it.id&&active!==it.id?"70ms":"0ms",
@@ -2461,6 +2467,57 @@ function ImmoTenancyForm({initial,onSave,onCancel}){
     </div>
     <_ImmoField label={_iL("NK-Vorauszahlung €/Monat","Aylık aidat avansı €","NK advance €/mo")} error={er.nk_voraus}><input style={_fInp(er.nk_voraus)} type="number" value={f.nk_voraus} onChange={e=>setF({...f,nk_voraus:e.target.value})}/></_ImmoField>
     <_ImmoActions onSave={submit} onCancel={onCancel}/>
+  </div>);
+}
+
+// ── BU AY (this-month digest — "Bu ay kim ödemedi?") landlord açılış ekranı ──
+function BuAyView({onNav,showToast}){
+  const [rows,setRows]=React.useState([]);
+  const [loading,setLoading]=React.useState(true);
+  const [busy,setBusy]=React.useState(null);
+  const _now=new Date(); const CY=_now.getFullYear(); const CM=_now.getMonth()+1;
+  const _e=(v)=>new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(v||0);
+  const _ml={de:["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"],tr:["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]};
+  const _mn=(_ml[getLang()]||_ml.de)[CM-1];
+  const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setLoading(false);}).catch(()=>setLoading(false));};
+  React.useEffect(()=>{load();},[]);
+  const markPaid=async(m)=>{setBusy(m.tenancy_id);try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:CY,monat:CM})});load();if(showToast)showToast(_L("Als bezahlt markiert ✓","Ödendi işaretlendi ✓","Marked paid ✓"),"success");}catch(e){alert(e.message);}finally{setBusy(null);}};
+  const active=rows.filter(m=>m.this_month_status);
+  const paid=active.filter(m=>m.this_month_status==="paid");
+  const partial=active.filter(m=>m.this_month_status==="partial");
+  const offen=active.filter(m=>m.this_month_status==="open");
+  const probs=offen.concat(partial);
+  const pending=Math.round(probs.reduce((s,m)=>s+(m.this_month_offen||0),0)*100)/100;
+  const _chip=(emoji,n,label,col)=>(<div style={{flex:"1 1 150px",minWidth:140,background:theme.card,border:"1px solid "+theme.border,borderRadius:12,padding:"14px 16px"}}>
+    <div style={{fontSize:26,fontWeight:800,color:col}}>{emoji} {n}</div>
+    <div style={{fontSize:12,color:theme.textMuted,marginTop:2}}>{label}</div></div>);
+  const _line=(m)=>(<div key={m.tenancy_id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"12px 14px",borderBottom:"1px solid "+theme.border,flexWrap:"wrap"}}>
+    <div style={{minWidth:0,flex:"1 1 auto"}}>
+      <div style={{fontWeight:700,color:theme.text}}>{m.mieter_name}</div>
+      <div style={{fontSize:12,color:theme.textMuted}}>{[m.property_name,m.unit_name].filter(Boolean).join(" · ")}</div>
+    </div>
+    <div style={{fontWeight:800,color:m.this_month_status==="open"?theme.danger:"#f59e0b"}}>{_e(m.this_month_offen)}{m.this_month_status==="partial"?" "+_L("offen","eksik","short"):""}</div>
+    <button disabled={busy===m.tenancy_id} onClick={()=>markPaid(m)} style={{padding:"8px 14px",background:theme.accent,color:"#fff",border:"none",borderRadius:9,fontSize:13,fontWeight:700,cursor:"pointer",opacity:busy===m.tenancy_id?0.6:1}}>{busy===m.tenancy_id?"…":"✓ "+_L("Bezahlt","Öde","Pay")}</button>
+  </div>);
+  return(<div style={{maxWidth:880,margin:"0 auto"}}>
+    <div style={{fontSize:22,fontWeight:800,color:theme.text,marginBottom:2}}>💰 {_L("Diesen Monat","Bu Ay","This Month")}</div>
+    <div style={{fontSize:13,color:theme.textMuted,marginBottom:16}}>{_mn} {CY}</div>
+    {loading?<div style={{color:theme.textMuted,padding:20}}>…</div>:active.length===0?
+      <div style={{...css.card,textAlign:"center",color:theme.textMuted,padding:30}}>{_L("Keine aktiven Mieter","Aktif kiracı yok","No active tenants")} · <span style={{color:theme.accent,cursor:"pointer"}} onClick={()=>onNav&&onNav("mieter")}>➕ {_L("Mieter hinzufügen","Kiracı ekle","Add tenant")}</span></div>:
+    <div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
+        {_chip("✓",paid.length,_L("sorgenfrei","sorunsuz","OK"),theme.accent)}
+        {_chip("⚠️",partial.length,_L("Teilzahlung","kısmi","partial"),"#f59e0b")}
+        {_chip("❌",offen.length,_L("nicht bezahlt","ödenmedi","unpaid"),theme.danger)}
+        {_chip("Σ",_e(pending),_L("offen gesamt","toplam bekleyen","pending"),theme.text)}
+      </div>
+      {probs.length===0?
+        <div style={{...css.card,textAlign:"center",padding:30}}><div style={{fontSize:32}}>✅</div><div style={{color:theme.text,fontWeight:700,marginTop:6}}>{_L("Alles bezahlt — nichts zu tun","Her şey ödendi — yapılacak yok","All paid — nothing to do")}</div></div>:
+        <div style={{...css.card,padding:0,overflow:"hidden"}}>
+          <div style={{padding:"10px 14px",fontSize:12,fontWeight:700,color:theme.textMuted,background:theme.surfaceAlt,textTransform:"uppercase",letterSpacing:0.5}}>{_L("Heute kümmern","Bugün ilgilen","To handle")} ({probs.length})</div>
+          {offen.map(_line)}{partial.map(_line)}
+        </div>}
+    </div>}
   </div>);
 }
 
@@ -7152,7 +7209,7 @@ function App(){
   }}/><CookieConsent/></Fragment>;
   // SendInvoicesView: InvoicesView'in sendOnly=true ile kopyasi — sadece email gonder buton'u
   const SendInvoicesView=(props)=><InvoicesView {...props} sendOnly={true}/>;
-  const views={dashboard:DashboardView,invoices:InvoicesView,angebote:AngeboteView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,immobilien_dash:ImmoDashboardView,immobilien:ImmobilienView,mieter:MieterView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView,kasse_v2:KasseAppView};
+  const views={dashboard:DashboardView,bu_ay:BuAyView,invoices:InvoicesView,angebote:AngeboteView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,immobilien_dash:ImmoDashboardView,immobilien:ImmobilienView,mieter:MieterView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView,kasse_v2:KasseAppView};
   const _t=typeof t==="function"?t:k=>k;
   const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),send_invoices:(getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),immobilien_dash:(getLang()==="de"?"🏠 Immobilien Cockpit":getLang()==="tr"?"🏠 Gayrimenkul Kokpiti":"🏠 Property Cockpit"),immobilien:(getLang()==="de"?"🏠 Immobilien":getLang()==="tr"?"🏠 Gayrimenkul":"🏠 Properties"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.

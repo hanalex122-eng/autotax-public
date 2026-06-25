@@ -1,8 +1,13 @@
-"""Step 4 — Ödendi/Ödenmedi quick-payment UX layer (immo_rent source='quick').
+"""Step 4 — Ödendi/Ödenmedi quick-action UX layer (EXCEPTION ENGINE).
 
-today pinned to 2026-06-23. Verifies: mark paid → this_month paid + offene 0,
-idempotent per month, custom amount → partial, Ödenmedi → soft-delete → open again.
-immo_rent only — no ledger/Soll/Ist logic touched.
+today pinned to 2026-06-23. Under the exception engine a new tenant defaults to OK
+(paid, offene 0) with NO data entry; debt surfaces ONLY from reported problems.
+Verifies the two quick actions:
+  • Ödenmedi (DELETE) → sets an UNPAID exception → open + offene = full Monatsmiete.
+  • Ödendi  (POST)   → clears the exception → paid + offene 0; idempotent.
+  • Ödendi with betrag < Soll → records a PARTIAL exception → partial + offene rest.
+No immo_rent payment row is created (model = 'no problem reported', not 'money
+received'); the endpoints return the resulting exception, not a betrag/removed.
 Run:  PYTHONIOENCODING=utf-8 PYTHONPATH=. python tests/test_immo_monat_bezahlt.py
 """
 import os
@@ -17,7 +22,7 @@ from sqlalchemy.pool import StaticPool
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent
+from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent  # noqa: F401
 from autotax import immo_api
 from autotax.auth import get_current_user
 
@@ -69,30 +74,34 @@ def main():
     app.dependency_overrides[get_current_user] = lambda: {"sub": "1", "email": "o@test.de"}
     cl = TestClient(app)
 
-    print("\n[before] unpaid")
+    print("\n[before] new tenant, no problem reported → default OK (paid, offene 0)")
     c0 = card(cl)
-    ok(c0["this_month_status"] == "open" and c0["offene_forderung"] == 500, f"open + offene 500 (got {c0['this_month_status']}/{c0['offene_forderung']})")
+    ok(c0["this_month_status"] == "paid" and c0["offene_forderung"] == 0,
+       f"paid + offene 0 (got {c0['this_month_status']}/{c0['offene_forderung']})")
 
-    print("\n[Ödendi] default amount = Gesamt 540")
-    r = cl.post("/immo/tenancies/101/monat-bezahlt", json={"jahr": 2026, "monat": 6})
-    ok(r.status_code == 200 and r.json()["betrag"] == 540, f"200 + betrag 540 (got {r.status_code})")
-    c1 = card(cl)
-    ok(c1["this_month_status"] == "paid", f"this_month paid (got {c1['this_month_status']})")
-    ok(c1["offene_forderung"] == 0 and c1["debtor"] is False, f"offene 0 + not debtor (got {c1['offene_forderung']})")
-
-    print("\n[idempotent] second Ödendi → no duplicate")
-    cl.post("/immo/tenancies/101/monat-bezahlt", json={"jahr": 2026, "monat": 6})
-    n = S().query(ImmoRent).filter(ImmoRent.tenancy_id == 101, ImmoRent.source == "quick",
-                                   (ImmoRent.is_deleted == False)).count()  # noqa: E712
-    ok(n == 1, f"exactly 1 active quick payment (got {n})")
-
-    print("\n[Ödenmedi] soft-delete quick payment")
+    print("\n[Ödenmedi] DELETE → report June UNBEZAHLT → open + offene = full 500")
     rd = cl.delete("/immo/tenancies/101/monat-bezahlt?jahr=2026&monat=6")
-    ok(rd.status_code == 200 and rd.json()["removed"] == 1, f"removed 1 (got {rd.status_code})")
-    c2 = card(cl)
-    ok(c2["this_month_status"] == "open" and c2["offene_forderung"] == 500, "back to open + offene 500")
+    ok(rd.status_code == 200 and rd.json()["exception"]["typ"] == "unpaid",
+       f"200 + unpaid exception (got {rd.status_code}/{rd.json().get('exception')})")
+    c1 = card(cl)
+    ok(c1["this_month_status"] == "open" and c1["offene_forderung"] == 500 and c1["debtor"] is True,
+       f"open + offene 500 + debtor (got {c1['this_month_status']}/{c1['offene_forderung']})")
 
-    print("\n[custom amount] partial 200")
+    print("\n[Ödendi] POST → clear the exception → paid + offene 0")
+    r = cl.post("/immo/tenancies/101/monat-bezahlt", json={"jahr": 2026, "monat": 6})
+    ok(r.status_code == 200 and r.json()["exception"] is None, f"200 + no exception (got {r.status_code})")
+    c2 = card(cl)
+    ok(c2["this_month_status"] == "paid", f"this_month paid (got {c2['this_month_status']})")
+    ok(c2["offene_forderung"] == 0 and c2["debtor"] is False, f"offene 0 + not debtor (got {c2['offene_forderung']})")
+
+    print("\n[idempotent] second Ödendi → still no exception, no immo_rent created")
+    cl.post("/immo/tenancies/101/monat-bezahlt", json={"jahr": 2026, "monat": 6})
+    t = S().query(ImmoTenancy).get(101)
+    ok(immo_api._exc_for(t, 2026, 6) is None, "no exception after repeated Ödendi")
+    n = S().query(ImmoRent).filter(ImmoRent.tenancy_id == 101).count()
+    ok(n == 0, f"no immo_rent payment row created by Ödendi (got {n})")
+
+    print("\n[custom amount] Ödendi betrag 200 < Soll 500 → PARTIAL exception, offene 300")
     cl.post("/immo/tenancies/101/monat-bezahlt", json={"jahr": 2026, "monat": 6, "betrag": 200})
     c3 = card(cl)
     ok(c3["this_month_status"] == "partial", f"partial (got {c3['this_month_status']})")

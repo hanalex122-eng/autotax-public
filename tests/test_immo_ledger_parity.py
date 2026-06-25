@@ -79,9 +79,8 @@ def main():
     ok(m["offene_forderung"]["old"] == 9350.0 and m["offene_forderung"]["ledger"] == 9350.0 and m["offene_forderung"]["ok"],
        f"offene_forderung 9350==9350 (got {m['offene_forderung']})")
     ok(m["debtor_count"]["old"] == 1 and m["debtor_count"]["ledger"] == 1 and m["debtor_count"]["ok"], "debtor_count 1==1")
-    ok(m["mahnung_candidates"]["ok"], "mahnung_candidates ok")
-    ok(m["cockpit_critical"]["old"] == m["cockpit_critical"]["ledger"] and m["cockpit_critical"]["ok"],
-       f"cockpit_critical match (got {m['cockpit_critical']})")
+    # AUDIT-DOMAIN reframe: cockpit_critical + mahnung_candidates retired (UI concerns,
+    # not audit invariants). Parity now = audit-truth (Soll−Ist) ↔ ledger, core metrics.
     ok(m["collected_rent"]["old"] == 850.0 and m["collected_rent"]["ledger"] == 850.0 and m["collected_rent"]["ok"],
        f"collected_rent 850==850 (got {m['collected_rent']})")
     ok(m["tenancy_saldo"]["old"] == 9350.0 and m["tenancy_saldo"]["ledger"] == 9350.0 and m["tenancy_saldo"]["ok"],
@@ -162,14 +161,11 @@ def main():
     ok(rep4["passed"] is True, f"passed=True (got {rep4['passed']})")
     ok(m4["offene_forderung"]["old"] == 18300.0 and m4["offene_forderung"]["ledger"] == 18300.0, f"offene_forderung 18300 (got {m4['offene_forderung']})")
     ok(m4["debtor_count"]["old"] == 4 and m4["debtor_count"]["ledger"] == 4, "debtor_count 4==4 (M2,3,4,5)")
-    ok(m4["mahnung_candidates"]["old"] == 4 and m4["mahnung_candidates"]["ledger"] == 4, "mahnung_candidates 4==4")
     ok(m4["collected_rent"]["old"] == 20500.0 and m4["collected_rent"]["ledger"] == 20500.0, f"collected_rent 20500 (got {m4['collected_rent']})")
     ok(m4["tenancy_saldo"]["old"] == 17900.0 and m4["tenancy_saldo"]["ledger"] == 17900.0, f"tenancy_saldo 17900 (incl. -400 credit) (got {m4['tenancy_saldo']})")
-    ok(m4["cockpit_critical"]["ok"] and m4["cockpit_critical"]["old"] == m4["cockpit_critical"]["ledger"] and m4["cockpit_critical"]["old"] > 0,
-       f"cockpit_critical match + non-zero (got {m4['cockpit_critical']})")
-    ok(all(m["ok"] for m in rep4["metrics"]), "ALL 6 metrics ok")
+    ok(all(m["ok"] for m in rep4["metrics"]), "ALL 4 audit metrics ok")
     okc = sum(1 for m in rep4["metrics"] if m["ok"])
-    print("    SUMMARY", {"passed": okc, "total": 6, "overall_ok": rep4["passed"]})
+    print("    SUMMARY", {"passed": okc, "total": 4, "overall_ok": rep4["passed"]})
     db.close()
 
     print(f"\n=== Faz 3 parity: {PASS} passed, {FAIL} failed ===")

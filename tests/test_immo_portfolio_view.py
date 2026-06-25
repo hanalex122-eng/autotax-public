@@ -1,8 +1,15 @@
 """Faz 4.2 Commit 2 proof — portfolio_view + lazy-ensure + endpoint wiring.
 
-Flag OFF → dashboard/cockpit identical to today. Flag ON → debt metrics from the
-ledger (lazy-ensured fresh). Error in refresh/read → OLD fallback, endpoint still
-answers. Perf log (ledger_refresh_ms/created_entries/status) emitted per GET.
+EXCEPTION ENGINE: the OLD engine's user-facing debt (_portfolio.rueckstand) now
+comes from REPORTED exceptions, not from Soll−Ist over immo_rent. The fixture
+therefore reports one exception per debtor reproducing the historical debts
+(T103 9000, T102 4900, T105 3200, T104 1200 → total 18300, 4 debtors); the
+immo_rent rows remain so the LEDGER (separate audit domain) still backfills.
+
+Flag OFF → dashboard/cockpit identical (OLD = exception debt). Flag ON → debt
+metrics from the ledger (lazy-ensured fresh, immo_rent-based). Error in
+refresh/read → OLD fallback, endpoint still answers. Perf log
+(ledger_refresh_ms/created_entries/status) emitted per GET.
 Self-contained: in-memory SQLite (StaticPool), TestClient. No prod DB / network.
 Run:  PYTHONIOENCODING=utf-8 PYTHONPATH=. python tests/test_immo_portfolio_view.py
 """
@@ -64,6 +71,13 @@ def seed(db, backfill=True):
     for mo in range(1, 7):
         pay(105, 500, mo)
     pay(105, -200, 7)
+    db.commit()
+    # EXCEPTION ENGINE: report the debts that the OLD engine used to derive from
+    # Soll−Ist. One partial exception per debtor (offen = full historical debt) in
+    # an active, due month (Jan 2025). Total 18300, 4 debtors; T101 stays OK (0).
+    for tid, debt in [(102, 4900.0), (103, 9000.0), (104, 1200.0), (105, 3200.0)]:
+        t = db.query(ImmoTenancy).get(tid)
+        immo_api._set_problem(t, 2025, 1, "partial", offen=debt)
     db.commit()
     if backfill:
         L.run_backfill(db, 1, dry_run=False)
