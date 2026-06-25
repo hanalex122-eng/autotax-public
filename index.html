@@ -2472,6 +2472,7 @@ function ImmoTenancyForm({initial,onSave,onCancel}){
 
 // ── BU AY (this-month digest — "Bu ay kim ödemedi?") landlord açılış ekranı ──
 function BuAyView({onNav,showToast}){
+  const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
   const [rows,setRows]=React.useState([]);
   const [loading,setLoading]=React.useState(true);
   const [busy,setBusy]=React.useState(null);
