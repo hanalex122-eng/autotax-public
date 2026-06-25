@@ -2482,6 +2482,7 @@ function BuAyView({onNav,showToast}){
   const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setLoading(false);}).catch(()=>setLoading(false));};
   React.useEffect(()=>{load();},[]);
   const markPaid=async(m)=>{setBusy(m.tenancy_id);try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:CY,monat:CM})});load();if(showToast)showToast(_L("Als bezahlt markiert ✓","Ödendi işaretlendi ✓","Marked paid ✓"),"success");}catch(e){alert(e.message);}finally{setBusy(null);}};
+  const mahnung=async(m)=>{setBusy(m.tenancy_id);try{const tk=localStorage.getItem("atx_token");const r=await fetch(API+"/immo/tenancies/"+m.tenancy_id+"/mahnung",{method:"POST",headers:{Authorization:"Bearer "+tk,"Content-Type":"application/json"},body:JSON.stringify({stufe:1,year:CY})});if(!r.ok){alert(_L("Mahnung fehlgeschlagen","Mahnung başarısız","Mahnung failed"));return;}const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="Mahnung-"+((m.mieter_name||"Mieter").replace(/[^a-zA-Z0-9]/g,"_"))+".pdf";document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);if(showToast)showToast(_L("Mahnung erstellt ✓","Mahnung oluşturuldu ✓","Mahnung created ✓"),"success");}catch(e){alert(e.message);}finally{setBusy(null);}};
   const active=rows.filter(m=>m.this_month_status);
   const paid=active.filter(m=>m.this_month_status==="paid");
   const partial=active.filter(m=>m.this_month_status==="partial");
@@ -2497,7 +2498,10 @@ function BuAyView({onNav,showToast}){
       <div style={{fontSize:12,color:theme.textMuted}}>{[m.property_name,m.unit_name].filter(Boolean).join(" · ")}</div>
     </div>
     <div style={{fontWeight:800,color:m.this_month_status==="open"?theme.danger:"#f59e0b"}}>{_e(m.this_month_offen)}{m.this_month_status==="partial"?" "+_L("offen","eksik","short"):""}</div>
-    <button disabled={busy===m.tenancy_id} onClick={()=>markPaid(m)} style={{padding:"8px 14px",background:theme.accent,color:"#fff",border:"none",borderRadius:9,fontSize:13,fontWeight:700,cursor:"pointer",opacity:busy===m.tenancy_id?0.6:1}}>{busy===m.tenancy_id?"…":"✓ "+_L("Bezahlt","Öde","Pay")}</button>
+    <div style={{display:"flex",gap:8}}>
+      <button disabled={busy===m.tenancy_id} onClick={()=>mahnung(m)} title={_L("Mahnung als PDF","Mahnung PDF","Mahnung PDF")} style={{padding:"8px 12px",background:"transparent",border:"1.5px solid #f59e0b",color:"#f59e0b",borderRadius:9,fontSize:13,fontWeight:700,cursor:"pointer",opacity:busy===m.tenancy_id?0.6:1}}>📨 {_L("Mahnung","Mahnung","Mahnung")}</button>
+      <button disabled={busy===m.tenancy_id} onClick={()=>markPaid(m)} style={{padding:"8px 14px",background:theme.accent,color:"#fff",border:"none",borderRadius:9,fontSize:13,fontWeight:700,cursor:"pointer",opacity:busy===m.tenancy_id?0.6:1}}>{busy===m.tenancy_id?"…":"✓ "+_L("Bezahlt","Öde","Pay")}</button>
+    </div>
   </div>);
   return(<div style={{maxWidth:880,margin:"0 auto"}}>
     <div style={{fontSize:22,fontWeight:800,color:theme.text,marginBottom:2}}>💰 {_L("Diesen Monat","Bu Ay","This Month")}</div>
@@ -2558,6 +2562,7 @@ function MieterView({onNav,showToast}){
   const _efl={display:"block",fontSize:12,color:theme.textMuted,fontWeight:600,marginBottom:5};
   const _efR=(n,lbl,key,extra)=>(<div style={{marginBottom:12}}><label style={_efl}>{n?<b style={{color:theme.textDim}}>{n}. </b>:""}{lbl}</label><input style={_ef} value={erf[key]} onChange={e=>setErf({...erf,[key]:e.target.value})} {...(extra||{})}/></div>);
   const delTenant=async(m)=>{if(!window.confirm(_L("Mieter \""+m.mieter_name+"\" löschen?","Kiracı \""+m.mieter_name+"\" silinsin mi?","Delete tenant \""+m.mieter_name+"\"?")))return;try{await api("/immo/tenancies/"+m.tenancy_id,{method:"DELETE"});if(sel&&sel.tenancy_id===m.tenancy_id)setSel(null);load();if(showToast)showToast(_L("Gelöscht","Silindi","Deleted"),"info");}catch(e){alert(e.message);}};
+  const dlMahnung=async(m)=>{try{const r=await fetch(API+"/immo/tenancies/"+m.tenancy_id+"/mahnung",{method:"POST",headers:{Authorization:"Bearer "+localStorage.getItem("atx_token"),"Content-Type":"application/json"},body:JSON.stringify({stufe:1,year:new Date().getFullYear()})});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();if(j&&j.detail)msg=j.detail;}catch(e){}alert(msg);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Mahnung_"+((m.mieter_name||"Mieter").replace(/[^a-zA-Z0-9]/g,"_"))+".pdf";a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(u);},1500);if(showToast)showToast(_L("Mahnung erstellt ✓","Mahnung oluşturuldu ✓","Mahnung created ✓"),"success");}catch(e){alert(e.message);}};
   // ── Bearbeiten: von/bis/Kaltmiete/NK düzenle (bis boş = aktif, çıkış yok) ──
   const [editFor,setEditFor]=React.useState(null);
   const [editF,setEditF]=React.useState({name:"",von:"",bis:"",kalt:"",nk:"",telefon:"",email:"",kaution:"",erst:"",erhAb:"",erhKalt:""});
@@ -2700,6 +2705,7 @@ function MieterView({onNav,showToast}){
         </div>
         {m.letzte_mahnung&&<div style={{fontSize:12,color:"#f59e0b",marginTop:6}}>⚠ {m.letzte_mahnung.stufe_text} · {m.letzte_mahnung.datum}</div>}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
+          {m.offene_forderung>0&&<button style={{...css.btnOutline,padding:"7px 11px",fontSize:12,color:"#f59e0b",borderColor:"#f59e0b"}} onClick={()=>dlMahnung(m)}>📨 Mahnung</button>}
           <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>dlWgb(m.tenancy_id)}>📄 WGB</button>
           <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>openDetail(m)}>📊 {_L("Mietkonto","Hesap","Account")}</button>
           <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>openEdit(m)}>✎ {_L("Bearbeiten","Düzenle","Edit")}</button>
@@ -7149,7 +7155,7 @@ function App(){
       const tgt=sessionStorage.getItem("atx_acting_target");
       if(tgt){sessionStorage.removeItem("atx_acting_target");return tgt;}
     }catch(e){}
-    return "dashboard";
+    return "bu_ay";   // Vermieter-first: Landlord landet auf "Bu Ay" (wer hat ein Problem?)
   })();
   const[page,setPage]=useState(_initialPage);const[collapsed,setCollapsed]=useState(window.innerWidth<768);
   const[profileOpen,setProfileOpen]=useState(false);
