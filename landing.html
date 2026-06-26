@@ -214,6 +214,7 @@ section { position:relative; z-index:1; padding:120px 0; }
 /* Premium AI panels section (replaces old demo) */
 .aipanels { background: rgba(0,0,0,0.15); }
 .panels-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; margin-top:48px; }
+.bsp-grid { display:grid; grid-template-columns:0.8fr 1.2fr; gap:28px; max-width:900px; margin:36px auto 0; align-items:start; }
 .ai-panel {
   padding:20px 22px; border-radius:16px;
   background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
@@ -344,6 +345,7 @@ footer .links a:hover { color:var(--text); }
   .how-grid { grid-template-columns: 1fr; gap:32px; }
   .how-arrow { transform:rotate(90deg); }
   .demo-grid { grid-template-columns: 1fr; }
+  .bsp-grid { grid-template-columns: 1fr; }
   .mahnung-flow { grid-template-columns: 1fr 1fr; gap:16px; }
   .mahnung-flow::before { display:none; }
   .pricing-grid { grid-template-columns: 1fr; }
@@ -612,7 +614,7 @@ footer .links a:hover { color:var(--text); }
     <h2 class="section-title" data-i18n="bsp_title">Beleg rein. Fertige Buchung raus.</h2>
     <p class="section-sub" style="margin:0 auto;" data-i18n="bsp_sub">Sehen Sie am Beispiel, was AutoTax aus einem Beleg macht — ganz ohne Tipparbeit.</p>
 
-    <div class="bsp-grid" style="display:grid;grid-template-columns:0.8fr 1.2fr;gap:28px;max-width:900px;margin:36px auto 0;align-items:start;">
+    <div class="bsp-grid">
       <!-- Beispielbeleg -->
       <div style="background:#fffdf7;color:#222;border-radius:12px;padding:20px 18px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.7;box-shadow:0 12px 40px rgba(0,0,0,0.35);border:1px solid rgba(0,0,0,0.08);">
         <div style="text-align:center;font-weight:700;font-size:14px;border-bottom:1px dashed #bbb;padding-bottom:8px;margin-bottom:8px;">REWE Markt GmbH</div>
