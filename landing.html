@@ -605,8 +605,68 @@ footer .links a:hover { color:var(--text); }
   </div>
 </section>
 
-<!-- PREMIUM AI FINANCE DASHBOARD (replaces ALDI demo) -->
+<!-- BEISPIELANALYSE — interaktiv, kein echter OCR-Lauf -->
 <section class="aipanels reveal" id="demo">
+  <div class="container">
+    <span class="section-tag" data-i18n="bsp_tag">🎬 So funktioniert's — in Sekunden</span>
+    <h2 class="section-title" data-i18n="bsp_title">Beleg rein. Fertige Buchung raus.</h2>
+    <p class="section-sub" style="margin:0 auto;" data-i18n="bsp_sub">Sehen Sie am Beispiel, was AutoTax aus einem Beleg macht — ganz ohne Tipparbeit.</p>
+
+    <div class="bsp-grid" style="display:grid;grid-template-columns:0.8fr 1.2fr;gap:28px;max-width:900px;margin:36px auto 0;align-items:start;">
+      <!-- Beispielbeleg -->
+      <div style="background:#fffdf7;color:#222;border-radius:12px;padding:20px 18px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.7;box-shadow:0 12px 40px rgba(0,0,0,0.35);border:1px solid rgba(0,0,0,0.08);">
+        <div style="text-align:center;font-weight:700;font-size:14px;border-bottom:1px dashed #bbb;padding-bottom:8px;margin-bottom:8px;">REWE Markt GmbH</div>
+        <div style="display:flex;justify-content:space-between;"><span>Bananen 1kg</span><span>1,99</span></div>
+        <div style="display:flex;justify-content:space-between;"><span>Milch 3,5%</span><span>1,29</span></div>
+        <div style="display:flex;justify-content:space-between;"><span>Brot</span><span>2,49</span></div>
+        <div style="display:flex;justify-content:space-between;color:#888;"><span>… 14 Artikel</span><span>…</span></div>
+        <div style="border-top:1px dashed #bbb;margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;font-weight:700;font-size:14px;"><span>SUMME</span><span>47,83 €</span></div>
+        <div style="display:flex;justify-content:space-between;color:#666;font-size:11px;margin-top:4px;"><span>MwSt 7%</span><span>3,13 €</span></div>
+        <div style="text-align:center;color:#888;font-size:10.5px;margin-top:8px;">14.06.2026 · 17:42</div>
+      </div>
+      <!-- Ergebnis-Flow -->
+      <div class="ai-thinking" style="margin:0;">
+        <div class="ai-thinking-head">
+          <div class="ai-thinking-icon">⚡</div>
+          <div>
+            <div class="ai-thinking-title" data-i18n="bsp_flow_title">AutoTax verarbeitet den Beleg</div>
+            <div class="ai-thinking-sub" data-i18n="bsp_flow_sub">Automatisch — Sie tippen nichts ab.</div>
+          </div>
+        </div>
+        <div class="ai-thinking-checks">
+          <div class="ai-check-row bsp-step" style="opacity:0.25;transition:opacity 0.4s;"><div class="ai-check-mark">✓</div><span data-i18n="bsp_step1">Beleg gelesen — REWE Markt GmbH</span></div>
+          <div class="ai-check-row bsp-step" style="opacity:0.25;transition:opacity 0.4s;"><div class="ai-check-mark">✓</div><span data-i18n="bsp_step2">Betrag &amp; Datum — 47,83 € · 14.06.2026</span></div>
+          <div class="ai-check-row bsp-step" style="opacity:0.25;transition:opacity 0.4s;"><div class="ai-check-mark">✓</div><span data-i18n="bsp_step3">Kategorie &amp; MwSt — Lebensmittel · 7%</span></div>
+          <div class="ai-check-row bsp-step" style="opacity:0.25;transition:opacity 0.4s;"><div class="ai-check-mark">✓</div><span data-i18n="bsp_step4">Verbucht — Betriebsausgabe in der EÜR</span></div>
+        </div>
+        <div class="ai-result-banner bsp-result" style="opacity:0;transition:opacity 0.5s;">
+          <div>
+            <div class="ai-result-text" data-i18n="bsp_result_label">Fertig — Ihre Buchung ist erledigt</div>
+            <div class="ai-result-value" data-i18n="bsp_result_value">Sekunden statt Minuten</div>
+          </div>
+          <a href="/app?action=register" class="btn btn-primary"><span data-i18n="bsp_cta">Jetzt selbst testen</span></a>
+        </div>
+        <button class="btn btn-glass" id="bspBtn" onclick="runBeispiel()" style="margin-top:14px;width:100%;" data-i18n="bsp_btn">▶ Beispiel-Analyse starten</button>
+      </div>
+    </div>
+    <p style="text-align:center;font-size:12px;color:var(--text-dim);margin-top:18px;" data-i18n="bsp_hint">Kein echter Upload — ein Beispiel, das zeigt, was Sie erwartet.</p>
+  </div>
+</section>
+<script>
+function runBeispiel(){
+  var steps=document.querySelectorAll('#demo .bsp-step');
+  var res=document.querySelector('#demo .bsp-result');
+  var btn=document.getElementById('bspBtn');
+  if(btn){btn.disabled=true;btn.style.opacity='0.6';}
+  steps.forEach(function(s){s.style.opacity='0.25';});
+  if(res)res.style.opacity='0';
+  steps.forEach(function(s,i){ setTimeout(function(){ s.style.opacity='1'; }, 550*(i+1)); });
+  setTimeout(function(){ if(res)res.style.opacity='1'; if(btn){btn.disabled=false;btn.style.opacity='1';} }, 550*(steps.length+1));
+}
+</script>
+
+<!-- FINANZ-ÜBERBLICK -->
+<section class="aipanels reveal" id="uebersicht">
   <div class="container">
     <span class="section-tag" data-i18n="panels_tag">📊 Ihr Finanzüberblick</span>
     <h2 class="section-title" data-i18n="panels_title">Alles im Blick — ohne Excel.</h2>
@@ -959,6 +1019,14 @@ const i18n = {
     aud1_t:"Freelancer & Selbstständige", aud1_s:"Belege fotografieren, Rechnungen schreiben, EÜR fertig. Mehr Zeit für die eigentliche Arbeit.",
     aud2_t:"Kleine Unternehmen", aud2_s:"Ausgaben, Vorsteuer und Mahnungen automatisch im Griff. DATEV-Export für den Steuerberater inklusive.",
     aud3_t:"Private Vermieter", aud3_s:"Mieter, Mieteinnahmen und offene Zahlungen übersichtlich. Sie markieren nur, was offen ist — den Rest erledigt AutoTax.",
+    bsp_tag:"🎬 So funktioniert's — in Sekunden", bsp_title:"Beleg rein. Fertige Buchung raus.",
+    bsp_sub:"Sehen Sie am Beispiel, was AutoTax aus einem Beleg macht — ganz ohne Tipparbeit.",
+    bsp_flow_title:"AutoTax verarbeitet den Beleg", bsp_flow_sub:"Automatisch — Sie tippen nichts ab.",
+    bsp_step1:"Beleg gelesen — REWE Markt GmbH", bsp_step2:"Betrag & Datum — 47,83 € · 14.06.2026",
+    bsp_step3:"Kategorie & MwSt — Lebensmittel · 7%", bsp_step4:"Verbucht — Betriebsausgabe in der EÜR",
+    bsp_result_label:"Fertig — Ihre Buchung ist erledigt", bsp_result_value:"Sekunden statt Minuten",
+    bsp_cta:"Jetzt selbst testen", bsp_btn:"▶ Beispiel-Analyse starten",
+    bsp_hint:"Kein echter Upload — ein Beispiel, das zeigt, was Sie erwartet.",
     panel1_t:"Büro-Miete", panel1_s:"Festkostenvertrag erkannt · Wiederkehrend gebucht",
     panel2_t:"Firmenfahrzeug", panel2_s:"Privatanteil erkannt — 1%-Regelung wird automatisch berechnet",
     panel3_t:"Mitarbeiterkosten", panel3_s:"3 Angestellte synchronisiert · Lohn + Sozialabgaben erkannt",
@@ -1086,6 +1154,14 @@ const i18n = {
     aud1_t:"Freelancers & self-employed", aud1_s:"Photograph receipts, write invoices, EÜR done. More time for the actual work.",
     aud2_t:"Small businesses", aud2_s:"Expenses, input VAT and dunning handled automatically. DATEV export for your tax advisor included.",
     aud3_t:"Private landlords", aud3_s:"Tenants, rent income and open payments at a glance. You only mark what's unpaid — AutoTax does the rest.",
+    bsp_tag:"🎬 How it works — in seconds", bsp_title:"Receipt in. Finished entry out.",
+    bsp_sub:"See on an example what AutoTax makes of a receipt — without any typing.",
+    bsp_flow_title:"AutoTax is processing the receipt", bsp_flow_sub:"Automatic — you type nothing.",
+    bsp_step1:"Receipt read — REWE Markt GmbH", bsp_step2:"Amount & date — €47.83 · 14 Jun 2026",
+    bsp_step3:"Category & VAT — Groceries · 7%", bsp_step4:"Booked — business expense in the EÜR",
+    bsp_result_label:"Done — your entry is finished", bsp_result_value:"Seconds instead of minutes",
+    bsp_cta:"Try it yourself", bsp_btn:"▶ Start example analysis",
+    bsp_hint:"No real upload — an example of what to expect.",
     panel1_t:"Office Rent", panel1_s:"Fixed contract detected · Recurring booked",
     panel2_t:"Company Vehicle", panel2_s:"Private share detected — 1%-rule calculated automatically",
     panel3_t:"Personnel Costs", panel3_s:"3 employees synchronized · Salary + social contributions detected",
@@ -1213,6 +1289,14 @@ const i18n = {
     aud1_t:"Freelancer & Serbest çalışanlar", aud1_s:"Belge fotoğrafla, fatura yaz, EÜR hazır. Asıl işinize daha çok zaman.",
     aud2_t:"Küçük işletmeler", aud2_s:"Giderler, indirilen KDV ve ihtarnameler otomatik kontrol altında. Müşavir için DATEV dışa aktarımı dahil.",
     aud3_t:"Küçük ev sahipleri", aud3_s:"Kiracılar, kira gelirleri ve açık ödemeler tek bakışta. Siz sadece ödenmeyeni işaretleyin — gerisini AutoTax halleder.",
+    bsp_tag:"🎬 Nasıl çalışır — saniyeler içinde", bsp_title:"Belge girer. Hazır kayıt çıkar.",
+    bsp_sub:"AutoTax'ın bir belgeden ne çıkardığını örnek üzerinde görün — hiç yazmadan.",
+    bsp_flow_title:"AutoTax belgeyi işliyor", bsp_flow_sub:"Otomatik — siz hiçbir şey yazmıyorsunuz.",
+    bsp_step1:"Belge okundu — REWE Markt GmbH", bsp_step2:"Tutar & tarih — 47,83 € · 14.06.2026",
+    bsp_step3:"Kategori & KDV — Gıda · %7", bsp_step4:"Kaydedildi — EÜR'de işletme gideri",
+    bsp_result_label:"Hazır — kaydınız tamam", bsp_result_value:"Dakikalar yerine saniyeler",
+    bsp_cta:"Kendiniz deneyin", bsp_btn:"▶ Örnek analizi başlat",
+    bsp_hint:"Gerçek yükleme değil — sizi neyin beklediğini gösteren bir örnek.",
     panel1_t:"Ofis Kirası", panel1_s:"Sabit sözleşme tespit edildi · Tekrarlı kayıt",
     panel2_t:"Şirket Aracı", panel2_s:"Özel pay tespit edildi — %1 kuralı otomatik hesaplanır",
     panel3_t:"Personel Maliyeti", panel3_s:"3 çalışan senkronize · Maaş + sosyal yükler tespit edildi",
