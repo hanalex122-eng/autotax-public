@@ -83,6 +83,35 @@ floor onto a cracked foundation — exactly what "Finish > New Features" forbids
 
 ## BACKLOG — parked, do NOT start before the active sprint closes
 
+### Historical Payment Backfill  (decided 2026-07-14: SKIPPED for Sprint 0)
+Fill `immo_rent.fuer_jahr` / `fuer_monat` on the 10 pre-Sprint-0 payment rows so that old
+payments are attributed to the rent month they settle.
+
+**Why it was skipped:** it delivers no user-visible value today and adds deployment risk.
+The read-only dry-run (`scripts/immo_backfill_dryrun_standalone.py`, run against production
+2026-07-14) proved it: **0 rows classified HIGH** (the only class that may ever be migrated
+automatically), 8 MEDIUM, 2 LOW — and **no tenant's debt would change** (both live tenants
+carry no reported exception, so Dauerzahlung already counts those months as paid: 0,00 → 0,00).
+Sprint 0's goal is the accounting foundation, not perfect historical metadata.
+
+**When it is picked up** it must be a standalone migration with its own tests:
+- classification rule to revisit: a payment booked on day 1–3 is, in German practice, THAT
+  month's rent (due by the 3rd working day) — not a late payment for the previous month.
+  With that fixed, YURONG's Jan–May rows (400,00 = exact Warmmiete) become HIGH.
+- rows that need a human decision regardless:
+  - VANELLE id 37: 540,00 paid on 2026-06-25 while June's Soll is 270,00 (vereinbarte
+    Erstmiete) → covers more than one month, or includes the deposit.
+  - YURONG ids 30 + 32: two identical 400,00 payments on 2026-06-01 → instalments or a
+    duplicate row.
+  - ids 14 + 31: payments with **no tenancy_id** at all (270,00 / 460,00).
+- decide only after real pilot users exist — it may never be worth it.
+
+**Ops finding while running the dry-run (separate small task):** the Railway *Postgres*
+service's `PGPASSWORD` / `DATABASE_PUBLIC_URL` hold an OUTDATED password; the working one is
+in the *AutoTax-Hub* service's `DATABASE_URL`. Backup/restore scripts that read the Postgres
+service vars would fail silently.
+
+
 ### Funnel / conversion (next sprint candidate — evidence in `.claude/immo_finish_review.md`)
 - Landing CTAs point to `/app?action=register` but the SPA never reads the param → every visitor
   who clicks "Kostenlos starten" lands on the **login** form. (`index.html:492`)
