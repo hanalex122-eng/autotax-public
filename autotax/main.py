@@ -2417,13 +2417,14 @@ a{color:#10b981}p{margin:10px 0}ul{padding-left:22px;margin:8px 0}li{margin:4px 
 .note{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);padding:12px 16px;border-radius:10px;font-size:13px;color:#f59e0b;margin:16px 0}
 </style></head><body>
 <h1>Allgemeine Geschäftsbedingungen (AGB)</h1>
-<p><em>AutoTax-HUB — Stand: April 2026</em></p>
+<p><em>AutoTax-HUB — Stand: Juli 2026</em></p>
 
 <h2>§ 1 Geltungsbereich und Anbieter</h2>
 <p>Diese Allgemeinen Geschäftsbedingungen gelten für sämtliche Verträge zwischen <strong>Hüseyin Hancer, Wiesenstr. 10, 66115 Saarbrücken, Deutschland</strong> (nachfolgend "Anbieter") und den Nutzern der Software-as-a-Service-Plattform "AutoTax-HUB" (nachfolgend "Dienst"), erreichbar unter autotaxhub.de und zugehörigen Subdomains.</p>
 
 <h2>§ 2 Leistungsbeschreibung</h2>
 <p>Der Dienst stellt Werkzeuge zur halbautomatischen Erfassung und Verwaltung von Belegen und Kassenbüchern bereit, unter anderem OCR-Texterkennung, Kategorisierung, Kassenbuchführung, Exportfunktionen (CSV, Excel, DATEV, JSON) sowie eine Einnahmen-Überschuss-Übersicht. Der konkrete Funktionsumfang richtet sich nach dem gewählten Plan.</p>
+<p>Der Dienst umfasst ferner ein <strong>Modul zur Immobilien- und Mietverwaltung für private Vermieter</strong> (Verwaltung von Objekten, Wohnungen und Mietverhältnissen, Übersicht offener Mietforderungen, Zählerstände sowie die Erzeugung vorbereiteter Dokumente wie Mahnungen, Wohnungsgeberbestätigungen und Übergabeprotokolle). Es handelt sich um ein organisatorisches Hilfsmittel; die Erstellung von Dokumenten stellt keine Rechtsberatung dar (siehe § 3 und § 4a).</p>
 <p>Der Dienst befindet sich in der <strong>BETA-Phase</strong>. Einzelne Funktionen können jederzeit hinzugefügt, geändert, eingeschränkt oder entfernt werden.</p>
 
 <h2>§ 3 Keine Steuer- oder Rechtsberatung</h2>
@@ -2431,6 +2432,11 @@ a{color:#10b981}p{margin:10px 0}ul{padding-left:22px;margin:8px 0}li{margin:4px 
 
 <h2>§ 4 Prüfungspflicht des Nutzers</h2>
 <p>Der Nutzer ist verpflichtet, alle automatisch erkannten Daten (insbesondere Beträge, MwSt-Sätze, Lieferanten, Kategorien, Datumsangaben, Rechnungsnummern) vor jeglicher weiteren Verwendung auf Richtigkeit und Vollständigkeit zu prüfen und bei Bedarf zu korrigieren.</p>
+
+<h2>§ 4a Erstellte Dokumente und elektronische Unterschrift</h2>
+<p>Vom Dienst erzeugte Dokumente (insbesondere Rechnungen, Mahnungen, Wohnungsgeberbestätigungen und Übergabeprotokolle) sind <strong>Vorlagen und Vorbereitungshilfen</strong>. Der Nutzer ist allein dafür verantwortlich, ihre inhaltliche und rechtliche Richtigkeit, Vollständigkeit und Rechtzeitigkeit zu prüfen sowie für ihre ordnungsgemäße Zustellung an den jeweiligen Empfänger (z. B. Mieter oder Kunden) zu sorgen. Der Dienst versendet diese Dokumente nicht selbsttätig rechtsverbindlich; der Versand liegt beim Nutzer.</p>
+<p>Die im Übergabeprotokoll erfassten Unterschriften sind <strong>einfache elektronische Unterschriften</strong> im Sinne von Art. 25 eIDAS-Verordnung (grafische Erfassung auf dem Bildschirm). Sie sind <strong>keine qualifizierte elektronische Signatur (QES)</strong> und ersetzen nicht die eigenhändige Unterschrift, soweit gesetzlich die Schriftform vorgeschrieben ist. Der Beweiswert richtet sich nach den allgemeinen Grundsätzen der freien Beweiswürdigung.</p>
+<p>Ein abgeschlossenes Übergabeprotokoll wird technisch gegen nachträgliche Änderung gesperrt, um seinen Nachweischarakter zu wahren. Für die inhaltliche Richtigkeit der zum Zeitpunkt des Abschlusses erfassten Angaben ist ausschließlich der Nutzer verantwortlich. Der Anbieter ist nicht Partei des zwischen Vermieter und Mieter geschlossenen Mietverhältnisses und übernimmt keine Gewähr für die rechtliche Wirksamkeit der erstellten Dokumente.</p>
 
 <h2>§ 5 Haftungsbeschränkung</h2>
 <p>Der Anbieter haftet bei Vorsatz und grober Fahrlässigkeit unbeschränkt. Bei einfacher Fahrlässigkeit haftet er nur bei Verletzung einer wesentlichen Vertragspflicht (Kardinalpflicht), deren Erfüllung die ordnungsgemäße Durchführung des Vertrags überhaupt erst ermöglicht und auf deren Einhaltung der Nutzer regelmäßig vertrauen darf, und der Höhe nach beschränkt auf den typischerweise vorhersehbaren Schaden.</p>
