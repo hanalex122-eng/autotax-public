@@ -2999,13 +2999,13 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
     </div>}
     {tab==="einnahmen"&&(<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Mieteingang erfassen","Kira girişi","Add rent payment")}</div>
-        <select style={_inp} value={rf.tid} onChange={e=>setRf({...rf,tid:e.target.value})}><option value="">{_L("— Mieter wählen —","— Kiracı seç —","— Select tenant —")}</option>{tncs.map(t=><option key={t.tenancy_id} value={t.tenancy_id}>{t.mieter_name} ({t.von}→{t.bis||"…"})</option>)}</select>
+        <select style={{..._inp,cursor:"pointer"}} value={rf.tid} onChange={e=>setRf({...rf,tid:e.target.value})}><option value="">{_L("— Mieter wählen —","— Kiracı seç —","— Select tenant —")}</option>{tncs.map(t=><option key={t.tenancy_id} value={t.tenancy_id}>{t.mieter_name} ({t.von}→{t.bis||"…"})</option>)}</select>
         <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} value={rf.betrag} onChange={e=>setRf({...rf,betrag:e.target.value})}/>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:12,color:theme.textMuted,minWidth:70}}>{_L("Für Monat","Hangi ay için","For month")}</span>
-          <select style={{..._inp,flex:"1 1 120px"}} value={rf.fm} onChange={e=>setRf({...rf,fm:e.target.value})}>
+          <select style={{..._inp,flex:"1 1 120px",cursor:"pointer"}} value={rf.fm} onChange={e=>setRf({...rf,fm:e.target.value})}>
             {_MONN.map((n,i)=><option key={i} value={i+1}>{n}</option>)}</select>
-          <select style={{..._inp,flex:"0 1 100px"}} value={rf.fj} onChange={e=>setRf({...rf,fj:e.target.value})}>
+          <select style={{..._inp,flex:"0 1 100px",cursor:"pointer"}} value={rf.fj} onChange={e=>setRf({...rf,fj:e.target.value})}>
             {[0,1,2].map(k=>{const yy=_tdy.getFullYear()-k;return <option key={yy} value={yy}>{yy}</option>;})}</select>
         </div>
         <input style={_inp} type="date" value={rf.datum} onChange={e=>setRf({...rf,datum:e.target.value})}/>

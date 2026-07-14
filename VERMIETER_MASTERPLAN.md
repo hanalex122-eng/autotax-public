@@ -30,7 +30,7 @@ yasaktır.** Aktif sprint takibi: `SPRINT.md`. Sprint disiplini: `CLAUDE.md`.
 | 5 | **Wohnungsgeberbestätigung** | Tam otomatik PDF | 🟡 geliştirilecek | 🟡 PDF var (`immo_api.py:1577`), "○ Anmeldung" çipi hiç tiklenemiyor |
 | 6 | **Übergabeprotokoll** ⭐ | Tarih · ev sahibi · kiracı · oda-oda kontrol (duvar/zemin/kapı/pencere/mutfak/banyo) · anahtar sayısı · sayaçlar (Strom/Wasser/Warmwasser/Heizung/Gas) · fotoğraflar · imzalar · PDF | 🔴 zorunlu | 🔴 yok |
 | 7 | **Zählerstände** ⭐ | Her taşınmada Strom/Wasser/Warmwasser/Gas/Heizung · geçmiş · grafik | 🔴 zorunlu | 🔴 yok |
-| 8 | **Nebenkostenabrechnung** ⭐⭐⭐ | Heizkosten · Wasser · Abwasser · Müll · Versicherung · Grundsteuer · Hausmeister · Gartenpflege · Allgemeinstrom · Schornsteinfeger · Winterdienst · Sonstige · **Umlageschlüssel · Vorauszahlungen · Nachzahlung · Guthaben · PDF** | 🔴 zorunlu | 🔴 yok — **ve #3'e bağımlı**: NK bugün Soll'a dahil değil (`immo_api.py:832-838`), Vorauszahlung takibi olmadan Abrechnung yapılamaz |
+| 8 | **Nebenkostenabrechnung** ⭐⭐⭐ | Heizkosten · Wasser · Abwasser · Müll · Versicherung · Grundsteuer · Hausmeister · Gartenpflege · Allgemeinstrom · Schornsteinfeger · Winterdienst · Sonstige · **Umlageschlüssel · Vorauszahlungen · Nachzahlung · Guthaben · PDF** | 🔴 zorunlu | 🔴 yok — ama **ENGELİ KALKTI** (Sprint 0): NK artık Soll'un parçası, Vorauszahlung borç olarak takip ediliyor (`immo_rules.monat_nk_soll`) |
 | 9 | **Mietvertrag Generator** | Şablon · PDF · imzaya hazır | 🔴 zorunlu | 🔴 yok |
 | 10 | **Kurzzeitmiete** | Günlük/haftalık/aylık sözleşmeler | 🟡 | 🔴 yok |
 | 11 | **Kündigung Generator** | Hazır şablonlar | 🟡 | 🔴 yok |
@@ -43,13 +43,13 @@ yasaktır.** Aktif sprint takibi: `SPRINT.md`. Sprint disiplini: `CLAUDE.md`.
 
 ## SIRA (bağımlılığa göre — Finish kuralı gereği)
 
-**Sprint 0 — Fundament ✅ KAPANDI (2026-07-14, canlı + prod smoke 9/9).** Masterplan'da ✅ işaretli 1/2/3 gerçekte ✅ değil.
-Mietkonto yanlış borç gösteriyor. #8 (Nebenkostenabrechnung) doğrudan #3'ün üstüne oturuyor —
-NK bugün Soll'a dahil olmadığı için önce bu düzelmeden NK Abrechnung yapılamaz.
-→ Detay ve DoD: `SPRINT.md`. Kanıt: `.claude/immo_finish_review.md`.
+**Sprint 0 — Fundament ✅ KAPANDI (2026-07-14 · canlı `32ace6f` · prod smoke 9/9 · suite 35/35).**
+Masterplan'ın "✅ mevcut" dediği 1/2/3 gerçekte ✅ değildi: Mietkonto yanlış borç gösteriyordu
+(NK yok, geçmiş aylar/yıllar yok, Mieteingang borcu değiştirmiyor, raporlar çelişiyor — üstüne
+ledger canlı bir üçüncü defterdi). Hepsi kapatıldı. Kapanış raporu: `SPRINT.md`.
 
-Sonraki sıra (Sprint 0 kapanmadan açılmaz):
-**S1** #4 Mahnung (tam eskalasyon + history + doğru mektup) →
+Sonraki sıra:
+**S1** #4 Mahnung'un kalanı (e-posta gönderimi, Mahnung silme) →
 **S2** #5 WGB + #7 Zählerstände →
 **S3** #6 Übergabeprotokoll →
 **S4** #8 Nebenkostenabrechnung ⭐⭐⭐ →
