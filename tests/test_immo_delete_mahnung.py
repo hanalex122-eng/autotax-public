@@ -132,8 +132,8 @@ def main():
     cl.post("/immo/tenancies/102/mahnung", json={"stufe": h["naechste_stufe"], "year": 2026})
     h = cl.get("/immo/tenancies/102/mahnungen").json()
     ok(h["naechste_stufe"] == 3, "the escalation stops at the last step (3), it does not run away")
-    ok([m["stufe"] for m in h["mahnungen"]] == [3, 2, 1] or sorted(m["stufe"] for m in h["mahnungen"]) == [1, 2, 3],
-       f"the history holds all three distinct steps — got {[m['stufe'] for m in h['mahnungen']]}")
+    ok([m["stufe"] for m in h["mahnungen"]] == [3, 2, 1],
+       f"the history is NEWEST FIRST, even for letters written on the same day — got {[m['stufe'] for m in h['mahnungen']]}")
     ok(all(abs(m["betrag"] - 540.0) < 0.01 for m in h["mahnungen"]),
        "every letter dunned the Warmmiete (540), the number the card shows")
 

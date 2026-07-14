@@ -1496,8 +1496,12 @@ def list_mahnungen(tid: int, user: dict = Depends(get_current_user)):
         t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == _uid(user)).first()
         if not t:
             raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
-        rows = db.query(ImmoMahnung).filter(ImmoMahnung.tenancy_id == tid, ImmoMahnung.user_id == _uid(user),
-                                            _notdel(ImmoMahnung)).order_by(ImmoMahnung.datum.desc()).all()
+        # newest first — with the id as tiebreak: several letters can be written on the SAME day
+        # (Zahlungserinnerung in the morning, 1. Mahnung after a phone call), and without the
+        # tiebreak the history read oldest-first, which makes the escalation look backwards.
+        rows = (db.query(ImmoMahnung)
+                .filter(ImmoMahnung.tenancy_id == tid, ImmoMahnung.user_id == _uid(user), _notdel(ImmoMahnung))
+                .order_by(ImmoMahnung.datum.desc(), ImmoMahnung.id.desc()).all())
         # C4: the ESCALATION is decided here, not in the browser. Before, the UI hardcoded
         # stufe:1 at both call sites — clicking Mahnung five times produced five identical
         # "Zahlungserinnerung" letters and the 2./3. Mahnung the backend supports were
