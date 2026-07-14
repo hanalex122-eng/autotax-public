@@ -2480,28 +2480,39 @@ function BuAyView({onNav,showToast}){
   const _e=(v)=>new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(v||0);
   const _ml={de:["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"],tr:["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]};
   const _mn=(_ml[getLang()]||_ml.de)[CM-1];
-  const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setLoading(false);}).catch(()=>setLoading(false));};
+  const [summe,setSumme]=React.useState(null);
+  const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setSumme(d.summe||null);setLoading(false);}).catch(()=>setLoading(false));};
   React.useEffect(()=>{load();},[]);
-  const markPaid=async(m)=>{setBusy(m.tenancy_id);try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:CY,monat:CM})});load();if(showToast)showToast(_L("Als bezahlt markiert ✓","Ödendi işaretlendi ✓","Marked paid ✓"),"success");}catch(e){alert(e.message);}finally{setBusy(null);}};
+  // Debt is NEVER computed here — the backend returns offene_forderung, rueckstand_monate
+  // and summe. This screen only displays them (CLAUDE.md → Architecture law #2/#4).
+  const _ymLabel=(ym)=>{const [yy,mm]=ym.split("-");const n=(_ml[getLang()]||_ml.de)[parseInt(mm,10)-1].slice(0,3);return n+(parseInt(yy,10)!==CY?" "+yy.slice(2):"");};
+  const markPaid=async(m,jahr,monat)=>{const k=m.tenancy_id+"-"+jahr+"-"+monat;setBusy(k);try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:jahr,monat:monat})});load();if(showToast)showToast(_L("Als bezahlt markiert ✓","Ödendi işaretlendi ✓","Marked paid ✓"),"success");}catch(e){alert(e.message);}finally{setBusy(null);}};
   const mahnung=async(m)=>{setBusy(m.tenancy_id);try{const tk=localStorage.getItem("atx_token");const r=await fetch(API+"/immo/tenancies/"+m.tenancy_id+"/mahnung",{method:"POST",headers:{Authorization:"Bearer "+tk,"Content-Type":"application/json"},body:JSON.stringify({stufe:1,year:CY})});if(!r.ok){alert(_L("Mahnung fehlgeschlagen","Mahnung başarısız","Mahnung failed"));return;}const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="Mahnung-"+((m.mieter_name||"Mieter").replace(/[^a-zA-Z0-9]/g,"_"))+".pdf";document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);if(showToast)showToast(_L("Mahnung erstellt ✓","Mahnung oluşturuldu ✓","Mahnung created ✓"),"success");}catch(e){alert(e.message);}finally{setBusy(null);}};
   const active=rows.filter(m=>m.this_month_status);
-  const paid=active.filter(m=>m.this_month_status==="paid");
-  const partial=active.filter(m=>m.this_month_status==="partial");
-  const offen=active.filter(m=>m.this_month_status==="open");
-  const probs=offen.concat(partial);
-  const pending=Math.round(probs.reduce((s,m)=>s+(m.this_month_offen||0),0)*100)/100;
+  const probs=active.filter(m=>m.debtor);                       // backend decides who owes
   const _chip=(emoji,n,label,col)=>(<div style={{flex:"1 1 150px",minWidth:140,background:theme.card,border:"1px solid "+theme.border,borderRadius:12,padding:"14px 16px"}}>
     <div style={{fontSize:26,fontWeight:800,color:col}}>{emoji} {n}</div>
     <div style={{fontSize:12,color:theme.textMuted,marginTop:2}}>{label}</div></div>);
-  const _line=(m)=>(<div key={m.tenancy_id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"12px 14px",borderBottom:"1px solid "+theme.border,flexWrap:"wrap"}}>
-    <div style={{minWidth:0,flex:"1 1 auto"}}>
-      <div style={{fontWeight:700,color:theme.text}}>{m.mieter_name}</div>
-      <div style={{fontSize:12,color:theme.textMuted}}>{[m.property_name,m.unit_name].filter(Boolean).join(" · ")}</div>
+  const _line=(m)=>(<div key={m.tenancy_id} style={{padding:"12px 14px",borderBottom:"1px solid "+theme.border}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+      <div style={{minWidth:0,flex:"1 1 auto"}}>
+        <div style={{fontWeight:700,color:theme.text}}>{m.mieter_name}</div>
+        <div style={{fontSize:12,color:theme.textMuted}}>{[m.property_name,m.unit_name].filter(Boolean).join(" · ")}</div>
+      </div>
+      <div style={{textAlign:"right"}}>
+        <div style={{fontWeight:800,color:theme.danger}}>{_e(m.offene_forderung)}</div>
+        {(m.rueckstand_monate||[]).length>1&&<div style={{fontSize:11,color:theme.textMuted}}>{(m.rueckstand_monate||[]).length} {_L("offene Monate","açık ay","open months")}</div>}
+      </div>
+      <button disabled={!!busy} onClick={()=>mahnung(m)} title={_L("Mahnung als PDF","Mahnung PDF","Mahnung PDF")} style={{padding:"8px 12px",background:"transparent",border:"1.5px solid #f59e0b",color:"#f59e0b",borderRadius:9,fontSize:13,fontWeight:700,cursor:"pointer",opacity:busy?0.6:1}}>📨 {_L("Mahnung","Mahnung","Mahnung")}</button>
     </div>
-    <div style={{fontWeight:800,color:m.this_month_status==="open"?theme.danger:"#f59e0b"}}>{_e(m.this_month_offen)}{m.this_month_status==="partial"?" "+_L("offen","eksik","short"):""}</div>
-    <div style={{display:"flex",gap:8}}>
-      <button disabled={busy===m.tenancy_id} onClick={()=>mahnung(m)} title={_L("Mahnung als PDF","Mahnung PDF","Mahnung PDF")} style={{padding:"8px 12px",background:"transparent",border:"1.5px solid #f59e0b",color:"#f59e0b",borderRadius:9,fontSize:13,fontWeight:700,cursor:"pointer",opacity:busy===m.tenancy_id?0.6:1}}>📨 {_L("Mahnung","Mahnung","Mahnung")}</button>
-      <button disabled={busy===m.tenancy_id} onClick={()=>markPaid(m)} style={{padding:"8px 14px",background:theme.accent,color:"#fff",border:"none",borderRadius:9,fontSize:13,fontWeight:700,cursor:"pointer",opacity:busy===m.tenancy_id?0.6:1}}>{busy===m.tenancy_id?"…":"✓ "+_L("Bezahlt","Öde","Pay")}</button>
+    {/* every open month gets its own settle button — including months from earlier years */}
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+      {(m.rueckstand_monate||[]).map(mo=>{const k=m.tenancy_id+"-"+mo.ym;const [yy,mm]=mo.ym.split("-");return(
+        <button key={mo.ym} disabled={busy===m.tenancy_id+"-"+parseInt(yy,10)+"-"+parseInt(mm,10)}
+          onClick={()=>markPaid(m,parseInt(yy,10),parseInt(mm,10))}
+          title={_L("Als bezahlt markieren","Ödendi işaretle","Mark as paid")}
+          style={{padding:"5px 10px",background:mo.typ==="partial"?"rgba(245,158,11,0.12)":"rgba(239,68,68,0.10)",border:"1px solid "+(mo.typ==="partial"?"#f59e0b":theme.danger),color:mo.typ==="partial"?"#f59e0b":theme.danger,borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+          {_ymLabel(mo.ym)} · {_e(mo.offen)} ✓</button>);})}
     </div>
   </div>);
   return(<div style={{maxWidth:880,margin:"0 auto"}}>
@@ -2511,16 +2522,19 @@ function BuAyView({onNav,showToast}){
       <div style={{...css.card,textAlign:"center",color:theme.textMuted,padding:30}}>{_L("Keine aktiven Mieter","Aktif kiracı yok","No active tenants")} · <span style={{color:theme.accent,cursor:"pointer"}} onClick={()=>onNav&&onNav("mieter")}>➕ {_L("Mieter hinzufügen","Kiracı ekle","Add tenant")}</span></div>:
     <div>
       <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
-        {_chip("✓",paid.length,_L("sorgenfrei","sorunsuz","OK"),theme.accent)}
-        {_chip("⚠️",partial.length,_L("Teilzahlung","kısmi","partial"),"#f59e0b")}
-        {_chip("❌",offen.length,_L("nicht bezahlt","ödenmedi","unpaid"),theme.danger)}
-        {_chip("Σ",_e(pending),_L("offen gesamt","toplam bekleyen","pending"),theme.text)}
+        {_chip("✓",(summe?summe.sorgenfrei:0),_L("sorgenfrei","sorunsuz","OK"),theme.accent)}
+        {_chip("⚠️",(summe?summe.teilzahlung:0),_L("Teilzahlung","kısmi","partial"),"#f59e0b")}
+        {_chip("❌",(summe?summe.nicht_bezahlt:0),_L("nicht bezahlt","ödenmedi","unpaid"),theme.danger)}
+        {_chip("Σ",_e(summe?summe.offen_gesamt:0),_L("offen gesamt","toplam bekleyen","pending"),theme.text)}
       </div>
       {probs.length===0?
         <div style={{...css.card,textAlign:"center",padding:30}}><div style={{fontSize:32}}>✅</div><div style={{color:theme.text,fontWeight:700,marginTop:6}}>{_L("Alles bezahlt — nichts zu tun","Her şey ödendi — yapılacak yok","All paid — nothing to do")}</div></div>:
         <div style={{...css.card,padding:0,overflow:"hidden"}}>
-          <div style={{padding:"10px 14px",fontSize:12,fontWeight:700,color:theme.textMuted,background:theme.surfaceAlt,textTransform:"uppercase",letterSpacing:0.5}}>{_L("Heute kümmern","Bugün ilgilen","To handle")} ({probs.length})</div>
-          {offen.map(_line)}{partial.map(_line)}
+          <div style={{padding:"10px 14px",fontSize:12,fontWeight:700,color:theme.textMuted,background:theme.surfaceAlt,textTransform:"uppercase",letterSpacing:0.5}}>
+            {_L("Heute kümmern","Bugün ilgilen","To handle")} ({probs.length})
+            {summe&&summe.monate_offen>probs.length?<span style={{textTransform:"none",fontWeight:600,marginLeft:6}}>· {summe.monate_offen} {_L("offene Monate insgesamt","toplam açık ay","open months in total")}</span>:null}
+          </div>
+          {probs.map(_line)}
         </div>}
     </div>}
   </div>);
@@ -2809,14 +2823,28 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const saveUnit=async(uid,b)=>{try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify(b)});setEditUnit(null);refreshDetail(sel.id,year);_toast(_L("Aktualisiert","Güncellendi","Updated"));}catch(e){alert(e.message);}};
   const createTen=async(unit_id,b)=>{try{await api("/immo/tenancies",{method:"POST",body:JSON.stringify({...b,unit_id})});setAddTenFor(null);refreshDetail(sel.id,year);_toast(_L("Gespeichert","Kaydedildi","Saved"));}catch(e){alert(e.message);}};
   const saveTen=async(tid,b)=>{try{await api("/immo/tenancies/"+tid,{method:"PATCH",body:JSON.stringify(b)});setEditTen(null);refreshDetail(sel.id,year);_toast(_L("Aktualisiert","Güncellendi","Updated"));}catch(e){alert(e.message);}};
-  const addRent=async(b)=>{await api("/immo/rent",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});refreshDetail(sel.id,year);};
+  const addRent=async(b)=>{const r=await api("/immo/rent",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});refreshDetail(sel.id,year);return r;};
   const addExp=async(b)=>{await api("/immo/expenses",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});refreshDetail(sel.id,year);};
   const delItem=async(kind,id)=>{if(!confirm(_L("Löschen?","Sil?","Delete?")))return;await api("/immo/"+kind+"/"+id,{method:"DELETE"});refreshDetail(sel.id,year);};
   // Controlled form state — eski IIFE-local (let b,d) re-render'da sıfırlanıp kaydı yutuyordu.
   const _today=()=>new Date().toISOString().slice(0,10);
-  const [rf,setRf]=React.useState({tid:"",betrag:"",datum:_today()});
+  const _tdy=new Date();
+  const _MONL={de:["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"],
+               tr:["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"],
+               en:["January","February","March","April","May","June","July","August","September","October","November","December"]};
+  const _MONN=_MONL[getLang()]||_MONL.de;
+  const _rf0=()=>({tid:"",betrag:"",datum:_today(),fj:_tdy.getFullYear(),fm:_tdy.getMonth()+1});
+  const [rf,setRf]=React.useState(_rf0());
   const [xf,setXf]=React.useState({k:"nebenkosten",betrag:"",be:"",datum:_today()});
-  const saveRent=async()=>{const amt=parseFloat(rf.betrag);if(!rf.betrag||isNaN(amt)||amt<=0){alert(_L("Bitte gültigen Betrag eingeben.","Geçerli tutar gir.","Enter a valid amount."));return;}await addRent({tenancy_id:rf.tid?parseInt(rf.tid):null,betrag:amt,datum:rf.datum||_today()});setRf({tid:"",betrag:"",datum:_today()});if(showToast)showToast(_L("Mieteingang gespeichert","Kira girişi kaydedildi","Rent saved"),"success");};
+  // A payment must say WHICH rent month it settles — the backend reconciles that month's
+  // debt from it. Without a tenant + month it is not a payment, just a number.
+  const saveRent=async()=>{const amt=parseFloat(rf.betrag);
+    if(!rf.tid){alert(_L("Bitte den Mieter wählen.","Lütfen kiracı seç.","Please select the tenant."));return;}
+    if(!rf.betrag||isNaN(amt)||amt<=0){alert(_L("Bitte gültigen Betrag eingeben.","Geçerli tutar gir.","Enter a valid amount."));return;}
+    const res=await addRent({tenancy_id:parseInt(rf.tid),betrag:amt,datum:rf.datum||_today(),fuer_jahr:parseInt(rf.fj),fuer_monat:parseInt(rf.fm)});
+    setRf(_rf0());
+    const off=res&&typeof res.offen_gesamt==="number"?res.offen_gesamt:null;   // backend's number, not ours
+    if(showToast)showToast(_L("Mieteingang gespeichert","Kira girişi kaydedildi","Rent saved")+(off!==null?" · "+_L("Rückstand jetzt","Kalan borç","Debt now")+" "+_e(off):""),"success");};
   const saveExp=async()=>{const amt=parseFloat(xf.betrag);if(!xf.betrag||isNaN(amt)||amt<=0){alert(_L("Bitte gültigen Betrag eingeben.","Geçerli tutar gir.","Enter a valid amount."));return;}await addExp({kategorie:xf.k,betrag:amt,beschreibung:xf.be,datum:xf.datum||_today()});setXf({k:"nebenkosten",betrag:"",be:"",datum:_today()});if(showToast)showToast(_L("Ausgabe gespeichert","Gider kaydedildi","Expense saved"),"success");};
   const upDoc=async(file,typ)=>{const fd=new FormData();fd.append("file",file);fd.append("property_id",sel.id);fd.append("typ",typ||"other");await fetch(API+"/immo/documents",{method:"POST",headers:{Authorization:"Bearer "+_tk()},body:fd});refreshDetail(sel.id,year);};
   const setYr=(y)=>{setYear(y);if(sel)refreshDetail(sel.id,y);};
@@ -2915,6 +2943,13 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Mieteingang erfassen","Kira girişi","Add rent payment")}</div>
         <select style={_inp} value={rf.tid} onChange={e=>setRf({...rf,tid:e.target.value})}><option value="">{_L("— Mieter wählen —","— Kiracı seç —","— Select tenant —")}</option>{tncs.map(t=><option key={t.tenancy_id} value={t.tenancy_id}>{t.mieter_name} ({t.von}→{t.bis||"…"})</option>)}</select>
         <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} value={rf.betrag} onChange={e=>setRf({...rf,betrag:e.target.value})}/>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:12,color:theme.textMuted,minWidth:70}}>{_L("Für Monat","Hangi ay için","For month")}</span>
+          <select style={{..._inp,flex:"1 1 120px"}} value={rf.fm} onChange={e=>setRf({...rf,fm:e.target.value})}>
+            {_MONN.map((n,i)=><option key={i} value={i+1}>{n}</option>)}</select>
+          <select style={{..._inp,flex:"0 1 100px"}} value={rf.fj} onChange={e=>setRf({...rf,fj:e.target.value})}>
+            {[0,1,2].map(k=>{const yy=_tdy.getFullYear()-k;return <option key={yy} value={yy}>{yy}</option>;})}</select>
+        </div>
         <input style={_inp} type="date" value={rf.datum} onChange={e=>setRf({...rf,datum:e.target.value})}/>
         <button style={_btn("#10b981")} onClick={saveRent}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
       {rents.map(r=>{const tn=tncs.find(t=>t.tenancy_id===r.tenancy_id);return(<div key={r.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div><b style={{color:theme.accent}}>{_e(r.betrag)}</b> <span style={{fontSize:12,color:theme.textMuted}}>{r.datum}{tn?" · "+tn.mieter_name:""}</span></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("rent",r.id)}>✕</span></div>);})}

@@ -164,6 +164,17 @@ def main():
        f"no report, no payment → no debt (got {c2['offene_forderung']})")
 
     # ─────────────────────────────────────────────────────────────────
+    print("\n[3A] the KPI summary is computed by the BACKEND (the UI may not add up debt)")
+    s = cl.get("/immo/mieter").json()["summe"]
+    ok(s["aktiv"] == 2, f"2 active tenants — got {s['aktiv']}")
+    ok(s["sorgenfrei"] == 1, f"1 tenant free of debt (Zahler) — got {s['sorgenfrei']}")
+    ok(s["schuldner"] == 1, f"1 debtor (Schuldner) — got {s['schuldner']}")
+    ok(s["monate_offen"] == 3, f"3 open months in total (Dec-25, Mar, Apr) — got {s['monate_offen']}")
+    ok(abs(s["offen_gesamt"] - 1210.0) < 0.01,
+       f"Σ offen gesamt = 1210 — the same number the card shows — got {s['offen_gesamt']}")
+    ok(s["teilzahlung"] == 1, f"1 tenant has a partial month (April) — got {s['teilzahlung']}")
+
+    # ─────────────────────────────────────────────────────────────────
     print("\n[B2] the reports derive from the exception engine")
     ck = cl.get("/immo/cockpit?year=2026").json()
     f = ck["financial"] if "financial" in ck else ck["kpi"]

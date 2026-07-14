@@ -245,7 +245,19 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "letzte_mahnung": _mahnung_status(db, uid, t.id),
             })
         out.sort(key=lambda x: (-(x["offene_forderung"] or 0), (x["mieter_name"] or "")))
-        return {"mieter": out, "year": y}
+        # SUMMARY — computed HERE, not in the browser. The frontend may not calculate
+        # debt (CLAUDE.md → Architecture law #2/#4); it only displays these numbers.
+        akt = [x for x in out if x["this_month_status"]]
+        summe = {
+            "aktiv": len(akt),
+            "sorgenfrei": sum(1 for x in akt if not x["debtor"]),
+            "schuldner": sum(1 for x in akt if x["debtor"]),
+            "teilzahlung": sum(1 for x in akt if any(m["typ"] == "partial" for m in x["rueckstand_monate"])),
+            "nicht_bezahlt": sum(1 for x in akt if any(m["typ"] != "partial" for m in x["rueckstand_monate"])),
+            "monate_offen": sum(len(x["rueckstand_monate"]) for x in akt),
+            "offen_gesamt": round(sum(x["offene_forderung"] or 0 for x in akt), 2),
+        }
+        return {"mieter": out, "year": y, "summe": summe}
     finally:
         db.close()
 
