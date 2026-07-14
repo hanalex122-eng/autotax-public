@@ -196,9 +196,13 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
     y = year or now.year
     db = SessionLocal()
     try:
-        tncs = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all()
         units = {u.id: u for u in db.query(ImmoUnit).filter(ImmoUnit.user_id == uid, _notdel(ImmoUnit)).all()}
         props = {p.id: p for p in db.query(ImmoProperty).filter(ImmoProperty.user_id == uid, _notdel(ImmoProperty)).all()}
+        # A4 belt-and-braces: even if an old row survived a pre-cascade delete, a tenancy
+        # whose unit or property is gone is NOT shown (it used to appear with a blank
+        # address, accrue debt and offer a Mahnung).
+        tncs = [t for t in db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all()
+                if t.unit_id in units and units[t.unit_id].property_id in props]
         svc = _pay.sql_service(db)
         out = []
         for t in tncs:
@@ -392,15 +396,43 @@ def update_property(pid: int, body: PropertyPatch, user: dict = Depends(get_curr
         db.close()
 
 
+def _soft_delete_tenancies(db, uid: int, tids: list) -> int:
+    """A4: a tenancy cannot outlive its unit. Before, deleting a property/unit left the
+    tenants alive: they kept showing up on Mieter and Bu Ay with a blank address, kept
+    accruing debt and still offered a Mahnung button. Soft-delete, so nothing is lost."""
+    if not tids:
+        return 0
+    now = datetime.now(timezone.utc)
+    n = 0
+    for t in db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, ImmoTenancy.id.in_(tids),
+                                          _notdel(ImmoTenancy)).all():
+        t.is_deleted = True
+        t.deleted_at = now
+        n += 1
+    return n
+
+
 @router.delete("/properties/{pid}")
 def delete_property(pid: int, user: dict = Depends(get_current_user)):
+    """Deletes the property AND everything that hangs off it (units, tenancies) — the UI
+    warns about exactly this before asking."""
+    uid = _uid(user)
     db = SessionLocal()
     try:
-        p = _own_property(db, _uid(user), pid)
+        p = _own_property(db, uid, pid)
         p.is_deleted = True; p.deleted_at = datetime.now(timezone.utc)
-        _cascade_ledger_delete(db, _uid(user), property_id=pid)  # Faz 4.0: keep ledger scope in sync
+        now = datetime.now(timezone.utc)
+        units = db.query(ImmoUnit).filter(ImmoUnit.property_id == pid, ImmoUnit.user_id == uid,
+                                          _notdel(ImmoUnit)).all()
+        uids = [u.id for u in units]
+        tids = [t for (t,) in db.query(ImmoTenancy.id).filter(ImmoTenancy.user_id == uid,
+                                                              ImmoTenancy.unit_id.in_(uids)).all()] if uids else []
+        for u in units:
+            u.is_deleted = True; u.deleted_at = now
+        n_ten = _soft_delete_tenancies(db, uid, tids)
+        _cascade_ledger_delete(db, uid, property_id=pid)  # Faz 4.0: keep ledger scope in sync
         db.commit()
-        return {"success": True}
+        return {"success": True, "einheiten_geloescht": len(units), "mieter_geloescht": n_ten}
     finally:
         db.close()
 
@@ -910,14 +942,17 @@ def update_unit(uid_: int, body: UnitPatch, user: dict = Depends(get_current_use
 
 @router.delete("/units/{uid_}")
 def delete_unit(uid_: int, user: dict = Depends(get_current_user)):
+    """Deletes the unit AND its tenancies (A4 — no orphaned tenants)."""
+    uid = _uid(user)
     db = SessionLocal()
     try:
-        u = _own_unit(db, _uid(user), uid_)
+        u = _own_unit(db, uid, uid_)
         u.is_deleted = True; u.deleted_at = datetime.now(timezone.utc)
         _tids = [t for (t,) in db.query(ImmoTenancy.id).filter(ImmoTenancy.unit_id == uid_).all()]
-        _cascade_ledger_delete(db, _uid(user), unit_id=uid_, tenancy_ids=_tids)  # Faz 4.0: incl. payments (no unit_id)
+        n_ten = _soft_delete_tenancies(db, uid, _tids)
+        _cascade_ledger_delete(db, uid, unit_id=uid_, tenancy_ids=_tids)  # Faz 4.0: incl. payments (no unit_id)
         db.commit()
-        return {"success": True}
+        return {"success": True, "mieter_geloescht": n_ten}
     finally:
         db.close()
 
@@ -1468,9 +1503,18 @@ def list_mahnungen(tid: int, user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
         rows = db.query(ImmoMahnung).filter(ImmoMahnung.tenancy_id == tid, ImmoMahnung.user_id == _uid(user),
                                             _notdel(ImmoMahnung)).order_by(ImmoMahnung.datum.desc()).all()
+        # C4: the ESCALATION is decided here, not in the browser. Before, the UI hardcoded
+        # stufe:1 at both call sites — clicking Mahnung five times produced five identical
+        # "Zahlungserinnerung" letters and the 2./3. Mahnung the backend supports were
+        # unreachable. The next step is one above the highest one already sent (max 3).
+        hoechste = max([m.stufe or 1 for m in rows], default=0)
+        naechste = min(hoechste + 1, 3) if rows else 1
         return {"mahnungen": [{"id": m.id, "datum": str(m.datum) if m.datum else "", "betrag": m.betrag,
                                "stufe": m.stufe, "stufe_text": _STUFE_TXT.get(m.stufe, "Mahnung"),
-                               "notiz": m.notiz or ""} for m in rows]}
+                               "notiz": m.notiz or ""} for m in rows],
+                "naechste_stufe": naechste,
+                "naechste_stufe_text": _STUFE_TXT.get(naechste, "Mahnung"),
+                "gesendet": len(rows)}
     finally:
         db.close()
 
@@ -1547,29 +1591,52 @@ def create_mahnung(tid: int, body: MahnungIn, user: dict = Depends(get_current_u
         u = db.query(ImmoUnit).filter(ImmoUnit.id == t.unit_id).first()
         p = db.query(ImmoProperty).filter(ImmoProperty.id == u.property_id).first() if u else None
         y = body.year or datetime.now(timezone.utc).year
-        betrag = _mahnung_betrag(db, uid, t, y)  # Faz 4.3: ledger amount behind guard (flag OFF → OLD)
+        debt = _debt(db, uid, t)                       # the same number Bu Ay / Mieter show
+        betrag = debt.total
         stufe = body.stufe if body.stufe in (1, 2, 3) else 1
         m = ImmoMahnung(tenancy_id=tid, user_id=uid, datum=date.today(), betrag=betrag, stufe=stufe, notiz=body.notiz)
         db.add(m); db.commit(); db.refresh(m)
+        # A5: the letter must come FROM the landlord, not from an anonymous "Hausverwaltung".
+        comp = (db.query(UserCompany).filter(UserCompany.user_id == uid, UserCompany.is_default == True).first()  # noqa: E712
+                or db.query(UserCompany).filter(UserCompany.user_id == uid).order_by(UserCompany.id.desc()).first())
+        absender = (comp.company_name if comp else "")
+        abs_addr = ((comp.address or "").replace("\n", ", ") if comp else "")
+        iban = (comp.iban if (comp and comp.iban) else None)
         ss = getSampleStyleSheet()
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=22 * mm, bottomMargin=18 * mm, leftMargin=22 * mm, rightMargin=22 * mm)
         objekt = (p.name if p else "") + (" · " + p.adresse if (p and p.adresse) else "")
         whg = u.name if u else ""
         heute = date.today().strftime("%d.%m.%Y")
+        frist = (date.today() + timedelta(days=14)).strftime("%d.%m.%Y")   # A5: a real deadline DATE
+        # A5: the recipient block — the tenant is addressed at the flat he rents
+        empf = "<br/>".join(x for x in [f"<b>{t.mieter_name}</b>",
+                                        (p.adresse if (p and p.adresse) else None),
+                                        (f"Wohnung: {whg}" if whg else None)] if x)
+        # the open months, itemised — a dunning letter must say WHAT is being dunned
+        _MN = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August",
+               "September", "Oktober", "November", "Dezember"]
+        posten = "<br/>".join(f"{_MN[mo.monat - 1]} {mo.jahr}: {mo.offen:.2f} EUR" for mo in debt.months) or "—"
+        konto = (f"auf das Konto <b>{iban}</b>" if iban else "auf das bekannte Konto")
         body_txt = (
             f"<b>{_STUFE_TXT.get(stufe, 'Mahnung')}</b><br/><br/>"
             f"Sehr geehrte/r {t.mieter_name},<br/><br/>"
-            f"für die von Ihnen gemietete Einheit <b>{whg}</b> ({objekt}) ist zum heutigen Tag "
-            f"ein offener Mietbetrag in Höhe von <b>{betrag:.2f} EUR</b> fällig.<br/><br/>"
-            f"Wir bitten Sie, den offenen Betrag innerhalb von <b>14 Tagen</b> auf das bekannte Konto "
-            f"zu überweisen. Sollte sich Ihre Zahlung mit diesem Schreiben überschnitten haben, "
+            f"für die von Ihnen gemietete Einheit <b>{whg}</b> ({objekt}) sind zum heutigen Tag "
+            f"folgende Mietzahlungen offen:<br/><br/>"
+            f"{posten}<br/><br/>"
+            f"<b>Offener Gesamtbetrag: {betrag:.2f} EUR</b><br/><br/>"
+            f"Wir bitten Sie, den offenen Betrag bis zum <b>{frist}</b> {konto} zu überweisen. "
+            f"Sollte sich Ihre Zahlung mit diesem Schreiben überschnitten haben, "
             f"betrachten Sie es bitte als gegenstandslos.<br/><br/>"
-            f"Mit freundlichen Grüßen<br/>Die Hausverwaltung"
+            f"Mit freundlichen Grüßen<br/>{absender or 'Der Vermieter'}"
         )
-        el = [Paragraph(heute, ss["Normal"]), Spacer(1, 10 * mm),
-              Paragraph(t.mieter_name, ss["Normal"]), Spacer(1, 12 * mm),
-              Paragraph(body_txt, ss["Normal"])]
+        el = []
+        if absender:
+            el.append(Paragraph(f"<font size=8>{absender}{' · ' + abs_addr if abs_addr else ''}</font>", ss["Normal"]))
+            el.append(Spacer(1, 6 * mm))
+        el += [Paragraph(empf, ss["Normal"]), Spacer(1, 10 * mm),
+               Paragraph(heute, ss["Normal"]), Spacer(1, 8 * mm),
+               Paragraph(body_txt, ss["Normal"])]
         doc.build(el)
         buf.seek(0)
         return StreamingResponse(buf, media_type="application/pdf",

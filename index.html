@@ -2498,7 +2498,8 @@ function BuAyView({onNav,showToast}){
   // and summe. This screen only displays them (CLAUDE.md → Architecture law #2/#4).
   const _ymLabel=(ym)=>{const [yy,mm]=ym.split("-");const n=(_ml[getLang()]||_ml.de)[parseInt(mm,10)-1].slice(0,3);return n+(parseInt(yy,10)!==CY?" "+yy.slice(2):"");};
   const markPaid=async(m,jahr,monat)=>{const k=m.tenancy_id+"-"+jahr+"-"+monat;setBusy(k);try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:jahr,monat:monat})});load();if(showToast)showToast(_L("Als bezahlt markiert ✓","Ödendi işaretlendi ✓","Marked paid ✓"),"success");}catch(e){alert(e.message);}finally{setBusy(null);}};
-  const mahnung=async(m)=>{if(!confirm(_L("Mahnung für „"+m.mieter_name+"“ über "+_e(m.offene_forderung)+" erstellen? (wird dauerhaft protokolliert)","„"+m.mieter_name+"“ için "+_e(m.offene_forderung)+" ihtar oluşturulsun mu? (ihtar kalıcı olarak kaydedilir)","Create a Mahnung for „"+m.mieter_name+"“ over "+_e(m.offene_forderung)+"? (recorded permanently)")))return;setBusy(m.tenancy_id);try{const tk=localStorage.getItem("atx_token");const r=await fetch(API+"/immo/tenancies/"+m.tenancy_id+"/mahnung",{method:"POST",headers:{Authorization:"Bearer "+tk,"Content-Type":"application/json"},body:JSON.stringify({stufe:1,year:CY})});if(!r.ok){alert(_L("Mahnung fehlgeschlagen","Mahnung başarısız","Mahnung failed"));return;}const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="Mahnung-"+((m.mieter_name||"Mieter").replace(/[^a-zA-Z0-9]/g,"_"))+".pdf";document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);if(showToast)showToast(_L("Mahnung erstellt ✓","Mahnung oluşturuldu ✓","Mahnung created ✓"),"success");}catch(e){alert(e.message);}finally{setBusy(null);}};
+  const mahnung=async(m)=>{let st=1,stTxt="";try{const h=await api("/immo/tenancies/"+m.tenancy_id+"/mahnungen");st=h.naechste_stufe||1;stTxt=h.naechste_stufe_text||"";}catch(e){}
+    if(!confirm(_L(stTxt+" für „"+m.mieter_name+"“ über "+_e(m.offene_forderung)+" erstellen? (wird dauerhaft protokolliert)","„"+m.mieter_name+"“ için "+stTxt+" ("+_e(m.offene_forderung)+") oluşturulsun mu? (kalıcı kaydedilir)","Create "+stTxt+" for „"+m.mieter_name+"“ over "+_e(m.offene_forderung)+"? (recorded permanently)")))return;setBusy(m.tenancy_id);try{const tk=localStorage.getItem("atx_token");const r=await fetch(API+"/immo/tenancies/"+m.tenancy_id+"/mahnung",{method:"POST",headers:{Authorization:"Bearer "+tk,"Content-Type":"application/json"},body:JSON.stringify({stufe:st,year:CY})});if(!r.ok){alert(_L("Mahnung fehlgeschlagen","Mahnung başarısız","Mahnung failed"));return;}const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="Mahnung-"+((m.mieter_name||"Mieter").replace(/[^a-zA-Z0-9]/g,"_"))+".pdf";document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);if(showToast)showToast(_L("Mahnung erstellt ✓","Mahnung oluşturuldu ✓","Mahnung created ✓"),"success");}catch(e){alert(e.message);}finally{setBusy(null);}};
   const active=rows.filter(m=>m.this_month_status);
   const probs=active.filter(m=>m.debtor);                       // backend decides who owes
   // mobile: 2 chips per row, smaller type — the Σ amount used to overflow its box on a phone
@@ -2602,7 +2603,8 @@ function MieterView({onNav,showToast}){
   const _efh={fontSize:11,color:theme.textDim,marginTop:4,lineHeight:1.35};
   const _efR=(n,lbl,key,extra,hint)=>(<div style={{marginBottom:12}}><label style={_efl}>{n?<b style={{color:theme.textDim}}>{n}. </b>:""}{lbl}</label><input style={_ef} value={erf[key]} onChange={e=>setErf({...erf,[key]:e.target.value})} {...(extra||{})}/>{hint?<div style={_efh}>{hint}</div>:null}</div>);
   const delTenant=async(m)=>{if(!window.confirm(_L("Mieter \""+m.mieter_name+"\" löschen?","Kiracı \""+m.mieter_name+"\" silinsin mi?","Delete tenant \""+m.mieter_name+"\"?")))return;try{await api("/immo/tenancies/"+m.tenancy_id,{method:"DELETE"});if(sel&&sel.tenancy_id===m.tenancy_id)setSel(null);load();if(showToast)showToast(_L("Gelöscht","Silindi","Deleted"),"info");}catch(e){alert(e.message);}};
-  const dlMahnung=async(m)=>{if(!confirm(_L("Mahnung für „"+m.mieter_name+"“ über "+_e(m.offene_forderung)+" erstellen? (wird dauerhaft protokolliert)","„"+m.mieter_name+"“ için "+_e(m.offene_forderung)+" ihtar oluşturulsun mu? (ihtar kalıcı olarak kaydedilir)","Create a Mahnung for „"+m.mieter_name+"“ over "+_e(m.offene_forderung)+"? (recorded permanently)")))return;try{const r=await fetch(API+"/immo/tenancies/"+m.tenancy_id+"/mahnung",{method:"POST",headers:{Authorization:"Bearer "+localStorage.getItem("atx_token"),"Content-Type":"application/json"},body:JSON.stringify({stufe:1,year:new Date().getFullYear()})});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();if(j&&j.detail)msg=j.detail;}catch(e){}alert(msg);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Mahnung_"+((m.mieter_name||"Mieter").replace(/[^a-zA-Z0-9]/g,"_"))+".pdf";a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(u);},1500);if(showToast)showToast(_L("Mahnung erstellt ✓","Mahnung oluşturuldu ✓","Mahnung created ✓"),"success");}catch(e){alert(e.message);}};
+  const dlMahnung=async(m)=>{let st=1,stTxt="";try{const h=await api("/immo/tenancies/"+m.tenancy_id+"/mahnungen");st=h.naechste_stufe||1;stTxt=h.naechste_stufe_text||"";}catch(e){}
+    if(!confirm(_L(stTxt+" für „"+m.mieter_name+"“ über "+_e(m.offene_forderung)+" erstellen? (wird dauerhaft protokolliert)","„"+m.mieter_name+"“ için "+stTxt+" ("+_e(m.offene_forderung)+") oluşturulsun mu? (kalıcı kaydedilir)","Create "+stTxt+" for „"+m.mieter_name+"“ over "+_e(m.offene_forderung)+"? (recorded permanently)")))return;try{const r=await fetch(API+"/immo/tenancies/"+m.tenancy_id+"/mahnung",{method:"POST",headers:{Authorization:"Bearer "+localStorage.getItem("atx_token"),"Content-Type":"application/json"},body:JSON.stringify({stufe:st,year:new Date().getFullYear()})});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();if(j&&j.detail)msg=j.detail;}catch(e){}alert(msg);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Mahnung_"+((m.mieter_name||"Mieter").replace(/[^a-zA-Z0-9]/g,"_"))+".pdf";a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(u);},1500);if(showToast)showToast(_L("Mahnung erstellt ✓","Mahnung oluşturuldu ✓","Mahnung created ✓"),"success");}catch(e){alert(e.message);}};
   // ── Bearbeiten: von/bis/Kaltmiete/NK düzenle (bis boş = aktif, çıkış yok) ──
   const [editFor,setEditFor]=React.useState(null);
   const [editF,setEditF]=React.useState({name:"",von:"",bis:"",kalt:"",nk:"",telefon:"",email:"",kaution:"",erst:"",erhAb:"",erhKalt:""});
@@ -2617,7 +2619,9 @@ function MieterView({onNav,showToast}){
   const [mk,setMk]=React.useState(null);
   const [mkY,setMkY]=React.useState(curY);          // C8: which YEAR of the Mietkonto is shown
   const fetchMk=(m,y)=>api("/immo/tenancies/"+m.tenancy_id+"/mietkonto?year="+(y||mkY)).then(setMk).catch(()=>{});
-  const openDetail=(m)=>{setSel(m);setMk(null);setMkY(curY);fetchMk(m,curY);};
+  const [mh,setMh]=React.useState(null);           // C4: Mahnung history (endpoint existed, was never called)
+  const fetchMh=(m)=>api("/immo/tenancies/"+m.tenancy_id+"/mahnungen").then(setMh).catch(()=>setMh(null));
+  const openDetail=(m)=>{setSel(m);setMk(null);setMh(null);setMkY(curY);fetchMk(m,curY);fetchMh(m);};
   const payMonth=async(m,mon)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:mkY,monat:mon,betrag:m.gesamtmiete})});fetchMk(m);load();}catch(e){alert(e.message);}};
   const unpayMonth=async(m,mon)=>{if(!confirm(_L("Diesen Monat als NICHT bezahlt melden?","Bu ay ÖDENMEDİ olarak işaretlensin mi?","Report this month as NOT paid?")))return;try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt?jahr="+mkY+"&monat="+mon,{method:"DELETE"});fetchMk(m);load();}catch(e){alert(e.message);}};
   const today=new Date().toISOString().slice(0,10);
@@ -2682,8 +2686,17 @@ function MieterView({onNav,showToast}){
            </span>}
         </div>)}
       </div>
+      {mh&&(mh.mahnungen||[]).length>0&&<div style={{...css.card,marginBottom:12}}>
+        <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>{_L("Mahnungen","İhtarlar","Dunning letters")} ({mh.gesendet})</div>
+        {(mh.mahnungen||[]).map(x=>(<div key={x.id} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid "+theme.border}}>
+          <span style={{color:theme.text}}>{x.stufe_text}</span>
+          <span style={{color:theme.textMuted}}>{x.datum} · <b style={{color:theme.text}}>{_e(x.betrag)}</b></span>
+        </div>))}
+        <div style={{fontSize:12,color:theme.textMuted,marginTop:8}}>{_L("Nächster Schritt","Sonraki adım","Next step")}: <b style={{color:"#f59e0b"}}>{mh.naechste_stufe_text}</b></div>
+      </div>}
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
         <button style={{...css.btnOutline,padding:"8px 12px",fontSize:13}} onClick={()=>dlWgb(m.tenancy_id)}>📄 Wohnungsgeberbestätigung</button>
+        {(m.offene_forderung||0)>0&&<button style={{...css.btnOutline,padding:"8px 12px",fontSize:13,borderColor:"#f59e0b",color:"#f59e0b"}} onClick={async()=>{await dlMahnung(m);fetchMh(m);}}>📨 {mh?mh.naechste_stufe_text:_L("Mahnung","İhtar","Mahnung")}</button>}
       </div>
     </div>);}
   return(<div style={{maxWidth:1000,margin:"0 auto"}}>
