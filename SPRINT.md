@@ -76,8 +76,63 @@ floor onto a cracked foundation — exactly what "Finish > New Features" forbids
 - [ ] C7 Field hints (3 languages) on Immobilien inputs — user reported the forms are "çok karışık".
 - [ ] C8 Tenancy Detail: no year switcher → last year's Mietkonto unreachable. (`index.html:2579`)
 
-**Sprint exit report goes here when closing** (completed · deferred · open risks · honest
-"is it really done?").
+---
+
+## ✅ SPRINT 0 EXIT REPORT — closed 2026-07-14
+
+**Deployed:** `32ace6f` · production `/health` ok · **production smoke test 9/9 green** ·
+suite **35/35 green** (incl. the ledger flag forced ON).
+
+### Completed
+| | What | Proof |
+|---|---|---|
+| A1 | Arrears from previous months surface — "✅ alles bezahlt" can no longer hide 940 € | smoke 4+5 |
+| A2 | Arrears cross the year boundary — unpaid December survives 1 January | test_immo_payment_service |
+| A3 | **Nebenkosten are part of the Soll.** Debt + Mahnung = Warmmiete (470, not 400) | smoke 4 |
+| A4 | Deleting a property/unit deletes its tenants — no orphans accruing debt | smoke 10 |
+| A5 | The Mahnung is a real letter: recipient address, itemised months, concrete deadline date, landlord's IBAN + signature (no more "Die Hausverwaltung") | test_immo_delete_mahnung |
+| B1 | **The sprint bug:** a Mieteingang payment now reduces the debt (940 → 470); deleting it restores it | smoke 6+7 |
+| B2 | Reports derive from the Exception Engine: no negative Gewinn, no flat-zero income chart, no false "Miete fehlt" | smoke 9 |
+| B3 | Dead `auto_paid` documented; `offene_monate` correctly marked as the live debt store | models.py |
+| C1–C8 | German buttons, confirm dialogs, loading/error/retry, Dauerzahlung explained in-module, mobile Bu Ay, year selector, 3-language field hints, Mahnung escalation + history | commits 3B/4 |
+| — | **Architecture:** Payment Service is the only writer; `PaymentRepository` port (immo_rent today, ledger tomorrow); no frontend computes debt | test_immo_no_third_book |
+
+### Found by the production smoke test (would have shipped otherwise)
+**The third book was LIVE.** `IMMO_LEDGER_READ=1` is set in production, and `portfolio_view()`
+overwrote the debt fields with the ledger's Kalt-only arrears: the Berichte screen said
+**2.800 €** while the Mieter card, Bu Ay and the Mahnung all said **940 €**. Every unit test
+passed because they ran with the flag OFF. Fixed in code (`32ace6f`) — the ledger can no
+longer be a debt source for any user-facing screen, whatever the environment says. New
+regression test forces the flag ON.
+
+### Deliberately deferred
+- **Historical Payment Backfill** — dry-run proved 0 HIGH rows and no debt change → skipped (see backlog).
+- `auto_paid` column drop (destructive migration).
+- Untermieter (TDD spec still skipped).
+- Ledger Phase 1+ / cutover.
+
+### Open risks
+1. **The ledger's Soll is still Kalt-only** and knows nothing about the exception engine. It
+   is now a pure audit domain (`/immo/_ledger/*`), so no user sees it — but it MUST be
+   aligned before any ledger cutover, or the third book returns.
+2. `IMMO_LEDGER_READ=1` is still set in production. It is now inert for user-facing debt,
+   but the variable is misleading — consider removing it.
+3. The Railway *Postgres* service variables hold an **outdated password** (the working one is
+   in AutoTax-Hub's `DATABASE_URL`) → backup/restore scripts reading them fail silently.
+4. The screens were verified through the API and the JSX compiler, **not** by a human looking
+   at the rendered UI on a phone. First real landlord session may still surface layout nits.
+5. The acquisition funnel is still broken (the landing CTA opens the login form, not
+   registration) — out of this sprint's scope, parked in the backlog.
+
+### Is this sprint really finished?  **YES.**
+The eight DoD conditions are met: code complete · 35/35 tests green · UX checked · the
+contradicting legacy flows are gone (two payment books AND the ledger third book) · reviewed
+commit by commit with BEFORE/AFTER evidence · deployed · smoke-tested on production · no
+critical gap left in the landlord accounting flow. The residual items above are named, owned
+and parked — none of them makes the product tell a landlord a wrong number.
+
+Masterplan #1 #2 #3 are now genuinely ✅. #8 (Nebenkostenabrechnung) is unblocked: the
+NK-Vorauszahlung is finally tracked as owed.
 
 ---
 

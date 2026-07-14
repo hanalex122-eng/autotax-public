@@ -23,10 +23,10 @@ yasaktır.** Aktif sprint takibi: `SPRINT.md`. Sprint disiplini: `CLAUDE.md`.
 
 | # | Modül | İçerik | Masterplan durumu | Kod-kanıtlı gerçek durum (review 2026-07-14) |
 |---|-------|--------|-------------------|-----------------------------------------------|
-| 1 | **Immobilien** | Property · Units · Address · Documents | ✅ mevcut | 🟡 mevcut, ama silme kiracıyı öksüz bırakıyor (`immo_api.py:375-385`), loading/error state yok |
-| 2 | **Mieter** | Tenant · Contact · Phone · Email · Kaution · Mieterhöhung geçmişi | ✅ mevcut | 🟡 mevcut, ama Kaution/Telefon/E-Mail kayıt akışında girilemiyor (sadece ✎ Bearbeiten), Almanca arayüzde Türkçe butonlar |
-| 3 | **Mietkonto** | Aylık genel bakış · Ödeme geçmişi · Exception Engine · This Month | ✅ mevcut | 🔴 **DEĞİL** — borç yanlış: geçmiş aylar Bu Ay'da görünmüyor, borç yıl sınırında siliniyor, **NK borca dahil değil**, Mieteingang sekmesi borcu değiştirmiyor, Berichte kendiyle çelişiyor |
-| 4 | **Mahnung** | Erinnerung · Mahnung 1 · Mahnung 2 · Letzte Mahnung · PDF · History | 🟡 geliştirilecek | 🟡 `stufe:1` sabit (eskalasyon UI yok), mektupta kiracı adresi/tarih yok, imza "Die Hausverwaltung", history endpoint'i UI'sız |
+| 1 | **Immobilien** | Property · Units · Address · Documents | ✅ mevcut | ✅ **TAMAM** (Sprint 0): cascade silme + loading/error/retry |
+| 2 | **Mieter** | Tenant · Contact · Phone · Email · Kaution · Mieterhöhung geçmişi | ✅ mevcut | ✅ **TAMAM** (Sprint 0): Almanca butonlar, onay dialogları, 3 dilli hint'ler |
+| 3 | **Mietkonto** | Aylık genel bakış · Ödeme geçmişi · Exception Engine · This Month | ✅ mevcut | ✅ **TAMAM** (Sprint 0): tek Payment Service, NK borca dahil (Warmmiete), çok-yıllı borç, Mieteingang borcu kapatıyor, tüm ekranlar aynı sayıyı veriyor (prod smoke 9/9) |
+| 4 | **Mahnung** | Erinnerung · Mahnung 1 · Mahnung 2 · Letzte Mahnung · PDF · History | 🟡 geliştirilecek | 🟢 **BÜYÜK ÖLÇÜDE TAMAM** (Sprint 0): eskalasyon (backend karar veriyor) + history UI + gerçek mektup (alıcı adresi, kalem dökümü, somut vade, landlord imzası+IBAN). Kalan: e-posta ile gönderim, Mahnung silme |
 | 5 | **Wohnungsgeberbestätigung** | Tam otomatik PDF | 🟡 geliştirilecek | 🟡 PDF var (`immo_api.py:1577`), "○ Anmeldung" çipi hiç tiklenemiyor |
 | 6 | **Übergabeprotokoll** ⭐ | Tarih · ev sahibi · kiracı · oda-oda kontrol (duvar/zemin/kapı/pencere/mutfak/banyo) · anahtar sayısı · sayaçlar (Strom/Wasser/Warmwasser/Heizung/Gas) · fotoğraflar · imzalar · PDF | 🔴 zorunlu | 🔴 yok |
 | 7 | **Zählerstände** ⭐ | Her taşınmada Strom/Wasser/Warmwasser/Gas/Heizung · geçmiş · grafik | 🔴 zorunlu | 🔴 yok |
@@ -43,7 +43,7 @@ yasaktır.** Aktif sprint takibi: `SPRINT.md`. Sprint disiplini: `CLAUDE.md`.
 
 ## SIRA (bağımlılığa göre — Finish kuralı gereği)
 
-**Sprint 0 — Fundament (ŞU AN AKTİF).** Masterplan'da ✅ işaretli 1/2/3 gerçekte ✅ değil.
+**Sprint 0 — Fundament ✅ KAPANDI (2026-07-14, canlı + prod smoke 9/9).** Masterplan'da ✅ işaretli 1/2/3 gerçekte ✅ değil.
 Mietkonto yanlış borç gösteriyor. #8 (Nebenkostenabrechnung) doğrudan #3'ün üstüne oturuyor —
 NK bugün Soll'a dahil olmadığı için önce bu düzelmeden NK Abrechnung yapılamaz.
 → Detay ve DoD: `SPRINT.md`. Kanıt: `.claude/immo_finish_review.md`.
