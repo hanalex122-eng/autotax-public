@@ -90,6 +90,20 @@ def init_db():
                         logger.info("Added '%s' column to immo_tenancy", _c)
     except Exception as e:
         logger.warning("immo_tenancy status-column migration skipped: %s", e)
+    # Sprint 1 (Übergabeprotokoll): a photo may belong to a handover + a room.
+    # The new tables (immo_protokoll / immo_zaehlerstand) come from create_all; only the two
+    # columns on the existing immo_document table need an ALTER. Additive + nullable.
+    try:
+        _id = inspect(engine)
+        if "immo_document" in _id.get_table_names():
+            _dc = [c["name"] for c in _id.get_columns("immo_document")]
+            with engine.begin() as conn:
+                for _c, _t in (("protokoll_id", "INTEGER"), ("raum", "VARCHAR(80)")):
+                    if _c not in _dc:
+                        conn.execute(text(f"ALTER TABLE immo_document ADD COLUMN {_c} {_t}"))
+                        logger.info("Added '%s' column to immo_document", _c)
+    except Exception as e:
+        logger.warning("immo_document protokoll-column migration skipped: %s", e)
     # Immobilien Ledger (Ledger-First Migration, Faz 0). The immo_ledger_entry
     # table is created by create_all; only the partial-unique indexes (backfill
     # idempotency) must be ensured explicitly. Best-effort — never block startup.

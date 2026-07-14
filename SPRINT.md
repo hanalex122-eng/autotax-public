@@ -18,7 +18,28 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## ACTIVE SPRINT — Sprint 0: "Fundament — make Mietkonto tell the truth"
+## ACTIVE SPRINT — Sprint 1: "Move-in / Move-out Package"
+
+**Opened:** 2026-07-14 (right after Sprint 0 closed)
+**Serves:** `VERMIETER_MASTERPLAN.md` #6 Übergabeprotokoll ⭐ · #7 Zählerstände ⭐ · #5 WGB
+**Goal (user):** *a landlord must complete an entire tenant handover inside AutoTax* — no Word,
+no Excel, no paper, no PDF hunting.
+**Scope:** Übergabeprotokoll · Zählerstände · Fotos · digitale Unterschriften · PDF.
+**Plan + design:** `.claude/sprint1_plan.md`. **Not in scope:** e-mailing the PDF (Sprint 3).
+
+Next: **Sprint 2 = Nebenkostenabrechnung** · **Sprint 3 = Mahnung improvements + e-mail sending.**
+Customer value first, automation second.
+
+- [ ] C1 Schema (immo_protokoll, immo_zaehlerstand, ImmoDocument.protokoll_id/raum) + pure rules
+      module + unit tests. No endpoint, no UI, no behaviour change.
+- [ ] C2 Endpoints + PDF + tests (incl. "abgeschlossen = immutable")
+- [ ] C3 The 5-step wizard UI, phone-first (rooms · meters · keys · signatures)
+- [ ] C4 Zählerstände history + consumption chart + WGB step that finally ticks `anmeldung_done`
+- [ ] C5 Deploy + production smoke (a real end-to-end handover) + sprint close report
+
+---
+
+## CLOSED — Sprint 0: "Fundament — make Mietkonto tell the truth"
 
 **Opened:** 2026-07-14
 **Serves:** `VERMIETER_MASTERPLAN.md` items #1 #2 #3 (marked ✅ there, **not actually done**) and

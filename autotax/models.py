@@ -992,6 +992,60 @@ class ImmoDocument(Base):
     file_path = Column(String(400), nullable=True)
     file_content_type = Column(String(100), nullable=True)
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # Sprint 1 (Übergabe): a photo can belong to a handover protocol and to one room in it.
+    # Additive + nullable — an ordinary document simply leaves them empty.
+    protokoll_id = Column(Integer, ForeignKey("immo_protokoll.id"), nullable=True, index=True)
+    raum = Column(String(80), nullable=True)          # "Küche", "Bad", "Zähler: strom", …
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+# ── IMMOBILIEN SPRINT 1: Übergabeprotokoll + Zählerstände (Ein-/Auszug) ──
+class ImmoProtokoll(Base):
+    """ONE handover: the landlord and the tenant walk through the flat, note the condition of
+    every room, read the meters, count the keys and both sign. Replaces the Word template.
+
+    `abgeschlossen` = LOCKED: once both signatures are on it, nothing may be edited — that is
+    the entire point of a handover document. A correction is a NEW protocol (Nachtrag)."""
+    __tablename__ = "immo_protokoll"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    tenancy_id = Column(Integer, ForeignKey("immo_tenancy.id"), nullable=False, index=True)
+    unit_id = Column(Integer, ForeignKey("immo_unit.id"), nullable=True, index=True)
+    art = Column(String(10), nullable=False, default="einzug")     # einzug | auszug
+    datum = Column(Date, nullable=True)                            # day of the handover
+    status = Column(String(15), nullable=False, default="entwurf")  # entwurf | abgeschlossen
+    raeume = Column(Text, nullable=True)        # JSON [{name, elemente:[{was,zustand,notiz}], notiz}]
+    schluessel = Column(Text, nullable=True)    # JSON [{typ:"Haustür", anzahl:2}]
+    personen = Column(Text, nullable=True)      # JSON {vermieter, mieter, zeugen:[]}
+    notiz = Column(Text, nullable=True)
+    unterschrift_vermieter = Column(Text, nullable=True)   # PNG data-URL (canvas)
+    unterschrift_mieter = Column(Text, nullable=True)      # PNG data-URL (canvas)
+    unterschrift_datum = Column(Date, nullable=True)
+    abgeschlossen_am = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class ImmoZaehlerstand(Base):
+    """ONE meter reading. Deliberately its own table, NOT JSON inside the protocol:
+    Masterplan #7 needs the history + a chart, and Sprint 2 (Nebenkostenabrechnung) computes
+    consumption per period — the reading taken at a handover and the one taken in January must
+    live in the same series. `protokoll_id` is empty for a standalone reading."""
+    __tablename__ = "immo_zaehlerstand"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    unit_id = Column(Integer, ForeignKey("immo_unit.id"), nullable=False, index=True)
+    protokoll_id = Column(Integer, ForeignKey("immo_protokoll.id"), nullable=True, index=True)
+    art = Column(String(15), nullable=False)      # strom|wasser|warmwasser|gas|heizung
+    zaehler_nr = Column(String(60), nullable=True)
+    stand = Column(Float, nullable=False, default=0.0)
+    einheit = Column(String(15), nullable=True)   # kWh | m³ | Einheiten
+    datum = Column(Date, nullable=True)
+    foto_document_id = Column(Integer, ForeignKey("immo_document.id"), nullable=True)
+    notiz = Column(String(300), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
 
