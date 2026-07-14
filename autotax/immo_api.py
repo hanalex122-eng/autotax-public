@@ -1956,3 +1956,622 @@ def ledger_reconcile(dry_run: bool = Query(True), user: dict = Depends(get_curre
                 "orphan_by_tenancy": by_t, "total_orphan": total, "cleaned": cleaned}
     finally:
         db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  SPRINT 1 — ÜBERGABEPROTOKOLL + ZÄHLERSTÄNDE (Ein-/Auszug)
+#
+#  Goal: a landlord completes an entire tenant handover inside AutoTax — no Word,
+#  no Excel, no paper. The endpoints are THIN: every rule lives in immo_protokoll.py,
+#  which is testable without a database.
+#
+#  The hard rule: a protocol with both signatures is ABGESCHLOSSEN = immutable.
+#  Every write path calls _prot_editable() first.
+# ══════════════════════════════════════════════════════════════════════
+from autotax import immo_protokoll as _prot                        # noqa: E402
+from autotax.models import ImmoProtokoll, ImmoZaehlerstand         # noqa: E402
+
+MAX_FOTO_PX = 1600      # phone photos are downscaled — a handover must not eat the disk
+
+
+class ProtokollIn(BaseModel):
+    tenancy_id: int
+    art: str = "einzug"                       # einzug | auszug
+    datum: Optional[str] = None
+    raeume: Optional[list] = None             # optional custom room names
+
+
+class ProtokollPatch(BaseModel):
+    datum: Optional[str] = None
+    raeume: Optional[list] = None
+    schluessel: Optional[list] = None
+    personen: Optional[dict] = None
+    notiz: Optional[str] = None
+
+
+class UnterschriftIn(BaseModel):
+    rolle: str                                # vermieter | mieter
+    png: str                                  # data:image/png;base64,...
+
+
+class ZaehlerIn(BaseModel):
+    unit_id: int
+    art: str                                  # strom|wasser|warmwasser|gas|heizung
+    stand: float
+    datum: Optional[str] = None
+    zaehler_nr: Optional[str] = None
+    protokoll_id: Optional[int] = None
+    notiz: Optional[str] = None
+
+
+def _own_protokoll(db, uid: int, pid: int) -> ImmoProtokoll:
+    p = db.query(ImmoProtokoll).filter(ImmoProtokoll.id == pid, ImmoProtokoll.user_id == uid,
+                                       _notdel(ImmoProtokoll)).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Protokoll nicht gefunden")
+    return p
+
+
+def _prot_editable(p: ImmoProtokoll) -> None:
+    try:
+        _prot.require_editable(p.status)
+    except _prot.ProtokollError as e:
+        raise HTTPException(status_code=409, detail=str(e))    # 409: it is a document now
+
+
+def _prot_fotos(db, uid: int, pid: int) -> list:
+    rows = (db.query(ImmoDocument)
+            .filter(ImmoDocument.user_id == uid, ImmoDocument.protokoll_id == pid, _notdel(ImmoDocument))
+            .order_by(ImmoDocument.id).all())
+    return [{"id": d.id, "raum": d.raum or "", "filename": d.filename,
+             "url": "/immo/documents/%d/download" % d.id} for d in rows]
+
+
+def _zaehler_dict(z) -> dict:
+    return {"id": z.id, "unit_id": z.unit_id, "protokoll_id": z.protokoll_id, "art": z.art,
+            "art_label": _prot.ZAEHLER_LABEL.get(z.art, z.art), "zaehler_nr": z.zaehler_nr or "",
+            "stand": z.stand, "einheit": z.einheit or "", "datum": str(z.datum) if z.datum else None,
+            "foto_document_id": z.foto_document_id, "notiz": z.notiz or ""}
+
+
+def _prot_dict(db, uid: int, p: ImmoProtokoll, with_details: bool = True) -> dict:
+    t = db.query(ImmoTenancy).filter(ImmoTenancy.id == p.tenancy_id).first()
+    u = db.query(ImmoUnit).filter(ImmoUnit.id == p.unit_id).first() if p.unit_id else None
+    pr = db.query(ImmoProperty).filter(ImmoProperty.id == u.property_id).first() if u else None
+    raeume = _prot.loads(p.raeume, [])
+    out = {
+        "id": p.id, "tenancy_id": p.tenancy_id, "unit_id": p.unit_id,
+        "mieter_name": (t.mieter_name if t else ""),
+        "unit_name": (u.name if u else ""), "property_adresse": (pr.adresse if pr else ""),
+        "art": p.art, "datum": str(p.datum) if p.datum else None, "status": p.status,
+        "gesperrt": _prot.is_locked(p.status),
+        "abgeschlossen_am": str(p.abgeschlossen_am) if p.abgeschlossen_am else None,
+        "unterschrift_vermieter_da": bool(p.unterschrift_vermieter),
+        "unterschrift_mieter_da": bool(p.unterschrift_mieter),
+    }
+    if with_details:
+        zs = (db.query(ImmoZaehlerstand)
+              .filter(ImmoZaehlerstand.protokoll_id == p.id, ImmoZaehlerstand.user_id == uid,
+                      _notdel(ImmoZaehlerstand)).order_by(ImmoZaehlerstand.art).all())
+        out.update({
+            "raeume": raeume,
+            "schluessel": _prot.loads(p.schluessel, []),
+            "personen": _prot.loads(p.personen, {}),
+            "notiz": p.notiz or "",
+            "maengel": _prot.maengel(raeume),            # derived, never stored twice
+            "fotos": _prot_fotos(db, uid, p.id),
+            "zaehler": [_zaehler_dict(z) for z in zs],
+        })
+    return out
+
+
+@router.post("/protokolle")
+def create_protokoll(body: ProtokollIn, user: dict = Depends(get_current_user)):
+    """A new handover — pre-filled with rooms and keys, so the landlord never faces an empty
+    page while standing in a cold flat."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == body.tenancy_id,
+                                         ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
+        try:
+            draft = _prot.neues_protokoll(body.art, _pdate(body.datum), body.raeume)
+        except _prot.ProtokollError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        # Einzug defaults to the move-in date, Auszug to the move-out date
+        datum = _pdate(body.datum) or (t.von if body.art == "einzug" else t.bis) or date.today()
+        p = ImmoProtokoll(user_id=uid, tenancy_id=t.id, unit_id=t.unit_id, art=draft["art"],
+                          datum=datum, status=_prot.STATUS_ENTWURF,
+                          raeume=_prot.dumps(draft["raeume"]),
+                          schluessel=_prot.dumps(draft["schluessel"]),
+                          personen=_prot.dumps({"vermieter": "", "mieter": t.mieter_name, "zeugen": []}))
+        db.add(p); db.commit(); db.refresh(p)
+        return {"success": True, **_prot_dict(db, uid, p)}
+    finally:
+        db.close()
+
+
+@router.get("/protokolle")
+def list_protokolle(tenancy_id: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        q = db.query(ImmoProtokoll).filter(ImmoProtokoll.user_id == uid, _notdel(ImmoProtokoll))
+        if tenancy_id:
+            q = q.filter(ImmoProtokoll.tenancy_id == tenancy_id)
+        rows = q.order_by(ImmoProtokoll.datum.desc(), ImmoProtokoll.id.desc()).all()
+        return {"protokolle": [_prot_dict(db, uid, p, with_details=False) for p in rows]}
+    finally:
+        db.close()
+
+
+@router.get("/protokolle/{pid}")
+def get_protokoll(pid: int, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        return _prot_dict(db, uid, _own_protokoll(db, uid, pid))
+    finally:
+        db.close()
+
+
+@router.patch("/protokolle/{pid}")
+def update_protokoll(pid: int, body: ProtokollPatch, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        p = _own_protokoll(db, uid, pid)
+        _prot_editable(p)                       # LAW: a signed protocol is a document
+        try:
+            if body.raeume is not None:
+                p.raeume = _prot.dumps(_prot.normalize_raeume(body.raeume))
+            if body.schluessel is not None:
+                p.schluessel = _prot.dumps(_prot.normalize_schluessel(body.schluessel))
+        except _prot.ProtokollError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if body.personen is not None:
+            p.personen = _prot.dumps(body.personen)
+        if body.datum is not None:
+            p.datum = _pdate(body.datum)
+        if body.notiz is not None:
+            p.notiz = body.notiz[:2000]
+        db.commit(); db.refresh(p)
+        return {"success": True, **_prot_dict(db, uid, p)}
+    finally:
+        db.close()
+
+
+@router.post("/protokolle/{pid}/unterschrift")
+def sign_protokoll(pid: int, body: UnterschriftIn, user: dict = Depends(get_current_user)):
+    """One party signs (finger on the phone). Signing does not lock — abschliessen does."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        p = _own_protokoll(db, uid, pid)
+        _prot_editable(p)
+        if not _prot._is_png_dataurl(body.png):
+            raise HTTPException(status_code=400, detail="Unterschrift fehlt oder ist leer.")
+        if body.rolle == "vermieter":
+            p.unterschrift_vermieter = body.png
+        elif body.rolle == "mieter":
+            p.unterschrift_mieter = body.png
+        else:
+            raise HTTPException(status_code=400, detail="rolle: vermieter | mieter")
+        db.commit(); db.refresh(p)
+        return {"success": True, **_prot_dict(db, uid, p, with_details=False)}
+    finally:
+        db.close()
+
+
+@router.post("/protokolle/{pid}/abschliessen")
+def close_protokoll(pid: int, user: dict = Depends(get_current_user)):
+    """Both signatures → the protocol becomes a DOCUMENT and can never be edited again."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        p = _own_protokoll(db, uid, pid)
+        _prot_editable(p)
+        try:
+            _prot.require_signatures(p.unterschrift_vermieter, p.unterschrift_mieter)
+        except _prot.ProtokollError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        p.status = _prot.STATUS_ABGESCHLOSSEN
+        p.unterschrift_datum = date.today()
+        p.abgeschlossen_am = datetime.now(timezone.utc)
+        db.commit(); db.refresh(p)
+        return {"success": True, **_prot_dict(db, uid, p)}
+    finally:
+        db.close()
+
+
+@router.delete("/protokolle/{pid}")
+def delete_protokoll(pid: int, user: dict = Depends(get_current_user)):
+    """Only a DRAFT may be deleted. A completed handover is evidence — it stays."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        p = _own_protokoll(db, uid, pid)
+        _prot_editable(p)
+        p.is_deleted = True
+        p.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"success": True}
+    finally:
+        db.close()
+
+
+# ── photos (phone camera → downscaled → disk) ────────────────────────
+
+
+def _downscale(content: bytes, max_px: int = MAX_FOTO_PX) -> tuple:
+    """A phone photo is 4-8 MB; 15 of them per handover would bloat the PDF and the disk.
+    Downscale to max_px on the long edge. On any failure keep the original — losing the photo
+    would be worse than storing a big one."""
+    try:
+        from io import BytesIO
+
+        from PIL import Image, ImageOps
+        im = Image.open(BytesIO(content))
+        im = ImageOps.exif_transpose(im)                  # honour the phone's rotation
+        if max(im.size) > max_px:
+            im.thumbnail((max_px, max_px))
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        buf = BytesIO()
+        im.save(buf, format="JPEG", quality=82, optimize=True)
+        return buf.getvalue(), "image/jpeg"
+    except Exception as e:                                 # noqa: BLE001
+        logger.warning("protokoll foto downscale failed, keeping original: %s", e)
+        return content, "image/jpeg"
+
+
+@router.post("/protokolle/{pid}/foto")
+async def upload_protokoll_foto(pid: int, raum: str = Form(""), file: UploadFile = File(...),
+                                user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Datei leer")
+    db = SessionLocal()
+    try:
+        p = _own_protokoll(db, uid, pid)
+        _prot_editable(p)
+        n = (db.query(ImmoDocument)
+             .filter(ImmoDocument.protokoll_id == pid, ImmoDocument.user_id == uid,
+                     _notdel(ImmoDocument)).count())
+        if n >= _prot.MAX_FOTOS:
+            raise HTTPException(status_code=400,
+                                detail="Maximal %d Fotos pro Protokoll." % _prot.MAX_FOTOS)
+        u = db.query(ImmoUnit).filter(ImmoUnit.id == p.unit_id).first()
+        if not u:
+            raise HTTPException(status_code=400, detail="Einheit nicht gefunden")
+        small, ctype = _downscale(content)
+        rel = storage.save_file(uid, small, (file.filename or "foto.jpg"))
+        d = ImmoDocument(property_id=u.property_id, user_id=uid, typ="other",
+                         filename=(file.filename or "foto.jpg"), file_path=rel,
+                         file_content_type=ctype, protokoll_id=pid, raum=(raum or "")[:80])
+        db.add(d); db.commit(); db.refresh(d)
+        return {"success": True, "id": d.id, "raum": d.raum,
+                "url": "/immo/documents/%d/download" % d.id,
+                "bytes_original": len(content), "bytes_gespeichert": len(small)}
+    finally:
+        db.close()
+
+
+@router.delete("/protokolle/{pid}/foto/{did}")
+def delete_protokoll_foto(pid: int, did: int, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        p = _own_protokoll(db, uid, pid)
+        _prot_editable(p)
+        d = (db.query(ImmoDocument)
+             .filter(ImmoDocument.id == did, ImmoDocument.user_id == uid,
+                     ImmoDocument.protokoll_id == pid, _notdel(ImmoDocument)).first())
+        if not d:
+            raise HTTPException(status_code=404, detail="Foto nicht gefunden")
+        d.is_deleted = True
+        d.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"success": True}
+    finally:
+        db.close()
+
+
+# ── Zählerstände (Masterplan #7 — history + consumption, also without a protocol) ──
+
+
+@router.post("/zaehler")
+def create_zaehler(body: ZaehlerIn, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        u = _own_unit(db, uid, body.unit_id)
+        try:
+            stand = _prot.validate_stand(body.art, body.stand)
+            einheit = _prot.zaehler_einheit(body.art)
+        except _prot.ProtokollError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if body.protokoll_id:
+            p = _own_protokoll(db, uid, body.protokoll_id)
+            _prot_editable(p)
+        z = ImmoZaehlerstand(user_id=uid, unit_id=u.id, protokoll_id=body.protokoll_id,
+                             art=body.art, zaehler_nr=(body.zaehler_nr or "")[:60] or None,
+                             stand=stand, einheit=einheit,
+                             datum=_pdate(body.datum) or date.today(),
+                             notiz=(body.notiz or "")[:300] or None)
+        db.add(z); db.commit(); db.refresh(z)
+        return {"success": True, **_zaehler_dict(z)}
+    finally:
+        db.close()
+
+
+@router.get("/units/{uid_}/zaehler")
+def list_zaehler(uid_: int, user: dict = Depends(get_current_user)):
+    """History per meter type + consumption between readings (Masterplan #7: chart)."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        _own_unit(db, uid, uid_)
+        rows = (db.query(ImmoZaehlerstand)
+                .filter(ImmoZaehlerstand.unit_id == uid_, ImmoZaehlerstand.user_id == uid,
+                        _notdel(ImmoZaehlerstand))
+                .order_by(ImmoZaehlerstand.datum, ImmoZaehlerstand.id).all())
+        out = {}
+        for art in _prot.ZAEHLER_ARTEN:
+            series = [{"id": z.id, "datum": z.datum, "stand": z.stand, "zaehler_nr": z.zaehler_nr}
+                      for z in rows if z.art == art]
+            v = _prot.verbrauch(series)
+            out[art] = {
+                "label": _prot.ZAEHLER_LABEL[art], "einheit": _prot.ZAEHLER_ARTEN[art],
+                "messungen": [{"id": x["id"], "datum": str(x["datum"]), "stand": x["stand"],
+                               "zaehler_nr": x["zaehler_nr"] or "", "verbrauch": x["verbrauch"],
+                               "hinweis": x["hinweis"]} for x in v],
+                "letzter_stand": (v[-1]["stand"] if v else None),
+            }
+        return {"unit_id": uid_, "zaehler": out}
+    finally:
+        db.close()
+
+
+@router.delete("/zaehler/{zid}")
+def delete_zaehler(zid: int, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        z = (db.query(ImmoZaehlerstand)
+             .filter(ImmoZaehlerstand.id == zid, ImmoZaehlerstand.user_id == uid,
+                     _notdel(ImmoZaehlerstand)).first())
+        if not z:
+            raise HTTPException(status_code=404, detail="Zählerstand nicht gefunden")
+        if z.protokoll_id:
+            p = _own_protokoll(db, uid, z.protokoll_id)
+            _prot_editable(p)              # a reading inside a signed protocol is evidence
+        z.is_deleted = True
+        z.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"success": True}
+    finally:
+        db.close()
+
+
+# ── the PDF: the document the landlord actually hands over ────────────
+
+
+def _sig_image(dataurl: str, w: float, h: float):
+    """A canvas signature (PNG data-URL) → a reportlab Image."""
+    from base64 import b64decode
+    from io import BytesIO
+
+    from reportlab.platypus import Image as RLImage
+    raw = b64decode(dataurl.split(";base64,", 1)[1])
+    return RLImage(BytesIO(raw), width=w, height=h, kind="proportional")
+
+
+def _foto_image(rel_path: str, w: float, h: float):
+    from io import BytesIO
+
+    from reportlab.platypus import Image as RLImage
+    return RLImage(BytesIO(storage.read_file(rel_path)), width=w, height=h, kind="proportional")
+
+
+@router.get("/protokolle/{pid}/pdf")
+def protokoll_pdf(pid: int, user: dict = Depends(get_current_user)):
+    """Übergabeprotokoll as a PDF: parties · rooms · meters · keys · photos · both signatures.
+
+    This is the artefact that replaces the Word template. It is generated from the stored
+    protocol, so what is signed and what is printed cannot drift apart.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table,
+                                    TableStyle)
+
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        p = _own_protokoll(db, uid, pid)
+        d = _prot_dict(db, uid, p)
+        comp = (db.query(UserCompany).filter(UserCompany.user_id == uid, UserCompany.is_default == True).first()  # noqa: E712
+                or db.query(UserCompany).filter(UserCompany.user_id == uid).order_by(UserCompany.id.desc()).first())
+        docs = {x.id: x for x in db.query(ImmoDocument).filter(
+            ImmoDocument.protokoll_id == pid, ImmoDocument.user_id == uid, _notdel(ImmoDocument)).all()}
+
+        ss = getSampleStyleSheet()
+        small = ss["Normal"].clone("small"); small.fontSize = 8.5; small.leading = 11
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=16 * mm,
+                                leftMargin=18 * mm, rightMargin=18 * mm,
+                                title="Übergabeprotokoll")
+        el = []
+        art_lbl = "Einzug" if d["art"] == "einzug" else "Auszug"
+        if comp:
+            el.append(Paragraph("<font size=8>%s%s</font>" % (
+                comp.company_name, (" · " + (comp.address or "").replace("\n", ", ")) if comp.address else ""), ss["Normal"]))
+            el.append(Spacer(1, 4 * mm))
+        el.append(Paragraph("<b>Wohnungsübergabeprotokoll (%s)</b>" % art_lbl, ss["Title"]))
+        el.append(Spacer(1, 2 * mm))
+
+        pers = d.get("personen") or {}
+        kopf = [
+            ["Objekt", d.get("property_adresse") or "—"],
+            ["Wohnung", d.get("unit_name") or "—"],
+            ["Art der Übergabe", art_lbl],
+            ["Datum", d.get("datum") or "—"],
+            ["Vermieter", pers.get("vermieter") or (comp.company_name if comp else "—")],
+            ["Mieter", pers.get("mieter") or d.get("mieter_name") or "—"],
+        ]
+        if pers.get("zeugen"):
+            kopf.append(["Zeugen", ", ".join([str(z) for z in pers["zeugen"]])])
+        t = Table(kopf, colWidths=[38 * mm, 130 * mm])
+        t.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.25, colors.HexColor("#e5e7eb")),
+        ]))
+        el.append(t)
+        el.append(Spacer(1, 5 * mm))
+
+        # ── rooms ────────────────────────────────────────────────────
+        el.append(Paragraph("<b>Zustand der Räume</b>", ss["Heading3"]))
+        rows = [["Raum", "Element", "Zustand", "Bemerkung"]]
+        for r in d.get("raeume") or []:
+            for i, e in enumerate(r.get("elemente") or []):
+                rows.append([r.get("name") if i == 0 else "",
+                             e.get("was") or "",
+                             _prot.ZUSTAND_LABEL.get(e.get("zustand"), e.get("zustand") or ""),
+                             Paragraph(e.get("notiz") or "", small)])
+            if r.get("notiz"):
+                rows.append(["", "Notiz", "", Paragraph(r["notiz"], small)])
+        tr = Table(rows, colWidths=[30 * mm, 40 * mm, 26 * mm, 72 * mm], repeatRows=1)
+        style = [
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]
+        for i, row in enumerate(rows[1:], start=1):
+            if row[2] == "beschädigt":
+                style.append(("TEXTCOLOR", (2, i), (2, i), colors.HexColor("#dc2626")))
+                style.append(("FONTNAME", (2, i), (2, i), "Helvetica-Bold"))
+        tr.setStyle(TableStyle(style))
+        el.append(tr)
+        el.append(Spacer(1, 4 * mm))
+
+        maengel = d.get("maengel") or []
+        if maengel:
+            el.append(Paragraph("<b>Festgestellte Mängel (%d)</b>" % len(maengel), ss["Heading3"]))
+            for m in maengel:
+                el.append(Paragraph("• <b>%s — %s</b>%s" % (
+                    m.get("raum") or "", m.get("was") or "",
+                    (": " + m["notiz"]) if m.get("notiz") else ""), small))
+            el.append(Spacer(1, 4 * mm))
+
+        # ── meters ───────────────────────────────────────────────────
+        el.append(Paragraph("<b>Zählerstände</b>", ss["Heading3"]))
+        zrows = [["Zähler", "Nummer", "Stand", "Einheit", "Datum"]]
+        for z in d.get("zaehler") or []:
+            zrows.append([z["art_label"], z.get("zaehler_nr") or "—",
+                          ("%.3f" % z["stand"]).rstrip("0").rstrip("."), z.get("einheit") or "",
+                          z.get("datum") or ""])
+        if len(zrows) == 1:
+            zrows.append(["—", "", "", "", ""])
+        tz = Table(zrows, colWidths=[38 * mm, 40 * mm, 30 * mm, 25 * mm, 35 * mm], repeatRows=1)
+        tz.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+        ]))
+        el.append(tz)
+        el.append(Spacer(1, 4 * mm))
+
+        # ── keys ─────────────────────────────────────────────────────
+        el.append(Paragraph("<b>Übergebene Schlüssel</b>", ss["Heading3"]))
+        krows = [["Schlüssel", "Anzahl"]]
+        for k in d.get("schluessel") or []:
+            krows.append([k.get("typ") or "", str(k.get("anzahl") or 0)])
+        if len(krows) == 1:
+            krows.append(["—", "0"])
+        tk = Table(krows, colWidths=[60 * mm, 25 * mm])
+        tk.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+        ]))
+        el.append(tk)
+
+        if d.get("notiz"):
+            el.append(Spacer(1, 4 * mm))
+            el.append(Paragraph("<b>Bemerkungen</b>", ss["Heading3"]))
+            el.append(Paragraph(d["notiz"], small))
+
+        # ── photos ───────────────────────────────────────────────────
+        fotos = d.get("fotos") or []
+        if fotos:
+            el.append(Spacer(1, 5 * mm))
+            el.append(Paragraph("<b>Fotos (%d)</b>" % len(fotos), ss["Heading3"]))
+            row, cells = [], []
+            for f in fotos:
+                doc_row = docs.get(f["id"])
+                if not doc_row or not doc_row.file_path:
+                    continue
+                try:
+                    img = _foto_image(doc_row.file_path, 52 * mm, 40 * mm)
+                except Exception as e:                       # noqa: BLE001
+                    logger.warning("protokoll pdf: foto %s unreadable: %s", f["id"], e)
+                    continue
+                cells.append([img, Paragraph("<font size=7>%s</font>" % (f.get("raum") or ""), small)])
+                if len(cells) == 3:
+                    row.append(cells); cells = []
+            if cells:
+                row.append(cells)
+            for group in row:
+                imgs = [c[0] for c in group] + [""] * (3 - len(group))
+                caps = [c[1] for c in group] + [""] * (3 - len(group))
+                tf = Table([imgs, caps], colWidths=[56 * mm] * 3)
+                tf.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+                el.append(tf)
+
+        # ── signatures ───────────────────────────────────────────────
+        el.append(Spacer(1, 8 * mm))
+        sig_cells, sig_names = [], []
+        for rolle, png, name in (("Vermieter", p.unterschrift_vermieter,
+                                  pers.get("vermieter") or (comp.company_name if comp else "")),
+                                 ("Mieter", p.unterschrift_mieter,
+                                  pers.get("mieter") or d.get("mieter_name") or "")):
+            try:
+                sig_cells.append(_sig_image(png, 60 * mm, 18 * mm) if png else Paragraph("", small))
+            except Exception:                                 # noqa: BLE001
+                sig_cells.append(Paragraph("", small))
+            sig_names.append(Paragraph("<font size=8>%s<br/>%s</font>" % (rolle, name), small))
+        datum_txt = str(p.unterschrift_datum or p.datum or "")
+        ts = Table([sig_cells,
+                    [Paragraph("<font size=7>_______________________</font>", small)] * 2,
+                    sig_names],
+                   colWidths=[85 * mm, 85 * mm])
+        ts.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+                                ("TOPPADDING", (0, 0), (-1, -1), 1)]))
+        el.append(ts)
+        el.append(Spacer(1, 3 * mm))
+        el.append(Paragraph("<font size=8 color='#6b7280'>Unterschrieben am %s%s · Erstellt mit AutoTax</font>"
+                            % (datum_txt, "" if d["gesperrt"] else " — ENTWURF, noch nicht abgeschlossen"),
+                            small))
+        doc.build(el)
+        buf.seek(0)
+        fn = "uebergabeprotokoll_%s_%s.pdf" % (art_lbl.lower(), pid)
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="%s"' % fn})
+    finally:
+        db.close()
