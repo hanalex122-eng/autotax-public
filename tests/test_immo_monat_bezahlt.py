@@ -84,8 +84,8 @@ def main():
     ok(rd.status_code == 200 and rd.json()["exception"]["typ"] == "unpaid",
        f"200 + unpaid exception (got {rd.status_code}/{rd.json().get('exception')})")
     c1 = card(cl)
-    ok(c1["this_month_status"] == "open" and c1["offene_forderung"] == 500 and c1["debtor"] is True,
-       f"open + offene 500 + debtor (got {c1['this_month_status']}/{c1['offene_forderung']})")
+    ok(c1["this_month_status"] == "open" and c1["offene_forderung"] == 540 and c1["debtor"] is True,
+       f"open + offene 540 (Warmmiete) + debtor (got {c1['this_month_status']}/{c1['offene_forderung']})")
 
     print("\n[Ödendi] POST → clear the exception → paid + offene 0")
     r = cl.post("/immo/tenancies/101/monat-bezahlt", json={"jahr": 2026, "monat": 6})
@@ -105,7 +105,7 @@ def main():
     cl.post("/immo/tenancies/101/monat-bezahlt", json={"jahr": 2026, "monat": 6, "betrag": 200})
     c3 = card(cl)
     ok(c3["this_month_status"] == "partial", f"partial (got {c3['this_month_status']})")
-    ok(c3["offene_forderung"] == 300, f"offene 300 (got {c3['offene_forderung']})")
+    ok(c3["offene_forderung"] == 340, f"offene 340 (got {c3['offene_forderung']})")
 
     print(f"\n=== Step 4 Ödendi/Ödenmedi: {PASS} passed, {FAIL} failed ===")
     sys.exit(1 if FAIL else 0)

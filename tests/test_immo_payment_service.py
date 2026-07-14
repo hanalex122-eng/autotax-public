@@ -166,7 +166,7 @@ eq("paying the agreed first rent settles it", s.open_debt(UID, t, TODAY).total, 
 
 s, t = svc(FakeTenancy(miete_historie='[{"ab":"2026-05-01","kalt":450}]'))
 s.mark_unpaid(UID, TID, 2026, 6)
-eq("Mieterhöhung applies to June", s.open_debt(UID, t, TODAY).total, 450.0)
+eq("Mieterhöhung applies to June (450 Kalt + 70 NK)", s.open_debt(UID, t, TODAY).total, 520.0)
 
 print("\n=== 13. Guards ===")
 s, t = svc(FakeTenancy())

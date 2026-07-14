@@ -91,18 +91,39 @@ def effective_kalt(t, y: int, m: int) -> float:
 
 
 def monat_soll(t, y: int, m: int) -> float:
-    """Soll für EINEN Monat: vereinbarte Erstmiete (erstmonat_betrag) im Einzugsmonat
-    falls gesetzt; sonst effektive Kaltmiete × Tagesanteil (anteilig).
+    """Soll für EINEN Monat = WARMMIETE: (Kaltmiete + NK-Vorauszahlung) × Tagesanteil.
 
-    NOTE (Sprint 0, commit 1): behaviour is IDENTICAL to the previous
-    immo_api._monat_soll — Nebenkosten are not part of the Soll yet. Adding the
-    pro-rated NK-Vorauszahlung is commit 2 (defect A3), together with its tests and
-    a backfill dry-run, because it changes existing debt figures.
+    Commit 2 (defect A3): the NK-Vorauszahlung is part of what the tenant owes every
+    month. Before, the Soll was Kalt-only, so the debt — and the Mahnung amount — were
+    short by the NK every single month (tenant card said "Gesamt 470", Bu Ay said
+    "offen 400", the Mahnung dunned for 400). It is also the precondition for the
+    Nebenkostenabrechnung (Masterplan #8): you cannot settle Vorauszahlungen you never
+    tracked as owed.
+
+    Exception: `erstmonat_betrag` (vereinbarte Erstmiete) is a GROSS agreed amount for
+    the move-in month — NK is not added on top of it.
     """
     em = getattr(t, "erstmonat_betrag", None)
     if em is not None and t.von and t.von.year == y and t.von.month == m:
         return round(float(em), 2)
+    warm = effective_kalt(t, y, m) + float(getattr(t, "nk_voraus", 0) or 0)
+    return round(warm * month_proration(t, y, m), 2)
+
+
+def monat_kalt_soll(t, y: int, m: int) -> float:
+    """Kalt-only Soll — for reports that must split Kaltmiete from Nebenkosten
+    (Anlage V, Nebenkostenabrechnung). NOT a debt figure: debt is always monat_soll."""
+    em = getattr(t, "erstmonat_betrag", None)
+    if em is not None and t.von and t.von.year == y and t.von.month == m:
+        nk = float(getattr(t, "nk_voraus", 0) or 0) * month_proration(t, y, m)
+        return round(max(0.0, float(em) - nk), 2)
     return round(effective_kalt(t, y, m) * month_proration(t, y, m), 2)
+
+
+def monat_nk_soll(t, y: int, m: int) -> float:
+    """NK-Vorauszahlung owed for one month (pro-rated) — the basis of the future
+    Nebenkostenabrechnung (Masterplan #8)."""
+    return round(monat_soll(t, y, m) - monat_kalt_soll(t, y, m), 2)
 
 
 def soll_faellig(t, y: int, as_of: Optional[date] = None) -> float:
@@ -216,3 +237,25 @@ def exception_arrears(t, year: int, as_of: Optional[date] = None) -> float:
     last = 12 if year < as_of.year else (as_of.month if year == as_of.year else 0)
     total = sum(month_open(t, year, m) for m in range(1, last + 1))
     return round(max(0.0, total), 2)
+
+
+# ── income (Ist) — DERIVED, never summed from payment rows ────────────
+#
+# Commit 2 (defect B2): the reports used to sum immo_rent rows, which the Exception
+# Engine never creates → income was always 0, Gewinn was negative, the income chart was
+# a flat line and the portfolio score was red. Income is not a second book: it is what
+# was owed minus what is still open.
+
+
+def month_ist(t, y: int, m: int, as_of: Optional[date] = None) -> float:
+    """Rent effectively received in ONE month = Soll − offen. Future/inactive → 0."""
+    as_of = as_of or date.today()
+    if not tenancy_active_in_month(t, y, m):
+        return 0.0
+    if (y, m) > (as_of.year, as_of.month):          # not due yet → no income claimed
+        return 0.0
+    return round(max(0.0, monat_soll(t, y, m) - month_open(t, y, m)), 2)
+
+
+def year_ist(t, y: int, as_of: Optional[date] = None) -> float:
+    return round(sum(month_ist(t, y, m, as_of) for m in range(1, 13)), 2)

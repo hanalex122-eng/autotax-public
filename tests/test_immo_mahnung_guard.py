@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 
 from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoMahnung
 from autotax import immo_api
+from autotax import immo_payments as _pay
 from autotax.auth import get_current_user
 
 PASS, FAIL = 0, 0
@@ -54,13 +55,13 @@ def main():
 
     print("\n[2] 7 Monate (Jun-Dez) als unbezahlt melden → 7×800 = 5600")
     for mo in range(6, 13):
-        immo_api._set_problem(t(), 2025, mo, "unpaid")
+        _pay.sql_service(db).report_problem(1, t().id, 2025, mo, "unpaid")
     db.commit()
     ok(immo_api._mahnung_betrag(db, 1, t(), 2025) == 5600.0, f"betrag = 5600 — got {immo_api._mahnung_betrag(db,1,t(),2025)}")
     ok(immo_api._mahnung_betrag(db, 1, t(), 2025) == immo_api._exception_arrears(t(), 2025), "betrag == exception arrears")
 
     print("\n[3] Juni auf Teilzahlung (300 offen) → 4800 + 300 = 5100")
-    immo_api._set_problem(t(), 2025, 6, "partial", offen=300)
+    _pay.sql_service(db).report_problem(1, t().id, 2025, 6, "partial", offen=300)
     db.commit()
     ok(immo_api._mahnung_betrag(db, 1, t(), 2025) == 5100.0, f"betrag = 5100 — got {immo_api._mahnung_betrag(db,1,t(),2025)}")
 
@@ -75,7 +76,7 @@ def main():
 
     print("\n[5] Alle Probleme gelöst → Mahnungsbetrag 0")
     for mo in range(6, 13):
-        immo_api._clear_problem(t(), 2025, mo)
+        _pay.sql_service(db).mark_paid(1, t().id, 2025, mo)
     db.commit()
     ok(immo_api._mahnung_betrag(db, 1, t(), 2025) == 0, f"betrag = 0 (alle OK) — got {immo_api._mahnung_betrag(db,1,t(),2025)}")
     db.close()

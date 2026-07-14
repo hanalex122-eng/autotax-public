@@ -21,6 +21,7 @@ from sqlalchemy.pool import StaticPool
 
 from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy
 from autotax import immo_api
+from autotax import immo_payments as _pay
 
 
 class _FakeDate(date):
@@ -32,7 +33,7 @@ class _FakeDate(date):
 immo_api.date = _FakeDate
 
 PASS = FAIL = 0
-JUNE_SOLL = round(470 * 16 / 30, 2)  # 15.06 Einzug → 16/30 ≈ 250.67
+JUNE_SOLL = round((470 + 70) * 16 / 30, 2)  # Warmmiete 540 × 16/30 = 288.00 (commit 2: NK is part of the Soll)
 
 
 def ok(c, m):
@@ -60,9 +61,9 @@ def build(exc):
     db.commit()
     t = db.query(ImmoTenancy).get(101)
     if exc == "unpaid":
-        immo_api._set_problem(t, 2026, 6, "unpaid")
+        _pay.sql_service(db).report_problem(1, t.id, 2026, 6, "unpaid")
     elif exc is not None:
-        immo_api._set_problem(t, 2026, 6, "partial", offen=exc)
+        _pay.sql_service(db).report_problem(1, t.id, 2026, 6, "partial", offen=exc)
     db.commit()
     return db
 
@@ -85,7 +86,7 @@ def main():
 
     print("[A] Kein Problem gemeldet → Rückstand 0 überall (0 Eingaben)")
     s = four_surfaces(build(None))
-    ok(eq(s["_soll"], JUNE_SOLL), f"Soll anteilig = {JUNE_SOLL} (nicht 470) — got {s['_soll']}")
+    ok(eq(s["_soll"], JUNE_SOLL), f"Soll anteilig = {JUNE_SOLL} (Warmmiete, nicht 540) — got {s['_soll']}")
     for k in ("Übersicht", "Mietkonto", "Mieter", "Mahnung"):
         ok(eq(s[k], 0), f"{k} = 0 — got {s[k]}")
 

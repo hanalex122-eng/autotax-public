@@ -31,6 +31,7 @@ from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent
 from autotax import immo_ledger as L
 from autotax import immo_source as S
 from autotax import immo_api
+from autotax import immo_payments as _pay
 
 PASS, FAIL = 0, 0
 
@@ -85,8 +86,8 @@ def main():
     # EXCEPTION ENGINE user-facing debt: report ONLY T102 (4900) and T103 (9000) as
     # problems → user total 13900, 2 debtors. T105/T101 have NO problem reported →
     # user debt 0 EVEN THOUGH immo_rent (the audit domain) shows 3200 / overpaid.
-    immo_api._set_problem(t102, 2025, 1, "partial", offen=4900.0)
-    immo_api._set_problem(t103, 2025, 1, "partial", offen=9000.0)
+    _pay.sql_service(db).report_problem(1, t102.id, 2025, 1, "partial", offen=4900.0)
+    _pay.sql_service(db).report_problem(1, t103.id, 2025, 1, "partial", offen=9000.0)
     db.commit()
 
     print("\n[1] flag OFF (live path) → EXCEPTION debt (reported problems only)")

@@ -78,11 +78,11 @@ def main():
     print("\n[2] Juni als UNBEZAHLT melden → Schuld = 400]")
     cl.delete("/immo/tenancies/101/monat-bezahlt", params={"jahr": 2026, "monat": 6})
     db.refresh(t())
-    ok(immo_api._exception_arrears(t(), 2026) == 400, f"Schuld = 400 (volle Monatsmiete) — got {immo_api._exception_arrears(t(),2026)}")
+    ok(immo_api._exception_arrears(t(), 2026) == 470, f"Schuld = 470 (volle Warmmiete) — got {immo_api._exception_arrears(t(),2026)}")
     mk = cl.get("/immo/tenancies/101/mietkonto?year=2026").json()
     jun = [r for r in mk["rows"] if r["monat"] == 6][0]
     ok(jun["status"] == "open", f"Mietkonto Juni status=open — got {jun['status']}")
-    ok(mk["summe"]["offen"] == 400, f"Mietkonto offen=400 — got {mk['summe']['offen']}")
+    ok(mk["summe"]["offen"] == 470, f"Mietkonto offen=470 — got {mk['summe']['offen']}")
 
     print("\n[3] Juni als BEZAHLT markieren (Problem löschen) → Schuld 0]")
     cl.post("/immo/tenancies/101/monat-bezahlt", json={"jahr": 2026, "monat": 6})
@@ -92,14 +92,14 @@ def main():
     print("\n[4] Juni TEILZAHLUNG: 280 von 400 → Schuld 120]")
     cl.post("/immo/tenancies/101/monat-bezahlt", json={"jahr": 2026, "monat": 6, "betrag": 280})
     db.refresh(t())
-    ok(immo_api._exception_arrears(t(), 2026) == 120, f"Schuld = 120 (offen) — got {immo_api._exception_arrears(t(),2026)}")
+    ok(immo_api._exception_arrears(t(), 2026) == 190, f"Schuld = 190 (offen von 470) — got {immo_api._exception_arrears(t(),2026)}")
     mk = cl.get("/immo/tenancies/101/mietkonto?year=2026").json()
     jun = [r for r in mk["rows"] if r["monat"] == 6][0]
     ok(jun["status"] == "partial", f"Mietkonto Juni status=partial — got {jun['status']}")
 
     print("\n[5] Zukunft (Juli) zählt nie als Schuld]")
     ok(immo_api._exc_for(t(), 2026, 7) is None, "Juli keine Ausnahme")
-    ok(immo_api._exception_arrears(t(), 2026) == 120, "nur Juni-Teil (120), Juli nicht fällig")
+    ok(immo_api._exception_arrears(t(), 2026) == 190, "nur Juni-Teil (190), Juli nicht fällig")
 
     print(f"\n=== EXCEPTION ENGINE: {PASS} passed, {FAIL} failed ===")
     sys.exit(1 if FAIL else 0)

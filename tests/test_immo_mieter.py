@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent
 from autotax import immo_api
+from autotax import immo_payments as _pay
 from autotax.auth import get_current_user
 
 TODAY = date(2026, 6, 23)
@@ -70,7 +71,7 @@ def main():
                        von=date(2026, 6, 1), bis=None, kaltmiete=500, nk_voraus=40))
     db.commit()
     t102 = db.query(ImmoTenancy).get(102)
-    immo_api._set_problem(t102, 2026, 6, "unpaid")
+    _pay.sql_service(db).report_problem(1, t102.id, 2026, 6, "unpaid")
     db.commit(); db.close()
 
     immo_api.SessionLocal = S
@@ -99,7 +100,7 @@ def main():
 
     print("\n[TEN 102 — unpaid, debtor]")
     ok(b["gesamtmiete"] == 540, "gesamtmiete = 540 (500+40)")
-    ok(b["offene_forderung"] == 500 and b["debtor"] is True, f"offene 500 + debtor True (got {b['offene_forderung']})")
+    ok(b["offene_forderung"] == 540 and b["debtor"] is True, f"offene 540 (Warmmiete 500+40) + debtor True (got {b['offene_forderung']})")
     ok(b["this_month_status"] == "open", f"this_month_status open (got {b['this_month_status']})")
     ok(b["last_payment_date"] is None, "last_payment_date None")
 

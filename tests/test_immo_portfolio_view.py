@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent
 from autotax import immo_ledger as L
 from autotax import immo_api
+from autotax import immo_payments as _pay
 from autotax.auth import get_current_user
 
 PASS, FAIL = 0, 0
@@ -77,7 +78,7 @@ def seed(db, backfill=True):
     # an active, due month (Jan 2025). Total 18300, 4 debtors; T101 stays OK (0).
     for tid, debt in [(102, 4900.0), (103, 9000.0), (104, 1200.0), (105, 3200.0)]:
         t = db.query(ImmoTenancy).get(tid)
-        immo_api._set_problem(t, 2025, 1, "partial", offen=debt)
+        _pay.sql_service(db).report_problem(1, t.id, 2025, 1, "partial", offen=debt)
     db.commit()
     if backfill:
         L.run_backfill(db, 1, dry_run=False)

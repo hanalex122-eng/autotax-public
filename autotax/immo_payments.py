@@ -156,6 +156,36 @@ class PaymentService:
         out["deleted"] = payment_id
         return out
 
+    def update_payment(self, user_id: int, payment_id: int, *, betrag: Optional[float] = None,
+                       datum: Optional[date] = None, jahr: Optional[int] = None,
+                       monat: Optional[int] = None, notiz: Optional[str] = None) -> dict:
+        """Correct a payment = replace it (remove + re-enter), then reconcile BOTH the
+        old and the new rent month. A correction must never leave the old month settled
+        by money that no longer exists."""
+        old = self.payments.get(user_id, payment_id)
+        if not old:
+            raise PaymentError("Zahlung nicht gefunden")
+        new_jahr = int(jahr) if jahr else old.fuer_jahr
+        new_monat = int(monat) if monat else old.fuer_monat
+        self._require_month(new_jahr, new_monat)
+        new_betrag = self._money(betrag) if betrag is not None else old.betrag
+        if new_betrag <= 0:
+            raise PaymentError("Betrag muss größer als 0 sein")
+        self.payments.soft_delete(user_id, payment_id)
+        rec = self.payments.add(PaymentRecord(
+            tenancy_id=old.tenancy_id, user_id=user_id, betrag=new_betrag,
+            fuer_jahr=new_jahr, fuer_monat=new_monat,
+            datum=datum or old.datum, property_id=old.property_id, source=old.source,
+            notiz=notiz if notiz is not None else old.notiz,
+        ))
+        t = self.tenancies.get(user_id, old.tenancy_id) if old.tenancy_id else None
+        if t is None:
+            return {"success": True, "payment_id": rec.id}
+        if old.fuer_jahr and old.fuer_monat and (old.fuer_jahr, old.fuer_monat) != (new_jahr, new_monat):
+            self.reconcile_month(user_id, t, old.fuer_jahr, old.fuer_monat)   # the month it left
+        exc = self.reconcile_month(user_id, t, new_jahr, new_monat)           # the month it landed in
+        return self._result(user_id, t, new_jahr, new_monat, exc, payment_id=rec.id, betrag=new_betrag)
+
     def mark_paid(self, user_id: int, tenancy_id: int, jahr: int, monat: int) -> dict:
         """"Bezahlt" button — the landlord reports: no problem in this month."""
         t = self._require_tenancy(user_id, tenancy_id)
@@ -169,6 +199,28 @@ class PaymentService:
         t = self._require_tenancy(user_id, tenancy_id)
         self._require_month(jahr, monat)
         self._write_exception(t, jahr, monat, "unpaid", flag={"typ": "unpaid"})
+        self.tenancies.save(t)
+        return self._result(user_id, t, jahr, monat, rules.exc_for(t, jahr, monat))
+
+    def report_problem(self, user_id: int, tenancy_id: int, jahr: int, monat: int,
+                       typ: str, offen: Optional[float] = None) -> dict:
+        """The landlord reports a problem directly: 'unpaid', or 'partial' with a known
+        open amount (e.g. imported from an old system). Same law — the service writes,
+        nobody else. mark_unpaid/mark_partial are the friendly UI wrappers around it."""
+        t = self._require_tenancy(user_id, tenancy_id)
+        self._require_month(jahr, monat)
+        if typ == "partial":
+            # NOT clamped to the month's Soll on purpose: an imported/carried-over open
+            # amount may legitimately exceed one month's rent. Silently shrinking a debt
+            # is worse than showing an unusual one.
+            off = self._money(offen or 0)
+            if off <= 0:
+                self._clear_exception(t, jahr, monat)
+            else:
+                self._write_exception(t, jahr, monat, "partial", offen=off,
+                                      flag={"typ": "partial", "offen": off})
+        else:
+            self._write_exception(t, jahr, monat, "unpaid", flag={"typ": "unpaid"})
         self.tenancies.save(t)
         return self._result(user_id, t, jahr, monat, rules.exc_for(t, jahr, monat))
 

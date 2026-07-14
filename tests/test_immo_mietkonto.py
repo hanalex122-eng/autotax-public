@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from autotax.models import Base, ImmoProperty, ImmoUnit, ImmoTenancy, ImmoRent
 from autotax import immo_api
+from autotax import immo_payments as _pay
 from autotax.auth import get_current_user
 
 
@@ -61,8 +62,8 @@ def main():
     db.commit()
     t = db.query(ImmoTenancy).get(101)
     # April: no problem reported → default OK (paid). May+June reported UNBEZAHLT.
-    immo_api._set_problem(t, 2026, 5, "unpaid")
-    immo_api._set_problem(t, 2026, 6, "unpaid")
+    _pay.sql_service(db).report_problem(1, t.id, 2026, 5, "unpaid")
+    _pay.sql_service(db).report_problem(1, t.id, 2026, 6, "unpaid")
     db.commit(); db.close()
 
     immo_api.SessionLocal = S

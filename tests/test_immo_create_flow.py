@@ -78,11 +78,11 @@ def main():
     ok(m is not None and m["gesamtmiete"] == 540, "Gesamt = 540 (470+70)")
     ok(m["offene_forderung"] == 0, f"offen = 0 (kein Problem gemeldet, 0 Eingaben) — got {m['offene_forderung']}")
 
-    print("[5] Juni als UNBEZAHLT melden → Rückstand = anteilig ~250.67")
+    print("[5] Juni als UNBEZAHLT melden → Rückstand = anteilig Warmmiete ~288.00")
     cl.delete(f"/immo/tenancies/{tid}/monat-bezahlt", params={"jahr": 2026, "monat": 6})
     acc = cl.get(f"/immo/properties/{pid}/accounting?year=2026").json()
     tr = acc["tenancies"][0]
-    ok(abs(tr["rueckstand"] - round(470 * 16 / 30, 2)) < 0.02, f"Rückstand = anteilig Juni ~250.67 — got {tr['rueckstand']}")
+    ok(abs(tr["rueckstand"] - round((470 + 70) * 16 / 30, 2)) < 0.02, f"Rückstand = anteilig Juni Warmmiete ~288.00 — got {tr['rueckstand']}")
 
     print("[6] Juni als BEZAHLT markieren → Rückstand 0")
     cl.post(f"/immo/tenancies/{tid}/monat-bezahlt", json={"jahr": 2026, "monat": 6})

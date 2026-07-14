@@ -24,6 +24,7 @@ from sqlalchemy import or_
 
 from autotax import storage
 from autotax import immo_rules as _rules
+from autotax import immo_payments as _pay
 from autotax import immo_ledger as _ledger
 from autotax import immo_ledger_read as _read
 from autotax import immo_source as _src
@@ -137,9 +138,11 @@ class RentIn(BaseModel):
     property_id: int
     tenant_id: Optional[int] = None
     tenancy_id: Optional[int] = None
-    datum: Optional[str] = None
+    datum: Optional[str] = None              # Wertstellung (when the money arrived)
     betrag: float = 0.0
     notiz: Optional[str] = None
+    fuer_jahr: Optional[int] = None          # WHICH rent month this settles;
+    fuer_monat: Optional[int] = None         # defaults to the month of `datum`
 
 
 class RentPatch(BaseModel):
@@ -148,6 +151,8 @@ class RentPatch(BaseModel):
     datum: Optional[str] = None
     betrag: Optional[float] = None
     notiz: Optional[str] = None
+    fuer_jahr: Optional[int] = None
+    fuer_monat: Optional[int] = None
 
 
 class ExpenseIn(BaseModel):
@@ -194,13 +199,15 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
         tncs = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).all()
         units = {u.id: u for u in db.query(ImmoUnit).filter(ImmoUnit.user_id == uid, _notdel(ImmoUnit)).all()}
         props = {p.id: p for p in db.query(ImmoProperty).filter(ImmoProperty.user_id == uid, _notdel(ImmoProperty)).all()}
+        svc = _pay.sql_service(db)
         out = []
         for t in tncs:
             u = units.get(t.unit_id)
             p = props.get(u.property_id) if u else None
             kalt = _effective_kalt(t, now.year, now.month)   # güncel kira (Mieterhöhung sonrası)
             nk = float(t.nk_voraus or 0)
-            offen = _tenancy_arrears(db, uid, t, y)
+            debt = svc.open_debt(uid, t, now)                # ALL open months, ALL years
+            offen = debt.total
             # last payment (immo_rent = payment source of truth)
             lp_row = db.query(ImmoRent.datum).filter(ImmoRent.tenancy_id == t.id, ImmoRent.user_id == uid,
                                                      ImmoRent.datum != None).order_by(ImmoRent.datum.desc()).first()  # noqa: E711
@@ -208,13 +215,14 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
             # this-month status + open amount (current calendar month) — EXCEPTION ENGINE
             tm = None; tm_offen = 0.0
             if y == now.year and _tenancy_active_in_month(t, now.year, now.month):
-                exc = _exc_for(t, now.year, now.month)
-                if not exc:
+                tm_offen = _rules.month_open(t, now.year, now.month)   # single derivation
+                soll_m = _monat_soll(t, now.year, now.month)
+                if tm_offen <= 0:
                     tm = "paid"
-                elif exc.get("typ") == "partial":
-                    tm = "partial"; tm_offen = round(float(exc.get("offen") or 0), 2)
+                elif tm_offen < soll_m - 0.01:
+                    tm = "partial"
                 else:
-                    tm = "open"; tm_offen = _monat_soll(t, now.year, now.month)
+                    tm = "open"
             out.append({
                 "tenancy_id": t.id, "mieter_name": t.mieter_name,
                 "property_name": (p.name if p else None), "property_address": (p.adresse if p else None),
@@ -223,6 +231,9 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "gesamtmiete": round(kalt + nk, 2),
                 "einzug": str(t.von) if t.von else None, "auszug": str(t.bis) if t.bis else None,
                 "offene_forderung": offen, "debtor": offen > 0,
+                # every open month, oldest first — so "Bu Ay" can stop lying with
+                # "✅ alles bezahlt" while March/April/last December are still unpaid
+                "rueckstand_monate": [{"ym": m.ym, "offen": m.offen, "typ": m.typ} for m in debt.months],
                 "this_month_status": tm, "this_month_offen": round(tm_offen, 2), "last_payment_date": last_payment,
                 "telefon": getattr(t, "telefon", None), "email": getattr(t, "email", None),
                 "kaution": (round(float(t.kaution), 2) if t.kaution is not None else None),
@@ -248,41 +259,37 @@ class MonatBezahltIn(BaseModel):
 
 @router.post("/tenancies/{tid}/monat-bezahlt")
 def mark_monat_bezahlt(tid: int, body: MonatBezahltIn, user: dict = Depends(get_current_user)):
-    """EXCEPTION ENGINE 'Ödendi / kein Problem' — clears the month's exception (default
-    OK). If a partial amount BELOW the month's Soll is given, records a PARTIAL
-    exception (offen = Soll − betrag). No payment row is created — the model is
-    'no problem reported', not 'money asserted received'."""
+    """'Bezahlt / kein Problem' — Payment Service. A partial amount below the month's
+    Soll is reported as a PARTIAL problem (offen = Soll − betrag)."""
     uid = _uid(user)
     db = SessionLocal()
     try:
-        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid, _notdel(ImmoTenancy)).first()
-        if not t:
-            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
-        soll_m = _monat_soll(t, body.jahr, body.monat)
-        if body.betrag is not None and round(float(body.betrag), 2) < round(soll_m, 2) - 0.001:
-            _set_problem(t, body.jahr, body.monat, "partial", offen=round(soll_m - float(body.betrag), 2))
+        svc = _pay.sql_service(db)
+        if body.betrag is not None:
+            out = svc.mark_partial(uid, tid, body.jahr, body.monat, body.betrag)
         else:
-            _clear_problem(t, body.jahr, body.monat)
+            out = svc.mark_paid(uid, tid, body.jahr, body.monat)
         db.commit()
-        return {"success": True, "jahr": body.jahr, "monat": body.monat, "exception": _exc_for(t, body.jahr, body.monat)}
+        return out
+    except _pay.PaymentError as e:
+        db.rollback()
+        raise HTTPException(status_code=404 if "nicht gefunden" in str(e) else 400, detail=str(e))
     finally:
         db.close()
 
 
 @router.delete("/tenancies/{tid}/monat-bezahlt")
 def unmark_monat_bezahlt(tid: int, jahr: int, monat: int, user: dict = Depends(get_current_user)):
-    """EXCEPTION ENGINE 'Ödenmedi' — report the month as a PROBLEM (unpaid, full owed)."""
+    """'Nicht bezahlt' — Payment Service: report the month as a problem (full month owed)."""
     uid = _uid(user)
     db = SessionLocal()
     try:
-        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid).first()
-        if not t:
-            raise HTTPException(status_code=404, detail="Mietverhältnis nicht gefunden")
-        if not (1 <= monat <= 12):
-            raise HTTPException(status_code=400, detail="monat 1-12")
-        _set_problem(t, jahr, monat, "unpaid")
+        out = _pay.sql_service(db).mark_unpaid(uid, tid, jahr, monat)
         db.commit()
-        return {"success": True, "jahr": jahr, "monat": monat, "exception": _exc_for(t, jahr, monat)}
+        return out
+    except _pay.PaymentError as e:
+        db.rollback()
+        raise HTTPException(status_code=404 if "nicht gefunden" in str(e) else 400, detail=str(e))
     finally:
         db.close()
 
@@ -469,45 +476,67 @@ def list_rent(pid: int, year: Optional[int] = Query(None), user: dict = Depends(
 
 @router.post("/rent")
 def create_rent(body: RentIn, user: dict = Depends(get_current_user)):
+    """MIETEINGANG — a door into the Payment Service, not a second book.
+
+    Commit 2 (defect B1): this used to INSERT an immo_rent row that changed no debt
+    figure — the landlord recorded a payment, got a green toast, and the Rückstand
+    stayed exactly the same. Now the payment goes through the service, which reconciles
+    the rent month's exception → Bu Ay, Mietkonto, Mahnung and Berichte all move.
+
+    `fuer_jahr`/`fuer_monat` = which rent month is settled; defaults to the month of
+    `datum` (so the existing UI keeps working until it gets its "Für Monat" selector).
+    """
+    uid = _uid(user)
     db = SessionLocal()
     try:
-        _own_property(db, _uid(user), body.property_id)
-        r = ImmoRent(property_id=body.property_id, tenant_id=body.tenant_id, tenancy_id=body.tenancy_id,
-                     user_id=_uid(user), datum=_pdate(body.datum) or date.today(), betrag=body.betrag, notiz=body.notiz)
-        db.add(r); db.commit(); db.refresh(r)
-        return {"success": True, **_rent_dict(r)}
+        _own_property(db, uid, body.property_id)
+        if not body.tenancy_id:
+            raise HTTPException(status_code=400, detail="Bitte den Mieter wählen (tenancy_id fehlt)")
+        d = _pdate(body.datum) or date.today()
+        out = _pay.sql_service(db).record_payment(
+            uid, body.tenancy_id, betrag=body.betrag,
+            jahr=body.fuer_jahr or d.year, monat=body.fuer_monat or d.month,
+            datum=d, source="mieteingang", notiz=body.notiz, property_id=body.property_id)
+        db.commit()
+        return {"success": True, **out}
+    except _pay.PaymentError as e:
+        db.rollback()
+        raise HTTPException(status_code=404 if "nicht gefunden" in str(e) else 400, detail=str(e))
     finally:
         db.close()
 
 
 @router.patch("/rent/{rid}")
 def update_rent(rid: int, body: RentPatch, user: dict = Depends(get_current_user)):
+    """Correct a payment — through the service (law #5), so both the old and the new
+    rent month are reconciled."""
     db = SessionLocal()
     try:
-        r = db.query(ImmoRent).filter(ImmoRent.id == rid, ImmoRent.user_id == _uid(user)).first()
-        if not r:
-            raise HTTPException(status_code=404, detail="Mietzahlung nicht gefunden")
-        if body.tenant_id is not None: r.tenant_id = body.tenant_id
-        if body.tenancy_id is not None: r.tenancy_id = body.tenancy_id
-        if body.datum is not None: r.datum = _pdate(body.datum)
-        if body.betrag is not None: r.betrag = body.betrag
-        if body.notiz is not None: r.notiz = body.notiz
-        db.commit(); db.refresh(r)
-        return {"success": True, **_rent_dict(r)}
+        d = _pdate(body.datum) if body.datum is not None else None
+        out = _pay.sql_service(db).update_payment(
+            _uid(user), rid, betrag=body.betrag, datum=d,
+            jahr=body.fuer_jahr or (d.year if d else None),
+            monat=body.fuer_monat or (d.month if d else None), notiz=body.notiz)
+        db.commit()
+        return {"success": True, **out}
+    except _pay.PaymentError as e:
+        db.rollback()
+        raise HTTPException(status_code=404 if "nicht gefunden" in str(e) else 400, detail=str(e))
     finally:
         db.close()
 
 
 @router.delete("/rent/{rid}")
 def delete_rent(rid: int, user: dict = Depends(get_current_user)):
+    """Remove a payment — through the service, so the debt it had settled comes back."""
     db = SessionLocal()
     try:
-        r = db.query(ImmoRent).filter(ImmoRent.id == rid, ImmoRent.user_id == _uid(user)).first()
-        if not r:
-            raise HTTPException(status_code=404, detail="Mietzahlung nicht gefunden")
-        r.is_deleted = True; r.deleted_at = datetime.now(timezone.utc)
+        out = _pay.sql_service(db).delete_payment(_uid(user), rid)
         db.commit()
-        return {"success": True}
+        return {"success": True, **out}
+    except _pay.PaymentError as e:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(e))
     finally:
         db.close()
 
@@ -995,14 +1024,7 @@ def _accounting(db, uid, pid, year):
                                                  ImmoTenancy.unit_id.in_(uids)).all()
     else:
         tenancies = []
-    rents = db.query(ImmoRent).filter(ImmoRent.property_id == pid, ImmoRent.user_id == uid, _notdel(ImmoRent),
-                                      ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all()
-    ist_by_tenancy = {}
-    ist_total = 0.0
-    for r in rents:
-        ist_total += float(r.betrag or 0)
-        if r.tenancy_id:
-            ist_by_tenancy[r.tenancy_id] = ist_by_tenancy.get(r.tenancy_id, 0) + float(r.betrag or 0)
+    # Income is DERIVED (Soll − offen), never summed from payment rows — see immo_rules.
     unit_results = []
     tenancy_results = []
     total_soll = total_occ = total_vac = total_leer = 0.0
@@ -1014,7 +1036,7 @@ def _accounting(db, uid, pid, year):
             act = [t for t in u_ten if _tenancy_active_in_month(t, year, m)]
             if act:
                 occ += 1
-                soll_u += float(act[0].kaltmiete or 0)
+                soll_u += _monat_soll(act[0], year, m)   # Warmmiete, anteilig — same Soll as the debt
             else:
                 vac += 1
         leer = vac * float(u.soll_miete or 0)
@@ -1025,9 +1047,9 @@ def _accounting(db, uid, pid, year):
         total_soll += soll_u; total_occ += occ; total_vac += vac; total_leer += leer
         for t in u_ten:
             ma = _months_due_to_date(t, year)
-            soll_t = _soll_faellig(t, year)                 # anteilig (Teilmonat pro-rata)
-            rueck_t = _exception_arrears(t, year)           # EXCEPTION ENGINE: debt = reported problems only
-            ist_t = round(max(0.0, soll_t - rueck_t), 2)    # effektiv = Soll − Ausnahmen ("kein Problem gemeldet")
+            soll_t = _soll_faellig(t, year)                 # Warmmiete, anteilig (Teilmonat pro-rata)
+            rueck_t = _exception_arrears(t, year)           # this YEAR's open months (year report)
+            ist_t = _rules.year_ist(t, year, date.today())  # derived: Soll − offen, month by month
             tenancy_results.append({"tenancy_id": t.id, "unit_id": u.id, "mieter_name": t.mieter_name,
                                     "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
                                     "kaltmiete": t.kaltmiete, "monate": ma, "soll": round(soll_t, 2),
@@ -1083,23 +1105,26 @@ def _portfolio(db, uid, year):
     uids = [u.id for u in units]
     tenancies = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy),
                                              ImmoTenancy.unit_id.in_(uids)).all() if uids else []
-    rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent), ImmoRent.property_id.in_(pids),
-                                      ImmoRent.datum >= date(year, 1, 1), ImmoRent.datum <= date(year, 12, 31)).all() if pids else []
     exps = db.query(ImmoExpense).filter(ImmoExpense.user_id == uid, _notdel(ImmoExpense), ImmoExpense.property_id.in_(pids),
                                         ImmoExpense.datum >= date(year, 1, 1), ImmoExpense.datum <= date(year, 12, 31)).all() if pids else []
     ten_by_unit = {}
     for t in tenancies:
         ten_by_unit.setdefault(t.unit_id, []).append(t)
     unit_by_id = {u.id: u for u in units}
-    # monthly series + per-tenancy Ist
+    # Monthly income — DERIVED from the exception engine (Soll − offen), NOT summed from
+    # immo_rent rows. Commit 2 (defect B2): the old sum was structurally always 0 under
+    # the exception model, which made Gewinn negative, the income chart a flat zero line
+    # and the "inkasso" score red, while the same page's detail list showed real profits.
     monthly_income = [0.0] * 12
     monthly_expenses = [0.0] * 12
     ist_by_ten = {}
-    for r in rents:
-        if r.datum:
-            monthly_income[r.datum.month - 1] += float(r.betrag or 0)
-        if r.tenancy_id:
-            ist_by_ten[r.tenancy_id] = ist_by_ten.get(r.tenancy_id, 0) + float(r.betrag or 0)
+    for t in tenancies:
+        for m in range(1, 13):
+            im = _rules.month_ist(t, year, m, today)
+            if im:
+                monthly_income[m - 1] += im
+                ist_by_ten[t.id] = round(ist_by_ten.get(t.id, 0) + im, 2)
+    monthly_income = [round(x, 2) for x in monthly_income]
     ist_total = round(sum(monthly_income), 2)
     expense_by_cat = {}
     for e in exps:
@@ -1118,7 +1143,7 @@ def _portfolio(db, uid, year):
         for m in range(1, 13):
             act = [t for t in ut if _tenancy_active_in_month(t, year, m)]
             if act:
-                soll_total += float(act[0].kaltmiete or 0)
+                soll_total += _monat_soll(act[0], year, m)   # same Soll the debt uses
             else:
                 vac_months += 1
                 vacancy_trend[m - 1] += 1
@@ -1135,12 +1160,15 @@ def _portfolio(db, uid, year):
     # debtors
     top_debtors = []
     ausfall_total = 0.0
+    svc = _pay.sql_service(db)
     for t in tenancies:
-        arr = _tenancy_arrears(db, uid, t, year)
+        d = svc.open_debt(uid, t, today)          # the SAME number Bu Ay and the Mahnung show
+        arr = d.total
         if arr > 0:
             ausfall_total += arr
-            mo = round(arr / float(t.kaltmiete)) if t.kaltmiete else None
-            top_debtors.append({"tenant": t.mieter_name, "debt": arr, "months_overdue": mo})
+            top_debtors.append({"tenant": t.mieter_name, "debt": arr,
+                                "months_overdue": len(d.months),
+                                "monate": [m.ym for m in d.months]})
     ausfall_total = round(ausfall_total, 2)
     # contracts ending within 60 days
     contracts_ending = []
@@ -1309,19 +1337,18 @@ def _cockpit(db, uid, year, base=None):
         actions.append({"severity": "orange", "typ": "contract_ending",
                         "text": "Vertrag %s (%s) endet in %s Tagen" % (c.get("unit", ""), c["tenant"], dleft if dleft is not None else "?"),
                         "tenant": c["tenant"]})
-    # missing rent for current month (only when viewing current year)
+    # Rent missing THIS month — from the exception engine, not from "no immo_rent row".
+    # Commit 2 (defect B2): the old check fired for EVERY active tenant every month
+    # (the exception model creates no payment rows), so the cockpit permanently warned
+    # "Miete Jun fehlt · Ahmet" about tenants that Bu Ay showed as ✓ sorgenfrei.
     if year == today.year:
         cm = today.month
         pids = [p.id for p in props]
         units = db.query(ImmoUnit).filter(ImmoUnit.user_id == uid, _notdel(ImmoUnit), ImmoUnit.property_id.in_(pids)).all() if pids else []
         uids2 = [u.id for u in units]
         tens = db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy), ImmoTenancy.unit_id.in_(uids2)).all() if uids2 else []
-        cm_rents = db.query(ImmoRent).filter(ImmoRent.user_id == uid, _notdel(ImmoRent),
-                                             ImmoRent.datum >= date(year, cm, 1),
-                                             ImmoRent.datum <= date(year, cm, monthrange(year, cm)[1])).all() if pids else []
-        paid = set(r.tenancy_id for r in cm_rents if r.tenancy_id)
         for t in tens:
-            if _tenancy_active_in_month(t, year, cm) and t.id not in paid:
+            if _rules.month_open(t, year, cm) > 0:
                 actions.append({"severity": "orange", "typ": "missing_rent",
                                 "text": "Miete %s fehlt · %s" % (_MON_DE[cm], t.mieter_name), "tenant": t.mieter_name})
     actions.sort(key=lambda a: 0 if a["severity"] == "red" else 1)
@@ -1381,30 +1408,10 @@ _exc_list = _rules.exc_list
 _exc_for = _rules.exc_for
 
 
-# NOTE (Sprint 0): the three WRITE helpers below are the LAST place outside the Payment
-# Service that mutates exception state. They are left untouched in commit 1 (zero
-# behaviour change) and are DELETED in commit 2, when the endpoints start calling
-# autotax.immo_payments.PaymentService — law #5: only the Payment Service may write.
-def _save_exc(t, lst):
-    import json
-    t.offene_monate = json.dumps([{k: v for k, v in e.items() if v is not None} for e in lst]) if lst else None
-
-
-def _set_problem(t, year, m, typ, offen=None):
-    """Report a problem for (year,m): typ 'unpaid' (full owed) | 'partial' (offen owed)."""
-    ym = "%04d-%02d" % (year, m)
-    lst = [e for e in _exc_list(t) if e["ym"] != ym]
-    e = {"ym": ym, "typ": "partial" if typ == "partial" else "unpaid"}
-    if e["typ"] == "partial":
-        e["offen"] = round(float(offen or 0), 2)
-    lst.append(e)
-    _save_exc(t, lst)
-
-
-def _clear_problem(t, year, m):
-    """Mark (year,m) OK — remove any exception (default state)."""
-    ym = "%04d-%02d" % (year, m)
-    _save_exc(t, [e for e in _exc_list(t) if e["ym"] != ym])
+# LAW #5 — only the Payment Service may modify payment state.
+# The former _save_exc / _set_problem / _clear_problem helpers lived here and were the
+# second writer of the exception engine. They are GONE (commit 2): this module now only
+# READS (immo_rules) and delegates every write to autotax.immo_payments.PaymentService.
 
 
 # EXCEPTION ENGINE debt for ONE year (Mietkonto tab view) — shared formula, see immo_rules.
@@ -1413,22 +1420,25 @@ def _exception_arrears(t, year, as_of=None):
     return _rules.exception_arrears(t, year, as_of or date.today())
 
 
-def _tenancy_arrears(db, uid, t, year):
-    # EXCEPTION ENGINE — user-facing debt = reported exceptions only (default = OK).
-    # immo_rent payments no longer drive debt (kept for history/bank-matching).
-    return _exception_arrears(t, year)
+def _debt(db, uid, t):
+    """THE debt answer for one tenancy — Payment Service, across ALL months and years.
+    Every surface that shows "what does he owe me" must use this and compute nothing
+    itself (law #2/#3/#4)."""
+    return _pay.sql_service(db).open_debt(uid, t, date.today())
 
 
-def _mahnung_betrag(db, uid, t, year) -> float:
-    """Mahnung open amount = EXCEPTION ARREARS (operational debt).
+def _tenancy_arrears(db, uid, t, year=None):
+    """Commit 2 (defects A1/A2): the debt is no longer clipped to one calendar year.
+    BEFORE: a tenant unpaid in March showed 0 in June's view, and an unpaid December
+    disappeared on 1 January. AFTER: every due, unsettled month counts, whatever year
+    it sits in. `year` is accepted and ignored — kept so callers need no rewrite."""
+    return _debt(db, uid, t).total
 
-    A Mahnung duns a tenant for a REPORTED problem (unpaid/partial) — never for an
-    un-flagged month. The former ledger parity GUARD is RETIRED: the ledger is now a
-    separate AUDIT domain (real payments / Soll−Ist), intentionally distinct from the
-    operational debt. Dunning must follow the operational view, so a tenant with no
-    reported problem is never dunned. (Audit integrity lives in parity_report =
-    audit-truth ↔ ledger, not here.)"""
-    return _exception_arrears(t, year)
+
+def _mahnung_betrag(db, uid, t, year=None) -> float:
+    """Mahnung amount = the same debt every screen shows (incl. Nebenkosten, incl.
+    previous years). Before commit 2 it dunned Kalt-only, current-year-only."""
+    return _debt(db, uid, t).total
 
 
 class MahnungIn(BaseModel):
