@@ -213,6 +213,16 @@ def main():
     ok(r.status_code == 200 and cl.get(f"/immo/protokolle/{pid3}").json()["fotos"] == [],
        "a photo can be removed while the protocol is still a draft")
 
+    print("\n[11] The tenant screen has what the handover needs (commit 4)")
+    card = cl.get("/immo/mieter").json()["mieter"][0]
+    ok(card["unit_id"] == 1, f"the card carries unit_id — the meter series hangs on the unit ({card.get('unit_id')})")
+    ok(card["anmeldung_done"] is False, "Anmeldung starts as not done")
+    r = cl.patch("/immo/tenancies/101", json={"anmeldung_done": True})
+    ok(r.status_code == 200, "the Anmeldung chip can finally be ticked (it never could before)")
+    ok(cl.get("/immo/mieter").json()["mieter"][0]["anmeldung_done"] is True, "…and it sticks")
+    r = cl.patch("/immo/tenancies/101", json={"anmeldung_done": False})
+    ok(cl.get("/immo/mieter").json()["mieter"][0]["anmeldung_done"] is False, "…and it can be un-ticked")
+
     print(f"\n=== PROTOKOLL API: {PASS} passed, {FAIL} failed ===")
     sys.exit(1 if FAIL else 0)
 

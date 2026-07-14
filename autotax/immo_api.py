@@ -230,6 +230,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
             out.append({
                 "tenancy_id": t.id, "mieter_name": t.mieter_name,
                 "property_name": (p.name if p else None), "property_address": (p.adresse if p else None),
+                "unit_id": t.unit_id,                      # Sprint 1: the meter series hangs on the unit
                 "unit_name": (u.name if u else None), "wohnflaeche": (u.wohnflaeche if u else None),
                 "kaltmiete": round(kalt, 2), "nk_vorauszahlung": round(nk, 2),
                 "gesamtmiete": round(kalt + nk, 2),
