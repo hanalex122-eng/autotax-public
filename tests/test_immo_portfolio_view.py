@@ -113,9 +113,14 @@ def main():
     # ledger-only korrektur (+500 on tenancy 105) — OLD doesn't know it
     L.post_entry(db, user_id=1, typ=L.TYP_KORREKTUR, betrag=500, jahr=2025, monat=7, tenancy_id=105, commit=True)
     pv_on = immo_api.portfolio_view(db, 1, 2025)
-    ok(pv_on["financial"]["rueckstand"] == 18800.0, f"ON rueckstand 18800 = ledger incl. korrektur (got {pv_on['financial']['rueckstand']})")
-    ok(pv_on["financial"]["rueckstand"] != old["financial"]["rueckstand"], "ON value differs from OLD → reads LEDGER not OLD")
-    ok(pv_on["warnings"]["debtors"] == 4, f"ON debtor warning from ledger (got {pv_on['warnings']['debtors']})")
+    # HOTFIX 2026-07-14 (found by the production smoke test): the flag must NOT change a
+    # single user-facing debt number. It used to swap in the ledger's Kalt-only arrears —
+    # Berichte said 2.800 while the Mieter card said 940. The ledger stays an AUDIT domain.
+    ok(pv_on["financial"]["rueckstand"] == 18300.0,
+       f"ON rueckstand STILL 18300 = exception engine, ledger korrektur ignored (got {pv_on['financial']['rueckstand']})")
+    ok(pv_on["financial"]["rueckstand"] == old["financial"]["rueckstand"],
+       "ON value == OLD value → the flag cannot open a second debt source")
+    ok(pv_on["warnings"]["debtors"] == 4, f"debtor count from the exception engine (got {pv_on['warnings']['debtors']})")
     ok(immo_api.parity_report(db, 1, 2025)["passed"] in (True, False), "parity_report still runs (pure OLD vs ledger)")
     db.close()
 
@@ -128,8 +133,8 @@ def main():
     before = db.query(ImmoLedgerEntry).count()
     pv2 = immo_api.portfolio_view(db, 1, 2025)  # flag ON → lazy ensure fills ledger
     after = db.query(ImmoLedgerEntry).count()
-    ok(before == 0 and after > 0, f"lazy-ensure created ledger rows ({before}→{after})")
-    ok(pv2["financial"]["rueckstand"] == 18300.0, f"ON rueckstand from freshly-ensured ledger 18300 (got {pv2['financial']['rueckstand']})")
+    ok(before == 0 and after == 0, f"no lazy ledger refresh on a user-facing read anymore ({before}→{after})")
+    ok(pv2["financial"]["rueckstand"] == 18300.0, f"rueckstand from the exception engine (got {pv2['financial']['rueckstand']})")
     db.close()
 
     print("\n[4] perf log fields emitted per GET")
@@ -139,8 +144,7 @@ def main():
     db = S(); immo_api.portfolio_view(db, 1, 2025); db.close()
     lg.removeHandler(h)
     perf = [m for m in recs if "ledger_refresh_status" in m]
-    ok(perf and "ledger_refresh_ms" in perf[-1] and "ledger_created_entries" in perf[-1],
-       f"perf log has ms/created/status (got {perf[-1] if perf else None})")
+    ok(not perf, "no ledger refresh is logged on a user-facing GET (the read path is gone)")
 
     print("\n[5] error → OLD fallback, endpoint still responds")
     orig = immo_api._ledger.run_backfill

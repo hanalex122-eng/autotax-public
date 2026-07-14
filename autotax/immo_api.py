@@ -1269,27 +1269,21 @@ def _lazy_ledger_refresh(db, uid: int, year: int) -> dict:
 
 
 def portfolio_view(db, uid: int, year: int) -> dict:
-    """OLD portfolio with the DEBT fields (rueckstand / top_debtors / warnings.
-    debtors) sourced from the ledger when IMMO_LEDGER_READ is ON. Everything else
-    (vacancy / ist / charts) stays OLD. Flag OFF → 100% _portfolio. Any ledger
-    error → OLD fallback (the unmodified base). _portfolio itself stays pure OLD
-    so parity is unaffected."""
-    base = _portfolio(db, uid, year)
-    from autotax.config import immo_ledger_read_enabled
-    if not immo_ledger_read_enabled():
-        return base
-    if _lazy_ledger_refresh(db, uid, year)["ledger_refresh_status"] != "ok":
-        return base  # OLD fallback
-    try:
-        dbt = _src.src_debtors(db, uid, year)
-        rueck = _src.src_arrears_total(db, uid, year)
-    except Exception as e:
-        logger.warning("immo ledger read failed (OLD fallback) uid=%s year=%s: %s", uid, year, e)
-        return base
-    base["financial"]["rueckstand"] = rueck
-    base["top_debtors"] = dbt[:5]
-    base["warnings"]["debtors"] = len(dbt)
-    return base
+    """THE portfolio view. Debt comes from the Exception Engine — like everywhere else.
+
+    HOTFIX (Sprint 0 smoke test, 2026-07-14): this function used to OVERWRITE the debt
+    fields (rueckstand / top_debtors / warnings.debtors) with numbers read from the
+    immo_ledger whenever IMMO_LEDGER_READ was on — and that flag IS on in production.
+    The ledger computes a Kalt-only Soll and knows nothing about the exception engine, so
+    Berichte showed a landlord "2.800 €" (7 months × Kaltmiete 400) while his Mieter card,
+    Bu Ay and the Mahnung all said "940 €" (2 reported months × Warmmiete 470). A third
+    book, live, contradicting the other two.
+
+    That override is GONE. The ledger stays a shadow/audit domain (/immo/_ledger/*), it is
+    never a debt source for a user-facing screen. No environment variable can resurrect it.
+    See CLAUDE.md → "Architecture law": debt is derived ONLY from the Exception Engine.
+    """
+    return _portfolio(db, uid, year)
 
 
 @router.get("/dashboard")
