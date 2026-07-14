@@ -913,10 +913,11 @@ class ImmoTenancy(Base):
     nk_voraus = Column(Float, nullable=True)          # NK-Vorauszahlung pro Monat
     anmeldung_done = Column(Boolean, nullable=True, default=False)  # Anmeldung beim Amt erledigt (UI status)
     wgb_erstellt_am = Column(DateTime, nullable=True)  # Wohnungsgeberbestätigung zuletzt erzeugt (UI status)
-    # AUTO-PAID model (Dauerzahlung): tenant assumed to pay every due month automatically.
-    # Landlord enters NOTHING monthly — only marks the exception (a month NOT paid).
-    auto_paid = Column(Boolean, nullable=True, default=True)   # (dormant) eski Dauerzahlung denemesi — kullanılmıyor
-    offene_monate = Column(Text, nullable=True)                # (dormant)
+    # EXCEPTION ENGINE (Dauerzahlung): rent counts as paid unless a month is flagged.
+    # The landlord enters NOTHING monthly — he only reports the exception.
+    auto_paid = Column(Boolean, nullable=True, default=True)   # DEAD — superseded by offene_monate; kept only so the live column isn't dropped
+    offene_monate = Column(Text, nullable=True)                # LIVE: the single debt truth. JSON [{"ym":"2026-06","typ":"unpaid"|"partial","offen":123.45}]
+                                                               # WRITE ONLY via autotax/immo_payments.py (Payment Service). See CLAUDE.md → Architecture law.
     # Mieter-Info + Mieterhöhung (dated rent history)
     telefon = Column(String(50), nullable=True)
     email = Column(String(200), nullable=True)
@@ -952,10 +953,15 @@ class ImmoRent(Base):
     tenant_id = Column(Integer, ForeignKey("immo_tenant.id"), nullable=True, index=True)
     tenancy_id = Column(Integer, ForeignKey("immo_tenancy.id"), nullable=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    datum = Column(Date, nullable=True)
+    datum = Column(Date, nullable=True)               # Wertstellung — WANN das Geld kam
     betrag = Column(Float, nullable=False, default=0.0)
     notiz = Column(String(300), nullable=True)
-    source = Column(String(20), nullable=True)        # manual|quick (Ödendi/Ödenmedi schnell) — UX layer tag
+    source = Column(String(20), nullable=True)        # manual|quick|mieteingang|bank — which UI door
+    # Payment Service: WELCHEN Mietmonat diese Zahlung begleicht (März-Miete kann im
+    # April bezahlt werden). Debt is per rent-month, so the attribution — not the value
+    # date — is what the Exception Engine reconciles against. Additive + nullable.
+    fuer_jahr = Column(Integer, nullable=True, index=True)
+    fuer_monat = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)

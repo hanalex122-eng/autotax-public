@@ -55,6 +55,13 @@ def init_db():
                 if "source" not in _rc:
                     conn.execute(text("ALTER TABLE immo_rent ADD COLUMN source VARCHAR(20)"))
                     logger.info("Added 'source' column to immo_rent")
+                # Payment Service (Sprint 0): which RENT MONTH a payment settles.
+                # `datum` is only the value date — March rent may be paid in April.
+                # Additive + nullable; no behaviour depends on it until commit 2.
+                for _c in ("fuer_jahr", "fuer_monat"):
+                    if _c not in _rc:
+                        conn.execute(text(f"ALTER TABLE immo_rent ADD COLUMN {_c} INTEGER"))
+                        logger.info("Added '%s' column to immo_rent", _c)
     except Exception as e:
         logger.warning("immo_rent tenancy_id migration skipped: %s", e)
     # Immobilien tenant-centric UX: immo_tenancy status columns (additive, nullable).

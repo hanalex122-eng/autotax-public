@@ -19,6 +19,40 @@ The single source of truth for what is currently in flight is **`SPRINT.md`** (o
 The locked product roadmap for the landlord platform is **`VERMIETER_MASTERPLAN.md`** — it is not a
 backlog, it is mandatory scope; new ideas do not jump ahead of it.
 
+### 🔒 Architecture law — ONE accounting model, many UIs (Immobilien)
+
+**Never maintain two parallel debt systems.** Every payment path is a *user interface*, not a second
+book. All of them must go through **one Payment Service** that writes the **Exception Engine** model:
+
+```
+Payment arrives (any UI)
+        │
+        ├── "Bezahlt" button        ┐
+        ├── Partial payment          │
+        ├── Mieteingang tab          ├──►  PAYMENT SERVICE  ──►  EXCEPTION ENGINE (single truth)
+        └── Bank import (future)     ┘                               │
+                                                                     ├── Bu Ay
+                                                                     ├── Mietkonto
+                                                                     ├── Mahnung
+                                                                     ├── Reports (Berichte)
+                                                                     └── Nebenkosten
+```
+
+The landlord may pick whichever workflow fits them; **all roads must lead to the same ledger and the
+same exception model.** This is mandatory — the future bank import will use the same path.
+
+**The law, verbatim (binding):**
+1. **Every payment enters the system exactly once.**
+2. **No UI is allowed to calculate debt independently.**
+3. **Debt is derived only from the Exception Engine.**
+4. **Every screen is read-only with respect to debt calculation.**
+5. **Only the Payment Service may modify payment state.**
+
+Practical consequences for any future change: a new payment surface (bank import, CSV, mobile,
+webhook) calls the Payment Service — it never writes `ImmoRent`, `offene_monate` or a ledger entry
+directly. A new read surface (screen, report, PDF, Nebenkostenabrechnung) calls the debt/derivation
+helpers — it never sums rows into its own private total.
+
 ---
 
 ## Project at a glance

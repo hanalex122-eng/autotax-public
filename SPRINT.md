@@ -47,9 +47,14 @@ floor onto a cracked foundation — exactly what "Finish > New Features" forbids
       instead of the landlord. (`immo_api.py:1627-1636`)
 
 ### B. Contradicting legacy flows — DoD condition #4 (P0)
-- [ ] B1 "📈 Mieteingang" tab writes ImmoRent rows that change no debt number → payment recorded,
-      debt unchanged. Wire it into the exception engine **or** remove the tab.
-      (`immo_api.py:1104`, `1505-1508`; `index.html:2914-2921`)
+- [ ] B1 **ONE accounting model, many UIs** (user decision 2026-07-14 — Mieteingang is NOT removed).
+      Introduce a single **Payment Service**; every payment path is only a UI on top of it:
+      "Bezahlt" button · partial payment · Mieteingang tab · (future) bank import.
+      All of them write the **Exception Engine** model; every read surface (Bu Ay, Mietkonto, Mahnung
+      amount, Berichte, Nebenkosten) derives from it and never recomputes its own truth.
+      Today the Mieteingang tab writes ImmoRent rows that change no debt number → payment recorded,
+      debt unchanged. (`immo_api.py:1104`, `1505-1508`; `index.html:2914-2921`)
+      **Mandatory: never two parallel debt systems.** See CLAUDE.md → "Architecture law".
 - [ ] B2 "📊 Berichte" contradicts itself and Bu Ay: Gewinn negative while its own detail list is
       positive, income chart always zero, "Miete Jun fehlt" for tenants Bu Ay calls ✓ sorgenfrei.
       (`immo_api.py:1155-1162`, `1213`, `1319`, `1379-1387`)

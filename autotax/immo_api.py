@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_
 
 from autotax import storage
+from autotax import immo_rules as _rules
 from autotax import immo_ledger as _ledger
 from autotax import immo_ledger_read as _read
 from autotax import immo_source as _src
@@ -767,87 +768,26 @@ def _tenancy_dict(t):
             "notiz": getattr(t, "notiz", None), "erstmonat_betrag": getattr(t, "erstmonat_betrag", None)}
 
 
-def _tenancy_active_in_month(t, y, m):
-    mstart = date(y, m, 1)
-    mend = date(y, m, monthrange(y, m)[1])
-    von = t.von or date(1900, 1, 1)
-    bis = t.bis or date(2999, 12, 31)
-    return von <= mend and bis >= mstart
+# Month math lives in autotax/immo_rules.py (pure, DB-free) so that the API layer and
+# the Payment Service share ONE formula — see CLAUDE.md → Architecture law. These names
+# are kept as aliases; behaviour is identical.
+_tenancy_active_in_month = _rules.tenancy_active_in_month
+_months_active_in_year = _rules.months_active_in_year
+_month_proration = _rules.month_proration
 
 
-def _months_active_in_year(t, y):
-    return sum(1 for m in range(1, 13) if _tenancy_active_in_month(t, y, m))
-
-
+# "Today"-dependent helpers stay thin wrappers so that `immo_api.date` remains the one
+# clock the API layer reads (the test-suite pins it: immo_api.date = FakeDate).
 def _months_due_to_date(t, y, as_of=None):
-    """Active months whose rent is ALREADY DUE — current year capped at the current
-    month, past years full, future years 0. Used for arrears/Rückstand/Mahnung so
-    future months (not yet owed) don't show up as debt. (Annual forecast Soll keeps
-    using _months_active_in_year.)"""
-    as_of = as_of or date.today()
-    last = 12 if y < as_of.year else (as_of.month if y == as_of.year else 0)
-    return sum(1 for m in range(1, last + 1) if _tenancy_active_in_month(t, y, m))
+    return _rules.months_due_to_date(t, y, as_of or date.today())
 
 
-def _month_proration(t, y, m):
-    """Anteil (0..1) des Monats, den der Mieter bewohnt — für anteilige Miete bei
-    Einzug/Auszug mitten im Monat (z.B. Einzug 15.06 → ~16/30). Voller Monat = 1.0."""
-    dim = monthrange(y, m)[1]
-    mstart = date(y, m, 1); mend = date(y, m, dim)
-    von = t.von or date(1900, 1, 1)
-    bis = t.bis or date(2999, 12, 31)
-    occ_start = max(von, mstart); occ_end = min(bis, mend)
-    if occ_end < occ_start:
-        return 0.0
-    days = (occ_end - occ_start).days + 1
-    return max(0.0, min(1.0, days / dim))
-
-
-def _effective_kalt(t, y, m):
-    """Effective Kaltmiete for month (y,m), honoring DATED Mieterhöhungen
-    (t.miete_historie JSON [{ab, kalt}]). Base = t.kaltmiete; the latest change whose
-    ab-date is on/before month-end wins → past months keep the old rent."""
-    base = float(t.kaltmiete or 0)
-    raw = getattr(t, "miete_historie", None)
-    if not raw:
-        return base
-    import json
-    try:
-        hist = json.loads(raw) if isinstance(raw, str) else list(raw or [])
-    except Exception:
-        return base
-    mend = date(y, m, monthrange(y, m)[1])
-    best_ab, best = None, base
-    for c in (hist or []):
-        try:
-            ab = datetime.strptime(str(c.get("ab"))[:10], "%Y-%m-%d").date()
-            k = float(c.get("kalt"))
-        except Exception:
-            continue
-        if ab <= mend and (best_ab is None or ab > best_ab):
-            best_ab, best = ab, k
-    return best
-
-
-def _monat_soll(t, y, m):
-    """Soll für EINEN Monat: vereinbarte Erstmiete (erstmonat_betrag) im Einzugsmonat
-    falls gesetzt; sonst effektive Kaltmiete × Tagesanteil (anteilig)."""
-    em = getattr(t, "erstmonat_betrag", None)
-    if em is not None and t.von and t.von.year == y and t.von.month == m:
-        return round(float(em), 2)
-    return round(_effective_kalt(t, y, m) * _month_proration(t, y, m), 2)
+_effective_kalt = _rules.effective_kalt
+_monat_soll = _rules.monat_soll
 
 
 def _soll_faellig(t, y, as_of=None):
-    """Fälliges Soll bis heute: pro Monat _monat_soll (vereinbarte Erstmiete /
-    anteilig / Mieterhöhung). Single source of truth."""
-    as_of = as_of or date.today()
-    last = 12 if y < as_of.year else (as_of.month if y == as_of.year else 0)
-    total = 0.0
-    for m in range(1, last + 1):
-        if _tenancy_active_in_month(t, y, m):
-            total += _monat_soll(t, y, m)
-    return round(total, 2)
+    return _rules.soll_faellig(t, y, as_of or date.today())
 
 
 class UnitIn(BaseModel):
@@ -1436,33 +1376,15 @@ EVENT_TYPEN = {"wartung", "versicherung", "grundsteuer", "mieterhoehung", "sonst
 # for delays, bank-matching, reminders, reporting. Stored per tenancy in
 # offene_monate (JSON): [{"ym":"2026-06","typ":"unpaid"},
 #                        {"ym":"2026-07","typ":"partial","offen":120.0}]
-def _exc_list(t):
-    """Parsed exception list of the tenancy. Each: {ym, typ:'unpaid'|'partial', offen?}."""
-    import json
-    raw = getattr(t, "offene_monate", None)
-    if not raw:
-        return []
-    try:
-        lst = json.loads(raw) if isinstance(raw, str) else list(raw or [])
-    except Exception:
-        return []
-    out = []
-    for e in (lst or []):
-        if isinstance(e, dict) and e.get("ym"):
-            out.append({"ym": str(e["ym"])[:7], "typ": e.get("typ") or "unpaid", "offen": e.get("offen")})
-        elif isinstance(e, str) and len(e) >= 7:          # legacy bare "2026-06" = unpaid
-            out.append({"ym": e[:7], "typ": "unpaid", "offen": None})
-    return out
+# Exception-engine READ side lives in immo_rules (shared with the Payment Service).
+_exc_list = _rules.exc_list
+_exc_for = _rules.exc_for
 
 
-def _exc_for(t, year, m):
-    ym = "%04d-%02d" % (year, m)
-    for e in _exc_list(t):
-        if e["ym"] == ym:
-            return e
-    return None
-
-
+# NOTE (Sprint 0): the three WRITE helpers below are the LAST place outside the Payment
+# Service that mutates exception state. They are left untouched in commit 1 (zero
+# behaviour change) and are DELETED in commit 2, when the endpoints start calling
+# autotax.immo_payments.PaymentService — law #5: only the Payment Service may write.
 def _save_exc(t, lst):
     import json
     t.offene_monate = json.dumps([{k: v for k, v in e.items() if v is not None} for e in lst]) if lst else None
@@ -1485,21 +1407,10 @@ def _clear_problem(t, year, m):
     _save_exc(t, [e for e in _exc_list(t) if e["ym"] != ym])
 
 
+# EXCEPTION ENGINE debt for ONE year (Mietkonto tab view) — shared formula, see immo_rules.
+# Commit 2 replaces the callers with PaymentService.open_debt(), which spans years (defect A2).
 def _exception_arrears(t, year, as_of=None):
-    """EXCEPTION ENGINE debt: ONLY reported exceptions. Default month = OK → 0.
-    unpaid → full _monat_soll (anteilig/Mieterhöhung/Erstmiete); partial → offen.
-    Due-to-date, active months only."""
-    as_of = as_of or date.today()
-    last = 12 if year < as_of.year else (as_of.month if year == as_of.year else 0)
-    total = 0.0
-    for m in range(1, last + 1):
-        if not _tenancy_active_in_month(t, year, m):
-            continue
-        e = _exc_for(t, year, m)
-        if not e:
-            continue
-        total += (float(e["offen"] or 0) if e["typ"] == "partial" else _monat_soll(t, year, m))
-    return round(max(0.0, total), 2)
+    return _rules.exception_arrears(t, year, as_of or date.today())
 
 
 def _tenancy_arrears(db, uid, t, year):
