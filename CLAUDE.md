@@ -4,6 +4,23 @@ This file is automatically loaded by Claude Code at session start. Keep it conci
 
 ---
 
+## ⚠️ Sprint discipline (BINDING — read before proposing or writing anything)
+
+**AutoTax is no longer in feature-collection mode. It is in FINISHING and RELIABILITY mode.**
+**Priority: Finish > New Features.** Work like someone who *completes a product*, not someone who writes code.
+
+1. **Never switch topic mid-sprint.** Do not move to another module before the current one is *done*.
+2. **"Done" requires ALL eight:** code complete · tests green · UX checked · **contradicting legacy flows removed** · review done · deployed · smoke-tested · no critical gap left from the *user's* point of view.
+3. **New idea → BACKLOG, not code.** Write it in `SPRINT.md` (Backlog section). Do not interrupt the active sprint.
+4. **Do not propose new features while a sprint is open.** Finish first, then propose the next sprint.
+5. **End every sprint with an honest report:** completed · deliberately deferred · open risks · *"Is this sprint really finished?"* — if the answer is **no**, no new topic is started.
+
+The single source of truth for what is currently in flight is **`SPRINT.md`** (one active sprint at a time).
+The locked product roadmap for the landlord platform is **`VERMIETER_MASTERPLAN.md`** — it is not a
+backlog, it is mandatory scope; new ideas do not jump ahead of it.
+
+---
+
 ## Project at a glance
 
 **AutoTax-Cloud** is a German-language SaaS for self-employed people and small businesses to manage receipts, VAT, and tax-related bookkeeping. Customers are Selbständige, Freelancer, Kleinunternehmer in Germany.
