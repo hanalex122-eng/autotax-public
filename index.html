@@ -2565,6 +2565,276 @@ function BuAyView({onNav,showToast}){
   </div>);
 }
 
+// ══════════════════════════════════════════════════════════════════════
+//  ÜBERGABE — Ein-/Auszugsprotokoll (Sprint 1)
+//  Used STANDING IN THE FLAT, on a phone, with the tenant watching.
+//  Therefore: one step at a time, big tap targets, the camera one tap away,
+//  autosave after every step (a lost draft in a cold flat is unforgivable).
+//  No business logic here — the backend derives Mängel, consumption and the lock.
+// ══════════════════════════════════════════════════════════════════════
+async function apiUpload(path, formData){
+  const tk=localStorage.getItem("atx_token");
+  const r=await fetch(API+path,{method:"POST",headers:{Authorization:"Bearer "+tk},body:formData});
+  if(!r.ok){let m="HTTP "+r.status;try{const j=await r.json();if(j&&j.detail)m=j.detail;}catch(e){}throw new Error(m);}
+  return r.json();
+}
+
+function SignaturePad({value,onChange,label}){
+  const ref=React.useRef(null);
+  const drawing=React.useRef(false);
+  const [hasInk,setHasInk]=React.useState(!!value);
+  React.useEffect(()=>{
+    const c=ref.current; if(!c) return;
+    const dpr=window.devicePixelRatio||1;
+    const w=c.clientWidth, h=c.clientHeight;
+    c.width=w*dpr; c.height=h*dpr;
+    const ctx=c.getContext("2d");
+    ctx.scale(dpr,dpr); ctx.lineWidth=2.2; ctx.lineCap="round"; ctx.lineJoin="round"; ctx.strokeStyle="#111827";
+    ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,w,h);
+  },[]);
+  const pos=(e)=>{const c=ref.current,r=c.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return {x:t.clientX-r.left,y:t.clientY-r.top};};
+  const start=(e)=>{e.preventDefault();drawing.current=true;const ctx=ref.current.getContext("2d");const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);};
+  const move=(e)=>{if(!drawing.current)return;e.preventDefault();const ctx=ref.current.getContext("2d");const p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke();setHasInk(true);};
+  const end=()=>{if(!drawing.current)return;drawing.current=false;onChange(ref.current.toDataURL("image/png"));};
+  const clear=()=>{const c=ref.current,ctx=c.getContext("2d");ctx.fillStyle="#ffffff";ctx.fillRect(0,0,c.width,c.height);setHasInk(false);onChange("");};
+  const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
+  return(<div style={{marginBottom:14}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+      <span style={{fontSize:12,color:theme.textMuted,fontWeight:600}}>{label}</span>
+      <span style={{fontSize:12,color:theme.accent,cursor:"pointer"}} onClick={clear}>↺ {_L("Löschen","Temizle","Clear")}</span>
+    </div>
+    <canvas ref={ref} style={{width:"100%",height:130,background:"#fff",border:"1.5px dashed "+(hasInk?theme.accent:theme.border),borderRadius:10,touchAction:"none",display:"block"}}
+      onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
+      onTouchStart={start} onTouchMove={move} onTouchEnd={end}/>
+    <div style={{fontSize:11,color:theme.textDim,marginTop:3}}>{_L("Mit dem Finger unterschreiben.","Parmağınızla imzalayın.","Sign with your finger.")}</div>
+  </div>);
+}
+
+function UebergabeWizard({prot,onClose,onDone,showToast}){
+  const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
+  const [p,setP]=React.useState(prot);
+  const [step,setStep]=React.useState(1);
+  const [busy,setBusy]=React.useState(false);
+  const [err,setErr]=React.useState(null);
+  const locked=!!p.gesperrt;
+  const ZUST=[["neu",_L("neu","yeni","new")],["gut",_L("gut","iyi","good")],["gebraucht",_L("gebraucht","kullanılmış","used")],["beschaedigt",_L("beschädigt","hasarlı","damaged")]];
+  const ZCOL={neu:theme.accent,gut:theme.accent,gebraucht:"#f59e0b",beschaedigt:theme.danger};
+  const ZAEHLER=[["strom","⚡ Strom","kWh"],["wasser","💧 Wasser","m³"],["warmwasser","🚿 Warmwasser","m³"],["gas","🔥 Gas","m³"],["heizung","🌡️ Heizung","Einheiten"]];
+  const _re=async()=>{const d=await api("/immo/protokolle/"+p.id);setP(d);return d;};
+  const save=async(patch)=>{setErr(null);setBusy(true);try{const d=await api("/immo/protokolle/"+p.id,{method:"PATCH",body:JSON.stringify(patch)});setP(d);return d;}catch(e){setErr(e.message);throw e;}finally{setBusy(false);}};
+
+  // ── step 2: rooms ──
+  const setZustand=(ri,ei,z)=>{const r=JSON.parse(JSON.stringify(p.raeume));r[ri].elemente[ei].zustand=z;setP({...p,raeume:r});};
+  const setNotiz=(ri,ei,v)=>{const r=JSON.parse(JSON.stringify(p.raeume));r[ri].elemente[ei].notiz=v;setP({...p,raeume:r});};
+  const addRaum=()=>{const name=prompt(_L("Name des Raums","Oda adı","Room name"));if(!name)return;
+    const std=["Wände","Boden","Decke","Türen","Fenster","Heizkörper"];
+    setP({...p,raeume:[...p.raeume,{name:name,elemente:std.map(w=>({was:w,zustand:"gut",notiz:""})),notiz:""}]});};
+  const delRaum=(ri)=>{if(!confirm(_L("Raum entfernen?","Oda silinsin mi?","Remove room?")))return;const r=p.raeume.filter((_,i)=>i!==ri);setP({...p,raeume:r});};
+  const [openRaum,setOpenRaum]=React.useState(0);
+
+  const foto=async(f,raum)=>{if(!f)return;setBusy(true);setErr(null);
+    try{const fd=new FormData();fd.append("file",f);fd.append("raum",raum||"");
+      const r=await apiUpload("/immo/protokolle/"+p.id+"/foto",fd);await _re();
+      if(showToast)showToast(_L("Foto gespeichert","Fotoğraf kaydedildi","Photo saved")+" ("+Math.round(r.bytes_gespeichert/1024)+" KB)","success");
+    }catch(e){setErr(e.message);}finally{setBusy(false);}};
+  const delFoto=async(id)=>{setBusy(true);try{await api("/immo/protokolle/"+p.id+"/foto/"+id,{method:"DELETE"});await _re();}catch(e){setErr(e.message);}finally{setBusy(false);}};
+
+  // ── step 3: meters ──
+  const [zf,setZf]=React.useState({});
+  const addZaehler=async(art)=>{const v=zf[art]||{};
+    if(!(parseFloat(v.stand)>=0)){alert(_L("Bitte Zählerstand eingeben.","Sayaç değeri gir.","Enter the meter reading."));return;}
+    setBusy(true);setErr(null);
+    try{await api("/immo/zaehler",{method:"POST",body:JSON.stringify({unit_id:p.unit_id,art:art,stand:parseFloat(v.stand),zaehler_nr:v.nr||"",datum:p.datum,protokoll_id:p.id})});
+      setZf({...zf,[art]:{}});await _re();
+    }catch(e){setErr(e.message);}finally{setBusy(false);}};
+  const delZaehler=async(id)=>{setBusy(true);try{await api("/immo/zaehler/"+id,{method:"DELETE"});await _re();}catch(e){setErr(e.message);}finally{setBusy(false);}};
+
+  // ── step 4: keys ──
+  const setKey=(i,n)=>{const s=JSON.parse(JSON.stringify(p.schluessel));s[i].anzahl=Math.max(0,n);setP({...p,schluessel:s});};
+  const addKey=()=>{const typ=prompt(_L("Schlüsselart","Anahtar türü","Key type"));if(!typ)return;setP({...p,schluessel:[...p.schluessel,{typ:typ,anzahl:1}]});};
+
+  // ── step 5: signatures ──
+  const sign=async(rolle,png)=>{if(!png)return;setBusy(true);setErr(null);
+    try{await api("/immo/protokolle/"+p.id+"/unterschrift",{method:"POST",body:JSON.stringify({rolle:rolle,png:png})});await _re();}
+    catch(e){setErr(e.message);}finally{setBusy(false);}};
+  const abschliessen=async()=>{
+    if(!confirm(_L("Protokoll abschließen?\n\nDanach kann es NICHT mehr geändert werden.","Protokol kapatılsın mı?\n\nSonrasında DEĞİŞTİRİLEMEZ.","Complete the protocol?\n\nIt can NOT be changed afterwards.")))return;
+    setBusy(true);setErr(null);
+    try{const d=await api("/immo/protokolle/"+p.id+"/abschliessen",{method:"POST"});setP(d);
+      if(showToast)showToast(_L("Protokoll abgeschlossen ✓","Protokol tamamlandı ✓","Protocol completed ✓"),"success");
+      if(onDone)onDone();
+    }catch(e){setErr(e.message);}finally{setBusy(false);}};
+  const dlPdf=async()=>{try{const tk=localStorage.getItem("atx_token");
+      const r=await fetch(API+"/immo/protokolle/"+p.id+"/pdf",{headers:{Authorization:"Bearer "+tk}});
+      if(!r.ok){alert("PDF "+r.status);return;}
+      const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");
+      a.href=u;a.download="Uebergabeprotokoll_"+p.art+"_"+p.id+".pdf";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);
+    }catch(e){alert(e.message);}};
+
+  const STEPS=[_L("Start","Başlangıç","Start"),_L("Räume","Odalar","Rooms"),_L("Zähler","Sayaçlar","Meters"),_L("Schlüssel","Anahtarlar","Keys"),_L("Unterschrift","İmza","Signature")];
+  const next=async()=>{
+    try{
+      if(step===1)await save({datum:p.datum,personen:p.personen});
+      if(step===2)await save({raeume:p.raeume});
+      if(step===4)await save({schluessel:p.schluessel});
+      setStep(Math.min(5,step+1));
+    }catch(e){/* error already shown */}
+  };
+  const _btn=(c,extra)=>({padding:"12px 18px",background:c,color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer",...(extra||{})});
+  const _in={width:"100%",boxSizing:"border-box",padding:"11px 13px",background:theme.surfaceAlt,border:"1.5px solid "+theme.border,borderRadius:10,color:theme.text,fontSize:15,fontFamily:"inherit"};
+
+  return(<div style={{position:"fixed",inset:0,background:theme.bg,zIndex:9000,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+    <div style={{maxWidth:640,margin:"0 auto",padding:"14px 14px 90px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:19,fontWeight:800,color:theme.text}}>🔑 {p.art==="einzug"?_L("Einzug","Giriş","Move-in"):_L("Auszug","Çıkış","Move-out")} · {p.mieter_name}</div>
+          <div style={{fontSize:12,color:theme.textMuted}}>{[p.property_adresse,p.unit_name].filter(Boolean).join(" · ")}</div>
+        </div>
+        <button onClick={onClose} style={{background:"transparent",border:"none",color:theme.textMuted,fontSize:26,cursor:"pointer",lineHeight:1}}>×</button>
+      </div>
+
+      {locked&&<div style={{background:"rgba(16,185,129,0.12)",border:"1px solid "+theme.accent,borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:13,color:theme.text}}>
+        🔒 {_L("Abgeschlossen und unterschrieben — dieses Protokoll kann nicht mehr geändert werden.","Tamamlandı ve imzalandı — bu protokol artık değiştirilemez.","Completed and signed — this protocol can no longer be changed.")}
+      </div>}
+
+      {!locked&&<div style={{display:"flex",gap:4,marginBottom:14}}>
+        {STEPS.map((s,i)=>(<div key={i} onClick={()=>setStep(i+1)} style={{flex:1,cursor:"pointer",textAlign:"center"}}>
+          <div style={{height:4,borderRadius:2,background:(i+1)<=step?theme.accent:theme.border,marginBottom:4}}></div>
+          <div style={{fontSize:10,color:(i+1)===step?theme.accent:theme.textDim,fontWeight:(i+1)===step?700:500}}>{s}</div>
+        </div>))}
+      </div>}
+
+      {err&&<div style={{background:"rgba(239,68,68,0.1)",border:"1px solid "+theme.danger,color:theme.danger,borderRadius:9,padding:"9px 12px",fontSize:13,marginBottom:10}}>⚠️ {err}</div>}
+
+      {/* ── 1 START ── */}
+      {(step===1||locked)&&<div style={{...css.card,marginBottom:12}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:10}}>{_L("Übergabe","Devir teslim","Handover")}</div>
+        <label style={{fontSize:12,color:theme.textMuted,fontWeight:600}}>{_L("Datum der Übergabe","Devir tarihi","Date of handover")}</label>
+        <input type="date" disabled={locked} style={{..._in,marginTop:4,marginBottom:12}} value={p.datum||""} onChange={e=>setP({...p,datum:e.target.value})}/>
+        <label style={{fontSize:12,color:theme.textMuted,fontWeight:600}}>{_L("Vermieter (anwesend)","Ev sahibi (hazır)","Landlord (present)")}</label>
+        <input disabled={locked} style={{..._in,marginTop:4,marginBottom:12}} value={(p.personen&&p.personen.vermieter)||""} onChange={e=>setP({...p,personen:{...(p.personen||{}),vermieter:e.target.value}})} placeholder={_L("Ihr Name","Adınız","Your name")}/>
+        <label style={{fontSize:12,color:theme.textMuted,fontWeight:600}}>{_L("Mieter (anwesend)","Kiracı (hazır)","Tenant (present)")}</label>
+        <input disabled={locked} style={{..._in,marginTop:4}} value={(p.personen&&p.personen.mieter)||""} onChange={e=>setP({...p,personen:{...(p.personen||{}),mieter:e.target.value}})}/>
+      </div>}
+
+      {/* ── 2 RÄUME ── */}
+      {(step===2||locked)&&<div style={{marginBottom:12}}>
+        {(p.raeume||[]).map((r,ri)=>(<div key={ri} style={{...css.card,marginBottom:8,padding:0,overflow:"hidden"}}>
+          <div onClick={()=>setOpenRaum(openRaum===ri?-1:ri)} style={{padding:"13px 15px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",background:theme.surfaceAlt}}>
+            <div style={{fontWeight:700,color:theme.text}}>{r.name}
+              {(r.elemente||[]).some(e=>e.zustand==="beschaedigt")&&<span style={{color:theme.danger,marginLeft:6,fontSize:12}}>⚠ {_L("Mangel","Hasar","Defect")}</span>}
+            </div>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              {!locked&&<span style={{color:theme.danger,fontSize:16}} onClick={(e)=>{e.stopPropagation();delRaum(ri);}}>🗑</span>}
+              <span style={{color:theme.textMuted}}>{openRaum===ri?"▾":"▸"}</span>
+            </div>
+          </div>
+          {openRaum===ri&&<div style={{padding:"10px 15px 14px"}}>
+            {(r.elemente||[]).map((el,ei)=>(<div key={ei} style={{marginBottom:12,paddingBottom:10,borderBottom:"1px solid "+theme.border}}>
+              <div style={{fontSize:14,fontWeight:600,color:theme.text,marginBottom:6}}>{el.was}</div>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
+                {ZUST.map(([v,lbl])=>(<button key={v} disabled={locked} onClick={()=>setZustand(ri,ei,v)}
+                  style={{flex:"1 1 auto",minWidth:70,minHeight:38,padding:"8px 4px",borderRadius:9,fontSize:13,fontWeight:700,cursor:locked?"default":"pointer",
+                    border:"1.5px solid "+(el.zustand===v?ZCOL[v]:theme.border),
+                    background:el.zustand===v?ZCOL[v]:"transparent",
+                    color:el.zustand===v?"#fff":theme.textMuted}}>{lbl}</button>))}
+              </div>
+              {(el.zustand==="beschaedigt"||el.zustand==="gebraucht"||el.notiz)&&
+                <input disabled={locked} style={{..._in,fontSize:13,padding:"8px 11px"}} placeholder={_L("Bemerkung (z.B. Kratzer 5 cm)","Not (ör. 5 cm çizik)","Note (e.g. 5 cm scratch)")}
+                  value={el.notiz||""} onChange={e=>setNotiz(ri,ei,e.target.value)}/>}
+            </div>))}
+            {!locked&&<label style={{display:"inline-block",padding:"10px 14px",background:theme.surfaceAlt,border:"1.5px solid "+theme.border,borderRadius:10,fontSize:14,fontWeight:600,color:theme.text,cursor:"pointer"}}>
+              📷 {_L("Foto aufnehmen","Fotoğraf çek","Take a photo")}
+              <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{foto(e.target.files[0],r.name);e.target.value="";}}/>
+            </label>}
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
+              {(p.fotos||[]).filter(f=>f.raum===r.name).map(f=>(<div key={f.id} style={{position:"relative"}}>
+                <img src={API+f.url} alt="" style={{width:74,height:56,objectFit:"cover",borderRadius:8,border:"1px solid "+theme.border}}/>
+                {!locked&&<span onClick={()=>delFoto(f.id)} style={{position:"absolute",top:-6,right:-6,background:theme.danger,color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>×</span>}
+              </div>))}
+            </div>
+          </div>}
+        </div>))}
+        {!locked&&<button onClick={addRaum} style={{..._btn("transparent"),border:"1.5px dashed "+theme.border,color:theme.textMuted,width:"100%"}}>➕ {_L("Raum hinzufügen","Oda ekle","Add room")}</button>}
+      </div>}
+
+      {/* ── 3 ZÄHLER ── */}
+      {(step===3||locked)&&<div style={{marginBottom:12}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:8,color:theme.text}}>{_L("Zählerstände","Sayaç değerleri","Meter readings")}</div>
+        {ZAEHLER.map(([art,lbl,einheit])=>{const saved=(p.zaehler||[]).filter(z=>z.art===art);const v=zf[art]||{};
+          return(<div key={art} style={{...css.card,marginBottom:8}}>
+            <div style={{fontWeight:700,color:theme.text,marginBottom:6}}>{lbl} <span style={{fontSize:12,color:theme.textDim,fontWeight:500}}>({einheit})</span></div>
+            {saved.map(z=>(<div key={z.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:14,padding:"6px 0"}}>
+              <span style={{color:theme.text}}><b>{z.stand}</b> {z.einheit} {z.zaehler_nr?<span style={{color:theme.textDim,fontSize:12}}>· Nr. {z.zaehler_nr}</span>:null}</span>
+              {!locked&&<span onClick={()=>delZaehler(z.id)} style={{color:theme.danger,cursor:"pointer"}}>×</span>}
+            </div>))}
+            {!locked&&saved.length===0&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <input style={{..._in,flex:"1 1 130px",fontSize:14}} placeholder={_L("Zählerstand","Değer","Reading")} type="number" inputMode="decimal"
+                value={v.stand||""} onChange={e=>setZf({...zf,[art]:{...v,stand:e.target.value}})}/>
+              <input style={{..._in,flex:"1 1 110px",fontSize:14}} placeholder={_L("Zähler-Nr.","Sayaç No","Meter no.")}
+                value={v.nr||""} onChange={e=>setZf({...zf,[art]:{...v,nr:e.target.value}})}/>
+              <button onClick={()=>addZaehler(art)} style={_btn(theme.accent,{flex:"0 0 auto"})}>✓</button>
+              <label style={{display:"flex",alignItems:"center",padding:"0 12px",background:theme.surfaceAlt,border:"1.5px solid "+theme.border,borderRadius:10,fontSize:18,cursor:"pointer"}}>
+                📷<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{foto(e.target.files[0],"Zähler: "+lbl);e.target.value="";}}/>
+              </label>
+            </div>}
+          </div>);})}
+      </div>}
+
+      {/* ── 4 SCHLÜSSEL ── */}
+      {(step===4||locked)&&<div style={{...css.card,marginBottom:12}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:10}}>{_L("Übergebene Schlüssel","Teslim edilen anahtarlar","Keys handed over")}</div>
+        {(p.schluessel||[]).map((k,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid "+theme.border}}>
+          <span style={{fontSize:15,color:theme.text}}>{k.typ}</span>
+          {locked?<b style={{fontSize:16}}>{k.anzahl}</b>:
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <button onClick={()=>setKey(i,(k.anzahl||0)-1)} style={{width:40,height:40,borderRadius:10,border:"1.5px solid "+theme.border,background:"transparent",color:theme.text,fontSize:20,cursor:"pointer"}}>−</button>
+            <b style={{fontSize:17,minWidth:24,textAlign:"center",color:theme.text}}>{k.anzahl||0}</b>
+            <button onClick={()=>setKey(i,(k.anzahl||0)+1)} style={{width:40,height:40,borderRadius:10,border:"1.5px solid "+theme.border,background:"transparent",color:theme.text,fontSize:20,cursor:"pointer"}}>+</button>
+          </div>}
+        </div>))}
+        {!locked&&<button onClick={addKey} style={{...css.btnOutline,marginTop:10,width:"100%"}}>➕ {_L("Schlüsselart hinzufügen","Anahtar türü ekle","Add key type")}</button>}
+      </div>}
+
+      {/* ── 5 UNTERSCHRIFT ── */}
+      {(step===5||locked)&&<div style={{...css.card,marginBottom:12}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>{_L("Unterschriften","İmzalar","Signatures")}</div>
+        <div style={{fontSize:12,color:theme.textMuted,marginBottom:12}}>
+          {_L("Beide Parteien bestätigen den oben festgehaltenen Zustand.","Her iki taraf yukarıdaki durumu onaylar.","Both parties confirm the condition recorded above.")}
+        </div>
+        {locked?
+          <div style={{fontSize:14,color:theme.text}}>
+            ✍️ {_L("Unterschrieben am","İmza tarihi","Signed on")} <b>{p.abgeschlossen_am?String(p.abgeschlossen_am).slice(0,10):p.datum}</b>
+          </div>
+          :<div>
+            <SignaturePad label={_L("Vermieter","Ev sahibi","Landlord")+(p.unterschrift_vermieter_da?" ✓":"")} onChange={(png)=>sign("vermieter",png)}/>
+            <SignaturePad label={_L("Mieter","Kiracı","Tenant")+(p.unterschrift_mieter_da?" ✓":"")} onChange={(png)=>sign("mieter",png)}/>
+            <button disabled={busy||!p.unterschrift_vermieter_da||!p.unterschrift_mieter_da} onClick={abschliessen}
+              style={{..._btn(theme.accent),width:"100%",marginTop:6,opacity:(busy||!p.unterschrift_vermieter_da||!p.unterschrift_mieter_da)?0.5:1}}>
+              🔒 {_L("Protokoll abschließen","Protokolü tamamla","Complete the protocol")}
+            </button>
+            <div style={{fontSize:11,color:theme.textDim,marginTop:6,textAlign:"center"}}>
+              {_L("Danach nicht mehr änderbar.","Sonrasında değiştirilemez.","Not editable afterwards.")}
+            </div>
+          </div>}
+        <button onClick={dlPdf} style={{...css.btnOutline,width:"100%",marginTop:10}}>📄 {_L("PDF herunterladen","PDF indir","Download PDF")}</button>
+      </div>}
+
+      {/* ── footer nav ── */}
+      {!locked&&<div style={{position:"fixed",bottom:0,left:0,right:0,background:theme.card,borderTop:"1px solid "+theme.border,padding:"10px 14px",display:"flex",gap:10,justifyContent:"center"}}>
+        <div style={{maxWidth:640,width:"100%",display:"flex",gap:10}}>
+          {step>1&&<button onClick={()=>setStep(step-1)} style={{...css.btnOutline,flex:"0 0 auto",padding:"12px 18px"}}>←</button>}
+          {step<5?<button disabled={busy} onClick={next} style={{..._btn(theme.accent),flex:1,opacity:busy?0.6:1}}>{busy?"…":_L("Weiter","Devam","Next")+" →"}</button>
+                 :<button onClick={onClose} style={{...css.btnOutline,flex:1,padding:"12px 18px"}}>{_L("Schließen","Kapat","Close")}</button>}
+        </div>
+      </div>}
+      {locked&&<div style={{textAlign:"center",marginTop:10}}>
+        <button onClick={onClose} style={{...css.btnOutline,padding:"12px 24px"}}>{_L("Schließen","Kapat","Close")}</button>
+      </div>}
+    </div>
+  </div>);
+}
+
 // ── MIETER (tenant-centric main view) — landlord günlük ana ekranı ──
 function MieterView({onNav,showToast}){
   const _gl=getLang();
@@ -2621,7 +2891,13 @@ function MieterView({onNav,showToast}){
   const fetchMk=(m,y)=>api("/immo/tenancies/"+m.tenancy_id+"/mietkonto?year="+(y||mkY)).then(setMk).catch(()=>{});
   const [mh,setMh]=React.useState(null);           // C4: Mahnung history (endpoint existed, was never called)
   const fetchMh=(m)=>api("/immo/tenancies/"+m.tenancy_id+"/mahnungen").then(setMh).catch(()=>setMh(null));
-  const openDetail=(m)=>{setSel(m);setMk(null);setMh(null);setMkY(curY);fetchMk(m,curY);fetchMh(m);};
+  // Sprint 1 — Übergabe (Ein-/Auszugsprotokoll): the handover lives on the tenant, where the landlord looks for it
+  const [prots,setProts]=React.useState([]);
+  const [wizard,setWizard]=React.useState(null);
+  const fetchProts=(m)=>api("/immo/protokolle?tenancy_id="+m.tenancy_id).then(d=>setProts(d.protokolle||[])).catch(()=>setProts([]));
+  const openProt=async(pid)=>{try{const d=await api("/immo/protokolle/"+pid);setWizard(d);}catch(e){alert(e.message);}};
+  const newProt=async(m,art)=>{try{const d=await api("/immo/protokolle",{method:"POST",body:JSON.stringify({tenancy_id:m.tenancy_id,art:art})});setWizard(d);fetchProts(m);}catch(e){alert(e.message);}};
+  const openDetail=(m)=>{setSel(m);setMk(null);setMh(null);setProts([]);setMkY(curY);fetchMk(m,curY);fetchMh(m);fetchProts(m);};
   const payMonth=async(m,mon)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:mkY,monat:mon,betrag:m.gesamtmiete})});fetchMk(m);load();}catch(e){alert(e.message);}};
   const unpayMonth=async(m,mon)=>{if(!confirm(_L("Diesen Monat als NICHT bezahlt melden?","Bu ay ÖDENMEDİ olarak işaretlensin mi?","Report this month as NOT paid?")))return;try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt?jahr="+mkY+"&monat="+mon,{method:"DELETE"});fetchMk(m);load();}catch(e){alert(e.message);}};
   const today=new Date().toISOString().slice(0,10);
@@ -2686,6 +2962,21 @@ function MieterView({onNav,showToast}){
            </span>}
         </div>)}
       </div>
+      {/* ── ÜBERGABE (Sprint 1): Einzug/Auszug protocol — the landlord's paper replacement ── */}
+      <div style={{...css.card,marginBottom:12}}>
+        <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>{_L("Übergabe","Devir teslim","Handover")}</div>
+        {prots.map(x=>(<div key={x.id} onClick={()=>openProt(x.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid "+theme.border,cursor:"pointer"}}>
+          <span style={{color:theme.text,fontWeight:600}}>🔑 {x.art==="einzug"?_L("Einzug","Giriş","Move-in"):_L("Auszug","Çıkış","Move-out")}
+            <span style={{fontSize:12,color:theme.textMuted,fontWeight:400}}> · {x.datum||""}</span></span>
+          <span style={{fontSize:12,fontWeight:700,color:x.gesperrt?theme.accent:"#f59e0b"}}>{x.gesperrt?"🔒 "+_L("abgeschlossen","tamamlandı","completed"):"✎ "+_L("Entwurf","Taslak","Draft")}</span>
+        </div>))}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
+          <button style={{...css.btnOutline,padding:"8px 12px",fontSize:13}} onClick={()=>newProt(m,"einzug")}>➕ {_L("Einzugsprotokoll","Giriş protokolü","Move-in protocol")}</button>
+          <button style={{...css.btnOutline,padding:"8px 12px",fontSize:13}} onClick={()=>newProt(m,"auszug")}>➕ {_L("Auszugsprotokoll","Çıkış protokolü","Move-out protocol")}</button>
+        </div>
+      </div>
+      {wizard&&<UebergabeWizard prot={wizard} showToast={showToast}
+        onClose={()=>{setWizard(null);fetchProts(m);}} onDone={()=>fetchProts(m)}/>}
       {mh&&(mh.mahnungen||[]).length>0&&<div style={{...css.card,marginBottom:12}}>
         <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>{_L("Mahnungen","İhtarlar","Dunning letters")} ({mh.gesendet})</div>
         {(mh.mahnungen||[]).map(x=>(<div key={x.id} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:"1px solid "+theme.border}}>
