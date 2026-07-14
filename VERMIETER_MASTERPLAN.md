@@ -27,9 +27,9 @@ yasaktır.** Aktif sprint takibi: `SPRINT.md`. Sprint disiplini: `CLAUDE.md`.
 | 2 | **Mieter** | Tenant · Contact · Phone · Email · Kaution · Mieterhöhung geçmişi | ✅ mevcut | ✅ **TAMAM** (Sprint 0): Almanca butonlar, onay dialogları, 3 dilli hint'ler |
 | 3 | **Mietkonto** | Aylık genel bakış · Ödeme geçmişi · Exception Engine · This Month | ✅ mevcut | ✅ **TAMAM** (Sprint 0): tek Payment Service, NK borca dahil (Warmmiete), çok-yıllı borç, Mieteingang borcu kapatıyor, tüm ekranlar aynı sayıyı veriyor (prod smoke 9/9) |
 | 4 | **Mahnung** | Erinnerung · Mahnung 1 · Mahnung 2 · Letzte Mahnung · PDF · History | 🟡 geliştirilecek | 🟢 **BÜYÜK ÖLÇÜDE TAMAM** (Sprint 0): eskalasyon (backend karar veriyor) + history UI + gerçek mektup (alıcı adresi, kalem dökümü, somut vade, landlord imzası+IBAN). Kalan: e-posta ile gönderim, Mahnung silme |
-| 5 | **Wohnungsgeberbestätigung** | Tam otomatik PDF | 🟡 geliştirilecek | 🟡 PDF var (`immo_api.py:1577`), "○ Anmeldung" çipi hiç tiklenemiyor |
-| 6 | **Übergabeprotokoll** ⭐ | Tarih · ev sahibi · kiracı · oda-oda kontrol (duvar/zemin/kapı/pencere/mutfak/banyo) · anahtar sayısı · sayaçlar (Strom/Wasser/Warmwasser/Heizung/Gas) · fotoğraflar · imzalar · PDF | 🔴 zorunlu | 🔴 yok |
-| 7 | **Zählerstände** ⭐ | Her taşınmada Strom/Wasser/Warmwasser/Gas/Heizung · geçmiş · grafik | 🔴 zorunlu | 🔴 yok |
+| 5 | **Wohnungsgeberbestätigung** | Tam otomatik PDF | 🟡 geliştirilecek | ✅ **TAMAM** (Sprint 1): PDF + "Anmeldung erledigt" kutusu artık tiklenebiliyor |
+| 6 | **Übergabeprotokoll** ⭐ | Tarih · ev sahibi · kiracı · oda-oda kontrol (duvar/zemin/kapı/pencere/mutfak/banyo) · anahtar sayısı · sayaçlar (Strom/Wasser/Warmwasser/Heizung/Gas) · fotoğraflar · imzalar · PDF | 🔴 zorunlu | ✅ **TAMAM** (Sprint 1): 5 adımlı sihirbaz, oda-oda durum, foto, anahtar, iki imza, PDF, kilit |
+| 7 | **Zählerstände** ⭐ | Her taşınmada Strom/Wasser/Warmwasser/Gas/Heizung · geçmiş · grafik | 🔴 zorunlu | ✅ **TAMAM** (Sprint 1): 5 sayaç türü, geçmiş, otomatik tüketim, grafik |
 | 8 | **Nebenkostenabrechnung** ⭐⭐⭐ | Heizkosten · Wasser · Abwasser · Müll · Versicherung · Grundsteuer · Hausmeister · Gartenpflege · Allgemeinstrom · Schornsteinfeger · Winterdienst · Sonstige · **Umlageschlüssel · Vorauszahlungen · Nachzahlung · Guthaben · PDF** | 🔴 zorunlu | 🔴 yok — ama **ENGELİ KALKTI** (Sprint 0): NK artık Soll'un parçası, Vorauszahlung borç olarak takip ediliyor (`immo_rules.monat_nk_soll`) |
 | 9 | **Mietvertrag Generator** | Şablon · PDF · imzaya hazır | 🔴 zorunlu | 🔴 yok |
 | 10 | **Kurzzeitmiete** | Günlük/haftalık/aylık sözleşmeler | 🟡 | 🔴 yok |
@@ -50,9 +50,9 @@ ledger canlı bir üçüncü defterdi). Hepsi kapatıldı. Kapanış raporu: `SP
 
 Sonraki sıra:
 **S1** #4 Mahnung'un kalanı (e-posta gönderimi, Mahnung silme) →
-**S2** #5 WGB + #7 Zählerstände →
-**S3** #6 Übergabeprotokoll →
-**S4** #8 Nebenkostenabrechnung ⭐⭐⭐ →
+**Sprint 1 ✅ KAPANDI (2026-07-15)**: #6 Übergabeprotokoll + #7 Zählerstände + #5 WGB → canlı, prod smoke 17/17.
+**SONRAKİ: Sprint 2 = #8 Nebenkostenabrechnung ⭐⭐⭐** (engeli kalktı: NK borç olarak takip ediliyor + sayaç ölçümleri var) →
+**Sprint 3** = Mahnung e-posta gönderimi + iyileştirmeler →
 **S5** #13 Wohnung Akte (yukarıdakileri tek ekranda toplar) →
 **S6** #9 Mietvertrag → **S7** #14/#15 → **S8** #10/#11/#12
 

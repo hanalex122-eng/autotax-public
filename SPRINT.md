@@ -18,7 +18,67 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## ACTIVE SPRINT — Sprint 1: "Move-in / Move-out Package"
+## NO ACTIVE SPRINT — pick the next one (Sprint 2 = Nebenkostenabrechnung, per the user's order)
+
+---
+
+## ✅ SPRINT 1 EXIT REPORT — closed 2026-07-15
+
+**Deployed:** `45fa928` · production `/health` ok · **production smoke 17/17 + regression 11/11** ·
+suite **37/37** · **all existing business data byte-for-byte unchanged (sha256 before == after)**.
+
+### Completed — a landlord can now do an entire handover inside AutoTax
+| Masterplan | What is live | Proof (production) |
+|---|---|---|
+| **#6 Übergabeprotokoll** ⭐ | 5-step wizard on the tenant screen (Start · Räume · Zähler · Schlüssel · Unterschrift). Rooms pre-filled with their elements, 4-step condition scale, notes, defects derived automatically. | smoke ①②: 5 rooms pre-filled, Mängel derived from a "beschädigt" floor |
+| **Fotos** | 📷 opens the phone camera directly; photos are attached per room and downscaled server-side | smoke ③: 186 KB → **11 KB**, EXIF rotation honoured |
+| **#7 Zählerstände** ⭐ | Strom/Wasser/Warmwasser/Gas/Heizung with meter number, unit and photo — during the handover AND standalone. History + consumption + bar chart on the tenant screen. | smoke ④⑪: 12345,5 → 13000 kWh = **654,5 kWh derived** |
+| **Digitale Unterschriften** | Two canvases signed with the finger. A typed name or an empty canvas is refused. | smoke ⑥ |
+| **Lock** | Both signatures → `abgeschlossen`. Every write is refused with **409**: edit, re-sign, add a meter, add a photo, delete. A correction is a new Nachtrag. | smoke ⑨: **5/5 refused** |
+| **PDF** | Letterhead · flat + parties · room-by-room table (defects in red) · Mängel list · meter table · keys · photos by room · **both signatures as images** + date | smoke ⑧: 9.4 KB PDF with photo + signatures |
+| **#5 Wohnungsgeberbestätigung** | §19 BMG PDF next to a real **"Anmeldung erledigt"** checkbox — the chip existed since the module was written and **no UI could ever tick it** | smoke ⑩: WGB 200 + chip ticked and it sticks |
+
+### Found by the production smoke test (fixed before closing)
+- **Mahnung history read backwards** for letters written on the same day (`datum.desc()` had no
+  id tiebreak). The dunned amounts were always right; only the order was wrong. Fixed in
+  `45fa928`, verified live: 1. Mahnung → Zahlungserinnerung → … newest first.
+- (A false alarm worth recording: a smoke assertion marked a FUTURE month unpaid and expected
+  debt. The product was right — a month that is not due yet is not debt. The test was wrong.)
+
+### Regression — every existing landlord function still works (rule 5)
+Bu Ay/Mieter (+`summe`) · Mietkonto (12 rows) · Mahnung (amount = the card, escalation) ·
+Berichte + Dashboard (Rückstand == the card — no third book) · Immobilien · Accounting ·
+and the Sprint-0 core: **NK in the Soll (470, not 400)**, previous-month arrears, and a
+Mieteingang payment settling the debt (470 → 0). **11/11 green.**
+
+### Deliberately deferred
+- E-mailing the protocol/WGB to the tenant → **Sprint 3** (together with the Mahnung e-mail).
+- Nachtrag flow (a "correction of" link between two protocols) — the rule is enforced, the
+  convenience link is not built.
+- Übergabe from the Immobilien screen (today it lives on the tenant, where the landlord looks).
+
+### Open risks
+1. Photos live on the Railway disk (830 GB free). A landlord with many handovers will grow it;
+   no retention policy exists yet.
+2. The signature is a **document signature** (like a scanned one), not a qualified electronic
+   signature (QES). The UI does not claim otherwise — keep it that way.
+3. Still open from Sprint 0: the ledger's Soll is Kalt-only (audit domain only, no user sees it)
+   · the Railway *Postgres* service variables hold an outdated password · the acquisition funnel
+   is still broken (landing CTA opens login, not registration).
+
+### Is this sprint really finished?  **YES.**
+All eight DoD conditions: code complete · 37/37 tests · UX checked (the wizard is the screen a
+landlord uses standing in a flat) · no contradicting legacy flow (the handover is new ground;
+the lock makes the document unambiguous) · reviewed commit by commit · deployed · smoke-tested
+on production with a complete real workflow · no critical gap in the handover.
+
+**Next: Sprint 2 = Nebenkostenabrechnung** — now genuinely unblocked: NK is tracked as owed
+(Sprint 0) and the meter readings that Heizkosten/Wasser must be split by exist (Sprint 1,
+`verbrauch_zeitraum()` is already written and tested).
+
+---
+
+## CLOSED — Sprint 1: "Move-in / Move-out Package"
 
 **Opened:** 2026-07-14 (right after Sprint 0 closed)
 **Serves:** `VERMIETER_MASTERPLAN.md` #6 Übergabeprotokoll ⭐ · #7 Zählerstände ⭐ · #5 WGB
