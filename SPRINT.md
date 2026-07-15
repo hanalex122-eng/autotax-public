@@ -18,7 +18,23 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## ACTIVE SPRINT — Sprint 3: "Personenzahl Allocation Engine"
+## NO ACTIVE SPRINT — next: Verbrauch engine, then HeizkostenV (separate legal design), then Mahnung e-mail
+
+## ✅ SPRINT 3 CLOSED (2026-07-15) — Personenzahl Allocation Engine
+Deployed `16a3bb5` · Go/No-Go fully green. A single-water-meter (Sammelzähler) statement now splits
+water/Abwasser/Müll by persons per flat × Zeitanteil; a vacant unit contributes 0 (no invented head
+count, not redistributed); missing person count → honest Wohnfläche fallback naming the tenant; the
+Σ(shares)+Leerstand==total invariant holds; CALCULATION_VERSION bumped to 2 so old finalised v1
+statements keep rendering from their snapshot. Rules-only (no DB/UI/endpoint change).
+
+- Backup PASS (SHA256 fingerprint) · Migration N/A (no schema change, proven) · Rollback ready
+  (`8e78939`, no DB rollback) · Smoke 9/9 (the 3/1/2-persons + 1-vacant scenario) · Regression 9/9
+  (all Sprint 0/1/2 functions + Wohnfläche NK unchanged) · core business data SHA256-identical.
+- Deferred: Verbrauch, Individuell (data-ready), HeizkostenV (separate legal/architecture sprint).
+
+---
+
+## CLOSED — Sprint 3: "Personenzahl Allocation Engine"
 
 **Opened:** 2026-07-15
 **Scope (approved):** switch on the Personenzahl allocation key ONLY. Verbrauch = next; HeizkostenV =
