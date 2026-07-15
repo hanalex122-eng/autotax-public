@@ -3201,6 +3201,11 @@ function NkEditor({propertyId,showToast}){
   const finalizeNk=async()=>{if(!confirm(_L("Abrechnung abschließen?\n\nDanach nicht mehr änderbar (nur Entsperren).","Hesap kapatılsın mı?\n\nSonra değiştirilemez (sadece kilit açma).","Finalise?\n\nNot editable afterwards (only unlock).")))return;try{const a=await api("/immo/nk/"+nkOpen.id+"/finalisieren",{method:"POST"});setNkOpen(a);loadNk(propertyId);if(showToast)showToast(_L("Abgeschlossen ✓","Kapatıldı ✓","Finalised ✓"),"success");}catch(e){alert(e.message);}};
   const unlockNk=async()=>{if(!confirm(_L("Entsperren und wieder bearbeitbar machen?","Kilidi aç ve düzenlenebilir yap?","Unlock and make editable again?")))return;try{setNkOpen(await api("/immo/nk/"+nkOpen.id+"/entsperren",{method:"POST"}));loadNk(propertyId);}catch(e){alert(e.message);}};
   const nkPdf=async(tid)=>{try{const r=await fetch(API+"/immo/nk/"+nkOpen.id+"/pdf"+(tid?"?tenancy_id="+tid:""),{headers:{Authorization:"Bearer "+_tk()}});if(!r.ok){alert("PDF "+r.status);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Nebenkosten_"+nkOpen.jahr+(tid?"_"+tid:"_Uebersicht")+".pdf";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}catch(e){alert(e.message);}};
+  // Personenzahl je Mieter — entered right here, so a Personenzahl split (Wasser/Müll) works without
+  // hunting through the tenant edit. Saves to the tenancy, then reloads the statement.
+  const [nkPers,setNkPers]=React.useState({});
+  const nkSavePers=async(tid)=>{const raw=nkPers[tid];if(raw===undefined)return;try{await api("/immo/tenancies/"+tid,{method:"PATCH",body:JSON.stringify({personenzahl:raw===""?-1:parseInt(raw)})});setNkOpen(await api("/immo/nk/"+nkOpen.id));setNkPers(p=>{const n={...p};delete n[tid];return n;});}catch(e){alert(e.message);}};
+  const nkUsesPers=nkOpen&&(nkOpen.positionen||[]).some(p=>p.schluessel==="personenzahl");
   if(!nkOpen)return(<div>
     <div style={{...css.card,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
       <div><div style={{fontWeight:700,fontSize:15}}>📑 {_L("Nebenkostenabrechnung","Yan gider hesabı","Utility-cost statement")}</div>
@@ -3238,6 +3243,19 @@ function NkEditor({propertyId,showToast}){
         </div>);})}
       <div style={{marginTop:12,fontSize:14,fontWeight:700,display:"flex",justifyContent:"space-between"}}><span>{_L("Summe umlagefähig","Toplam dağıtılabilir","Umlagefähig total")}</span><b style={{color:theme.accent}}>{_e(erg.umlagefaehige_summe)}</b></div>
     </div>
+    {/* Personen je Mieter — for Wasser/Müll split by persons. Enter here; the result recomputes. */}
+    {!locked&&(erg.tenants||[]).length>0&&<div style={{...css.card,marginBottom:12,border:nkUsesPers?"1.5px solid "+theme.accent:undefined}}>
+      <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>👤 {_L("Personen je Wohnung","Daire başına kişi","Persons per flat")}</div>
+      <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Nur nötig, wenn eine Position nach 'Personenzahl' verteilt wird (z.B. Wasser, Müll).","Sadece bir kalem 'Personenzahl' ile dağıtılıyorsa gerekir (ör. su, çöp).","Only needed when a cost is split by 'Personenzahl' (e.g. water, waste).")}</div>
+      {(erg.tenants||[]).map(t=>{const pv=nkPers[t.tenancy_id]!==undefined?nkPers[t.tenancy_id]:(t.personenzahl!=null?String(t.personenzahl):"");return(
+        <div key={t.tenancy_id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"5px 0"}}>
+          <span style={{fontSize:14,color:theme.text}}>{t.name}</span>
+          <input type="number" min="0" inputMode="numeric" placeholder={_L("Personen","Kişi","Persons")} value={pv}
+            onChange={e=>setNkPers(p=>({...p,[t.tenancy_id]:e.target.value}))} onBlur={()=>nkSavePers(t.tenancy_id)}
+            onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
+            style={{width:110,padding:"7px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(t.personenzahl!=null?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
+        </div>);})}
+    </div>}
     <div style={{...css.card,marginBottom:12}}>
       <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>{_L("Ergebnis je Mieter","Kiracı başına sonuç","Result per tenant")}</div>
       {(erg.tenants||[]).map(t=>{const g=t.typ==="guthaben";const n=t.typ==="nachzahlung";return(<div key={t.tenancy_id} style={{padding:"9px 0",borderBottom:"1px solid "+theme.border}}>

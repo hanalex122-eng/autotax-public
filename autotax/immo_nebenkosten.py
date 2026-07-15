@@ -327,6 +327,7 @@ def ergebnis(verteilung, tenancies, von: date, bis: date):
         saldo = round(voraus - umlage, 2)
         rows.append({
             "tenancy_id": tid, "name": data["name"],
+            "personenzahl": (getattr(t, "personenzahl", None) if t is not None else None),
             "umlage": umlage, "vorauszahlung": voraus, "saldo": saldo,
             "typ": "guthaben" if saldo > 0.005 else ("nachzahlung" if saldo < -0.005 else "ausgeglichen"),
             "positionen": data["positionen"],

@@ -171,6 +171,11 @@ ok(vm["leerstand"] > 0, f"the vacant unit's AREA share (Grundsteuer) is carried 
 # person cost fully on occupants (200/100 of 300 = 300 assigned), area cost split incl. vacancy
 eq("A: 200 (Müll) + 200 (Grundsteuer 1/3) = 400", sm[801], 400.0)
 
+print("\n[8b] ergebnis rows carry personenzahl (so the NK screen can show a per-tenant persons input)")
+res_b = NK.ergebnis(NK.verteile([Pos("muell", 400.0, schluessel="personenzahl")], UNITS, tens, VON, BIS), tens, VON, BIS)
+byname = {r["name"]: r for r in res_b["tenants"]}
+ok(byname["A"]["personenzahl"] == 3 and byname["B"]["personenzahl"] == 1, "each result row exposes personenzahl")
+
 print("\n[9] snapshot records the RAW schluessel (personenzahl), engine version 2")
 snap = NK.build_snapshot({"id": 1, "jahr": 2026}, {"id": 10, "adresse": "x"}, [Unit(1), Unit(2)],
                          [Tenancy(901, 1, "A", VON, None, personenzahl=2), Tenancy(902, 2, "B", VON, None, personenzahl=2)],
