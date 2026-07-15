@@ -18,7 +18,19 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## ACTIVE SPRINT — Sprint 2: "Nebenkostenabrechnung" (Masterplan #8 ⭐⭐⭐)
+## NO ACTIVE SPRINT — next candidate: Sprint 3 (Personenzahl/Verbrauch/HeizkostenV engines)
+
+## ✅ SPRINT 2 CLOSED (2026-07-15) — full report: `.claude/sprint2_final_report.md`
+Deployed `0c001c4` · Go/No-Go fully green (migration/smoke 12-12/regression 9-9/rollback ready) ·
+suite 39/39 · all business data SHA256-identical. A landlord can now produce a legally usable
+Nebenkostenabrechnung per tenant (Wohnfläche×Zeitanteil + Leerstand → landlord, Vorauszahlung from
+`monat_nk_soll`, Guthaben/Nachzahlung, immutable snapshot, finalise=lock, per-tenant + overview PDF).
+Personenzahl/Verbrauch/HeizkostenV/OCR are data-ready and deferred to Sprint 3 (code-only, no
+migration). Masterplan #8 done for Faz-1.
+
+---
+
+## CLOSED — Sprint 2: "Nebenkostenabrechnung" (Masterplan #8 ⭐⭐⭐)
 
 **Opened:** 2026-07-15
 **Goal:** a small landlord produces a legally usable annual utility-cost statement (§556 BGB) per

@@ -30,7 +30,7 @@ yasaktır.** Aktif sprint takibi: `SPRINT.md`. Sprint disiplini: `CLAUDE.md`.
 | 5 | **Wohnungsgeberbestätigung** | Tam otomatik PDF | 🟡 geliştirilecek | ✅ **TAMAM** (Sprint 1): PDF + "Anmeldung erledigt" kutusu artık tiklenebiliyor |
 | 6 | **Übergabeprotokoll** ⭐ | Tarih · ev sahibi · kiracı · oda-oda kontrol (duvar/zemin/kapı/pencere/mutfak/banyo) · anahtar sayısı · sayaçlar (Strom/Wasser/Warmwasser/Heizung/Gas) · fotoğraflar · imzalar · PDF | 🔴 zorunlu | ✅ **TAMAM** (Sprint 1): 5 adımlı sihirbaz, oda-oda durum, foto, anahtar, iki imza, PDF, kilit |
 | 7 | **Zählerstände** ⭐ | Her taşınmada Strom/Wasser/Warmwasser/Gas/Heizung · geçmiş · grafik | 🔴 zorunlu | ✅ **TAMAM** (Sprint 1): 5 sayaç türü, geçmiş, otomatik tüketim, grafik |
-| 8 | **Nebenkostenabrechnung** ⭐⭐⭐ | Heizkosten · Wasser · Abwasser · Müll · Versicherung · Grundsteuer · Hausmeister · Gartenpflege · Allgemeinstrom · Schornsteinfeger · Winterdienst · Sonstige · **Umlageschlüssel · Vorauszahlungen · Nachzahlung · Guthaben · PDF** | 🔴 zorunlu | 🔴 yok — ama **ENGELİ KALKTI** (Sprint 0): NK artık Soll'un parçası, Vorauszahlung borç olarak takip ediliyor (`immo_rules.monat_nk_soll`) |
+| 8 | **Nebenkostenabrechnung** ⭐⭐⭐ | Heizkosten · Wasser · Abwasser · Müll · Versicherung · Grundsteuer · Hausmeister · Gartenpflege · Allgemeinstrom · Schornsteinfeger · Winterdienst · Sonstige · **Umlageschlüssel · Vorauszahlungen · Nachzahlung · Guthaben · PDF** | 🔴 zorunlu | ✅ **TAMAM Faz-1** (Sprint 2): elle gider + umlagefähig varsayılanları + Wohnfläche/Zeitanteil/Leerstand motoru + Vorauszahlung (monat_nk_soll) + Guthaben/Nachzahlung + immutable snapshot + finalize=lock + kiracı/genel PDF. Personenzahl/Verbrauch/HeizkostenV → Sprint 3 (veri hazır). |
 | 9 | **Mietvertrag Generator** | Şablon · PDF · imzaya hazır | 🔴 zorunlu | 🔴 yok |
 | 10 | **Kurzzeitmiete** | Günlük/haftalık/aylık sözleşmeler | 🟡 | 🔴 yok |
 | 11 | **Kündigung Generator** | Hazır şablonlar | 🟡 | 🔴 yok |
@@ -51,7 +51,8 @@ ledger canlı bir üçüncü defterdi). Hepsi kapatıldı. Kapanış raporu: `SP
 Sonraki sıra:
 **S1** #4 Mahnung'un kalanı (e-posta gönderimi, Mahnung silme) →
 **Sprint 1 ✅ KAPANDI (2026-07-15)**: #6 Übergabeprotokoll + #7 Zählerstände + #5 WGB → canlı, prod smoke 17/17.
-**SONRAKİ: Sprint 2 = #8 Nebenkostenabrechnung ⭐⭐⭐** (engeli kalktı: NK borç olarak takip ediliyor + sayaç ölçümleri var) →
+**Sprint 2 ✅ KAPANDI (2026-07-15)**: #8 Nebenkostenabrechnung Faz-1 → canlı 0c001c4, Go/No-Go tam yeşil. Rapor: .claude/sprint2_final_report.md →
+**SONRAKİ: Sprint 3 = Personenzahl/Verbrauch/HeizkostenV hesap motorları** (kod-only, DB değişmez) →
 **Sprint 3** = Mahnung e-posta gönderimi + iyileştirmeler →
 **S5** #13 Wohnung Akte (yukarıdakileri tek ekranda toplar) →
 **S6** #9 Mietvertrag → **S7** #14/#15 → **S8** #10/#11/#12
