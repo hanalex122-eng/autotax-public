@@ -895,6 +895,9 @@ class ImmoUnit(Base):
     name = Column(String(100), nullable=True)        # z.B. "Whg 1", "EG links"
     wohnflaeche = Column(Float, nullable=True)
     soll_miete = Column(Float, nullable=True)         # Ziel-/Marktmiete (für Leerstand-Bewertung)
+    # Sprint 2 (Nebenkosten): Miteigentumsanteil / an agreed allocation key that overrides Wohnfläche
+    # (WEG statements, non-area keys). Nullable; Wohnfläche is the §556a default when empty.
+    mea = Column(Float, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
@@ -924,6 +927,9 @@ class ImmoTenancy(Base):
     notiz = Column(Text, nullable=True)
     miete_historie = Column(Text, nullable=True)               # JSON [{"ab":"2026-07-01","kalt":450}] — kira değişiklikleri (tarihli)
     erstmonat_betrag = Column(Float, nullable=True)            # vereinbarte Erstmiete (anlaşılan ilk-ay kira) — boşsa gün-oranı
+    # Sprint 2 (Nebenkosten): basis for the Personenzahl allocation key (e.g. Müll).
+    # Stored now so Sprint 3 wiring is code-only; nullable, no existing behaviour depends on it.
+    personenzahl = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
@@ -1044,6 +1050,56 @@ class ImmoZaehlerstand(Base):
     einheit = Column(String(15), nullable=True)   # kWh | m³ | Einheiten
     datum = Column(Date, nullable=True)
     foto_document_id = Column(Integer, ForeignKey("immo_document.id"), nullable=True)
+    notiz = Column(String(300), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+# ── IMMOBILIEN SPRINT 2: Nebenkostenabrechnung (Betriebskostenabrechnung) ──
+class NkAbrechnung(Base):
+    """ONE utility-cost statement for one property and one period (§556 BGB).
+
+    A FINALISED statement is immutable: `ergebnis_snapshot` freezes every value used in the
+    calculation (see .claude/nk_architecture.md → Principle A). The snapshot — NOT the PDF — is the
+    record of truth: years later, even if rent/area/tenancy dates changed, the statement re-produces
+    from the snapshot. A correction requires an explicit Unlock or a new Revision, never an in-place
+    edit (Principle B)."""
+    __tablename__ = "nk_abrechnung"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    property_id = Column(Integer, ForeignKey("immo_property.id"), nullable=False, index=True)
+    jahr = Column(Integer, nullable=False)
+    zeitraum_von = Column(Date, nullable=True)
+    zeitraum_bis = Column(Date, nullable=True)
+    status = Column(String(15), nullable=False, default="entwurf")   # entwurf | final
+    ergebnis_snapshot = Column(Text, nullable=True)   # JSON: the frozen calculation (Principle A)
+    calculation_version = Column(Integer, nullable=True)   # engine version stamped at finalise
+    finalized_at = Column(DateTime, nullable=True)
+    notiz = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class NkKostenposition(Base):
+    """ONE cost line in a statement. `kategorie` is a STRING (not a DB enum) so a new operating-cost
+    category never needs a migration. `schluessel` is one of the five allocation methods — all valid
+    values now; Sprint 2 computes wohnflaeche/wohneinheiten, the others are stored and wired in
+    Sprint 3 (no schema change). `verbrauch_art`/`individuell` carry the basis for those later keys."""
+    __tablename__ = "nk_kostenposition"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    abrechnung_id = Column(Integer, ForeignKey("nk_abrechnung.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    kategorie = Column(String(40), nullable=False)    # heizkosten|wasser|muell|grundsteuer|… (string)
+    betrag = Column(Float, nullable=False, default=0.0)
+    umlagefaehig = Column(Boolean, nullable=False, default=True)   # BetrKV default per category
+    umlage_pct = Column(Integer, nullable=False, default=100)      # mixed Hausmeister etc. (0-100)
+    schluessel = Column(String(20), nullable=False, default="wohnflaeche")  # allocation method
+    verbrauch_art = Column(String(15), nullable=True)   # -> ImmoZaehlerstand.art (Verbrauch key, S3)
+    individuell = Column(Text, nullable=True)           # JSON {tenancy_id: betrag} (Individuell key, S3)
+    document_id = Column(Integer, ForeignKey("immo_document.id"), nullable=True)   # the receipt
+    beleg_datum = Column(Date, nullable=True)
     notiz = Column(String(300), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)

@@ -84,12 +84,25 @@ def init_db():
                     logger.info("Added 'offene_monate' column to immo_tenancy")
                 for _c, _t in (("telefon", "VARCHAR(50)"), ("email", "VARCHAR(200)"),
                                ("notiz", "TEXT"), ("miete_historie", "TEXT"),
-                               ("erstmonat_betrag", "DOUBLE PRECISION")):
+                               ("erstmonat_betrag", "DOUBLE PRECISION"),
+                               ("personenzahl", "INTEGER")):   # Sprint 2 (Nebenkosten): Personenzahl key
                     if _c not in _tc:
                         conn.execute(text(f"ALTER TABLE immo_tenancy ADD COLUMN {_c} {_t}"))
                         logger.info("Added '%s' column to immo_tenancy", _c)
     except Exception as e:
         logger.warning("immo_tenancy status-column migration skipped: %s", e)
+    # Sprint 2 (Nebenkosten): immo_unit.mea. New tables (nk_abrechnung/nk_kostenposition) come from
+    # create_all; only this one existing column needs an ALTER. Additive + nullable.
+    try:
+        _iu = inspect(engine)
+        if "immo_unit" in _iu.get_table_names():
+            _uc = [c["name"] for c in _iu.get_columns("immo_unit")]
+            if "mea" not in _uc:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE immo_unit ADD COLUMN mea DOUBLE PRECISION"))
+                    logger.info("Added 'mea' column to immo_unit")
+    except Exception as e:
+        logger.warning("immo_unit mea migration skipped: %s", e)
     # Sprint 1 (Übergabeprotokoll): a photo may belong to a handover + a room.
     # The new tables (immo_protokoll / immo_zaehlerstand) come from create_all; only the two
     # columns on the existing immo_document table need an ALTER. Additive + nullable.

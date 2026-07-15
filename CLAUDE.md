@@ -53,6 +53,12 @@ webhook) calls the Payment Service — it never writes `ImmoRent`, `offene_monat
 directly. A new read surface (screen, report, PDF, Nebenkostenabrechnung) calls the debt/derivation
 helpers — it never sums rows into its own private total.
 
+**Single-Ledger Principle (verbatim):** *an economic event is represented in exactly one place in the
+system.* The NK Vorauszahlung is computed only from `monat_nk_soll` (the Mietkonto) — never a second
+Vorauszahlung field/source. A finalised Nebenkostenabrechnung is immutable: its `ergebnis_snapshot`
+(not the PDF) is the record of truth, and a correction requires an explicit Unlock or a new
+Revision — never an in-place edit. See `.claude/nk_architecture.md` → "Binding architecture principles".
+
 ---
 
 ## Project at a glance
