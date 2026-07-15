@@ -156,7 +156,9 @@ check, for the landlord's own file.
 
 **Postponed to Sprint 3+ (data-ready, rules-stubbed — NO DB redesign needed):**
 - **Heizkosten/Warmwasser by Verbrauch** (HeizkostenV 50–70% split) — the meter data exists.
-- **Personenzahl** and **Individuell** computation.
+- **Personenzahl** and **Individuell** computation. ⭐ **Personenzahl unlocks the Single-Main-Meter
+  scenario** (single water meter split by persons for water/Abwasser/Müll) — see "Real World German
+  Landlord Scenarios → Scenario 1". Code-only; the column and enum already exist.
 - **OCR auto-classification** ("drop 20 PDFs, we sort them") — the Wow moment.
 - Nachzahlung → Mietkonto via the Payment Service (opt-in).
 - Copy-previous-year, multi-object batch, Techem/ista import, bank matching.
@@ -263,6 +265,36 @@ note**, never a silent wrong split.
 | C3 | Nebenkosten tab: cost entry (category → default umlagefähig), result cards, Leerstand card. | **yes** |
 | C4 | Finalise + PDF + 12-month warning + polish. | **yes** |
 | C5 | Deploy + production smoke (a real 3-flat statement) + sprint close. | — |
+
+---
+
+## Real World German Landlord Scenarios
+
+Concrete situations the module must ultimately serve. Recorded here so the roadmap never drifts from
+how small German landlords actually bill.
+
+### Scenario 1 — Single main meter (Sammelzähler / ein Hauptzähler)
+In German buildings of **2–20 units** it is very common that the building has **one single water
+meter** for the whole house (a Sammelzähler), not one per flat. There is then **no per-flat Verbrauch
+reading** to split water by — the total water bill must be distributed by another key.
+
+Real need: for **water, sewage (Abwasser), waste (Müll)** and similar, the total is very often split
+by **Personenzahl** (number of people per flat). This is a core use case for small landlords and, for
+these categories, frequently the fairest and the agreed key.
+
+The system must therefore support these Umlageschlüssel (all present in the enum since Sprint 2):
+`Personenzahl · Wohnfläche · Wohneinheiten · Verbrauch · Individuell`.
+
+**Roadmap (this scenario):**
+- **Sprint 2 (shipped):** the `personenzahl` data model exists (`ImmoTenancy.personenzahl`, nullable);
+  the `personenzahl` Umlageschlüssel is a valid, storable value; **it is NOT yet computed** — a
+  position set to `personenzahl` falls back to Wohnfläche with a visible note.
+- **Sprint 3:** the **Personenzahl Allocation Engine** is switched on. A building with a single water
+  meter then distributes its total water (and Müll etc.) automatically by the number of persons per
+  flat × Zeitanteil. **Code-only** — the column and the enum are already in place, no DB change.
+
+The invariant (Σ tenant shares + Leerstand == total) and the honesty rules (missing basis → flagged,
+never divided) apply to the Personenzahl key exactly as to Wohnfläche.
 
 ---
 
