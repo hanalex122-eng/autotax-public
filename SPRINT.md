@@ -18,7 +18,27 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — pick the next one (Sprint 2 = Nebenkostenabrechnung, per the user's order)
+## ACTIVE SPRINT — Sprint 2: "Nebenkostenabrechnung" (Masterplan #8 ⭐⭐⭐)
+
+**Opened:** 2026-07-15
+**Goal:** a small landlord produces a legally usable annual utility-cost statement (§556 BGB) per
+tenant — inside AutoTax, no Excel, no Steuerberater. NOT expense tracking.
+**Architecture (approved):** `.claude/nk_architecture.md` — 3 binding principles: (A) immutable
+settlement snapshot is the record of truth, not the PDF; (B) finalise = legal lock; (C) Single-Ledger
+— Vorauszahlung only from `monat_nk_soll`. Full DB now; Sprint 2 computes Wohnfläche/Wohneinheiten,
+Heizkosten/Personenzahl/Verbrauch/Individuell are data-ready and stubbed (Sprint 3, code-only).
+
+- [x] C1 Schema (2 tables + personenzahl/mea) + `immo_nebenkosten.py` rules + tests (57). No endpoint/UI.
+- [ ] C2 Endpoints + per-tenant & overview PDF + tests (final=immutable, umlagefähig defaults, snapshot)
+- [ ] C3 Nebenkosten tab: cost entry + result cards + Leerstand card
+- [ ] C4 Finalise (freeze snapshot) + PDF + 12-month warning + polish
+- [ ] C5 Deploy + production smoke (a real 3-flat statement) + sprint close
+
+**Sprint exit report goes here when closing.**
+
+---
+
+## CLOSED — earlier sprints below
 
 ---
 
