@@ -18,7 +18,26 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — next candidate: Sprint 3 (Personenzahl/Verbrauch/HeizkostenV engines)
+## ACTIVE SPRINT — Sprint 3: "Personenzahl Allocation Engine"
+
+**Opened:** 2026-07-15
+**Scope (approved):** switch on the Personenzahl allocation key ONLY. Verbrauch = next; HeizkostenV =
+a separate later sprint with its own legal/architecture design (no HeizkostenV rules added here).
+**Constraints (binding):** NO DB change (use the existing `immo_tenancy.personenzahl`) · keep the
+Zeitanteil logic · Leerstand stays with the landlord · the invariant Σ(tenant shares)+Leerstand ==
+umlagefähige total holds · Snapshot/Finalize behaviour unchanged · Single-Ledger preserved · all new
+computation in the rules layer (`immo_nebenkosten.py`).
+**Key design (person-based):** a vacant unit has 0 persons → contributes 0 weight (no invented head
+count); the cost is split among the actual occupants by personenzahl × Zeitanteil. If any active
+tenant lacks personenzahl, the position falls back to Wohnfläche WITH a note (no silent wrong split).
+
+- [ ] C1 Rules: personenzahl computed in `basis_weight`/`verteile`; bump CALCULATION_VERSION. Unit +
+      invariant + regression tests. No DB, no UI change (picker+field already exist from Sprint 2 C4).
+- [ ] C2 Deploy + production smoke (single-water-meter statement split by persons) + sprint close.
+
+---
+
+## CLOSED — Sprint 2 and earlier below
 
 ## ✅ SPRINT 2 CLOSED (2026-07-15) — full report: `.claude/sprint2_final_report.md`
 Deployed `0c001c4` · Go/No-Go fully green (migration/smoke 12-12/regression 9-9/rollback ready) ·

@@ -30,7 +30,7 @@ from typing import Optional
 
 from autotax import immo_rules as _rules
 
-CALCULATION_VERSION = 1
+CALCULATION_VERSION = 2   # v2 (Sprint 3): Personenzahl is computed (v1 fell back to Wohnfläche)
 
 # ── vocabulary ────────────────────────────────────────────────────────
 
@@ -43,8 +43,9 @@ SCHLUESSEL_LABEL = {
     "wohneinheiten": "Wohneinheiten", "verbrauch": "Verbrauch", "individuell": "Individuell",
 }
 
-# Which allocation methods actually compute in Sprint 2. The rest fall back to Wohnfläche + note.
-_COMPUTED = ("wohnflaeche", "wohneinheiten")
+# Which allocation methods actually compute. verbrauch/individuell still fall back to Wohnfläche
+# with a note (Sprint 3+). personenzahl computes since Sprint 3 (this sprint).
+_COMPUTED = ("wohnflaeche", "wohneinheiten", "personenzahl")
 
 # BetrKV §2 operating-cost categories + the umlagefähig knowledge (the correctness core).
 # `umlagefaehig` False = the landlord must NOT pass this on (the #1 statement-invalidating mistake).
@@ -138,17 +139,38 @@ def _computes(schluessel: str) -> bool:
 
 def basis_weight(schluessel: str, unit, tenancy, za: float) -> float:
     """The un-normalised weight of one tenancy for one Schlüssel (before dividing by the sum).
-    Sprint 2 computes wohnflaeche and wohneinheiten; the others fall back to wohnflaeche (the caller
-    records a note). Time-weighting by `za` is applied by every key."""
+    Computes wohnflaeche, wohneinheiten and personenzahl; verbrauch/individuell fall back to
+    wohnflaeche (the caller records a note). Time-weighting by `za` is applied by every key."""
     if schluessel == "wohneinheiten":
         return za                                  # each occupied unit weighs equally, × Zeitanteil
     if schluessel == "personenzahl":
+        # A vacant unit (_Dummy, personenzahl None) contributes 0 — there are no persons there, so no
+        # invented head count. The missing-data case (an ACTIVE tenant without personenzahl) is caught
+        # by _effective_schluessel BEFORE we get here and falls the whole position back to Wohnfläche.
         n = getattr(tenancy, "personenzahl", None)
-        # Sprint 3 will use n; until then we fall back to Wohnfläche (note set by the caller).
-        _ = n
-        return _flaeche(unit) * za
-    # wohnflaeche (default) and every not-yet-wired key fall back to area × Zeitanteil
+        return float(n or 0) * za
+    # wohnflaeche (default) and every not-yet-wired key use area × Zeitanteil
     return _flaeche(unit) * za
+
+
+def _effective_schluessel(schluessel: str, active_tenancies) -> tuple:
+    """Resolve the key actually used for a position, and any note.
+
+    personenzahl needs a person count for EVERY occupied tenant to be split fairly. If one is missing
+    (None or 0), we cannot do an honest per-person split → fall back to Wohnfläche WITH a note (the
+    Sprint 0/1 discipline: never a silent wrong number). Returns (effective_schluessel, note_or_None).
+    """
+    if schluessel == "personenzahl":
+        missing = [getattr(t, "mieter_name", "?") for t in active_tenancies
+                   if not (getattr(t, "personenzahl", None) and int(getattr(t, "personenzahl")) > 0)]
+        if missing:
+            return "wohnflaeche", ("Personenzahl fehlt bei: " + ", ".join(missing)
+                                   + " — Verteilung nach Wohnfläche.")
+        return "personenzahl", None
+    if not _computes(schluessel):
+        return "wohnflaeche", (f"Schlüssel '{SCHLUESSEL_LABEL.get(schluessel, schluessel)}' wird "
+                               f"derzeit nach Wohnfläche verteilt (Verbrauch/Individuell folgt).")
+    return schluessel, None
 
 
 def _flaeche(unit) -> float:
@@ -195,13 +217,14 @@ def verteile(positionen, units, tenancies, von: date, bis: date):
         if betrag <= 0:
             continue
         umlagefaehige_summe = round(umlagefaehige_summe + betrag, 2)
-        schluessel = getattr(pos, "schluessel", "wohnflaeche") or "wohnflaeche"
-        if schluessel not in SCHLUESSEL:
-            raise NkError(f"Unbekannter Umlageschlüssel: {schluessel}")
-        if not _computes(schluessel) and schluessel not in seen_fallback:
-            hinweise.append(f"Schlüssel '{SCHLUESSEL_LABEL.get(schluessel, schluessel)}' wird derzeit "
-                            f"nach Wohnfläche verteilt (Verbrauch/Person folgt).")
-            seen_fallback.add(schluessel)
+        raw_schluessel = getattr(pos, "schluessel", "wohnflaeche") or "wohnflaeche"
+        if raw_schluessel not in SCHLUESSEL:
+            raise NkError(f"Unbekannter Umlageschlüssel: {raw_schluessel}")
+        # resolve the key actually used (personenzahl may fall back on missing data; so may verbrauch)
+        schluessel, note = _effective_schluessel(raw_schluessel, active)
+        if note and note not in seen_fallback:
+            hinweise.append(note)
+            seen_fallback.add(note)
 
         # weights across ALL units in the period (occupied AND vacant), so the vacant share is visible
         total_w = 0.0
@@ -270,6 +293,8 @@ def _anteil_text(schluessel: str, w: float, total: float) -> str:
         return ""
     if schluessel == "wohneinheiten":
         return f"{round(w, 2)} / {round(total, 2)} Einheiten-Zeitanteil"
+    if schluessel == "personenzahl":
+        return f"{round(w, 2)} / {round(total, 2)} Personen-Zeitanteil"
     return f"{round(w, 1)} / {round(total, 1)} m²-Zeitanteil"
 
 

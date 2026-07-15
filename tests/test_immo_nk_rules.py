@@ -164,11 +164,15 @@ ok(any("nicht verteilt" in h or "keine Wohnfläche" in h for h in vb["hinweise"]
    f"a note explains it could not be split — {vb['hinweise']}")
 eq("the amount is carried by the landlord, not divided by zero", vb["leerstand"], 1000.0)
 
-print("\n[10] A not-yet-wired key falls back to Wohnfläche WITH A NOTE (never a silent wrong split)")
-vp = NK.verteile([Pos("muell", 400.0, schluessel="personenzahl")], UNITS, tens_full, VON, BIS)
+print("\n[10] A not-yet-wired key (verbrauch) falls back to Wohnfläche WITH A NOTE")
+vp = NK.verteile([Pos("heizkosten", 400.0, schluessel="verbrauch")], UNITS, tens_full, VON, BIS)
 ok(any("Wohnfläche verteilt" in h for h in vp["hinweise"]),
-   f"the Personenzahl fallback is announced — {vp['hinweise']}")
+   f"the Verbrauch fallback is announced — {vp['hinweise']}")
 eq("it still splits (by area) and stays exact", vp["per_tenant"][201]["summe"], 100.0)
+# personenzahl WITHOUT data also falls back (with its own note); WITH data it computes (Sprint 3)
+vpz = NK.verteile([Pos("muell", 400.0, schluessel="personenzahl")], UNITS, tens_full, VON, BIS)
+ok(any("Personenzahl fehlt" in h for h in vpz["hinweise"]),
+   f"personenzahl with no data → honest fallback note — {vpz['hinweise']}")
 ok(NK.verteile([Pos("x", 1.0, schluessel="quatsch")] if False else [], UNITS, TENS, VON, BIS) is not None, "empty positions ok")
 try:
     NK.verteile([Pos("x", 100.0, schluessel="quatsch")], UNITS, tens_full, VON, BIS)
