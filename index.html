@@ -700,6 +700,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
     {id:"bu_ay",icon:I.dashboard,label:_gl==="de"?"💰 Diesen Monat":_gl==="tr"?"💰 Bu Ay":"💰 This Month"},
     {id:"immobilien",icon:I.tax,label:_gl==="de"?"🏠 Meine Immobilien":_gl==="tr"?"🏠 Mülklerim":"🏠 My Properties"},
     {id:"mieter",icon:I.invoice,label:_gl==="de"?"👥 Mieter":_gl==="tr"?"👥 Kiracılarım":"👥 Tenants"},
+    {id:"nebenkosten",icon:I.tax,label:_gl==="de"?"📑 Nebenkosten":_gl==="tr"?"📑 Yan Giderler":"📑 Utility Costs"},
     {id:"immobilien_dash",icon:I.tax,label:_gl==="de"?"📊 Berichte & Leerstand":_gl==="tr"?"📊 Raporlar":"📊 Reports"},
     {id:"_more"},
     ...(moreOpen?[
@@ -3167,6 +3168,119 @@ function MieterView({onNav,showToast}){
 }
 
 
+// ── Nebenkosten editor — shared by the property tab AND the sidebar "Nebenkosten" view.
+// Self-contained: the backend derives every share/Vorauszahlung/Leerstand/lock; this only collects
+// costs (open grid) and displays. propertyId is the object being billed.
+function NkEditor({propertyId,showToast}){
+  const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
+  const _e=n=>"€"+(Number(n)||0).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const _btn=(c)=>({padding:"9px 16px",background:c,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"});
+  const _tk=()=>localStorage.getItem("atx_token");
+  const NK_SCHL=[["","(Standard)"],["wohnflaeche","Wohnfläche (m²)"],["wohneinheiten","Wohneinheiten"],["personenzahl","Personenzahl"],["verbrauch","Verbrauch"],["individuell","Individuell"]];
+  const NK_STD=[["heizkosten","Heizkosten"],["warmwasser","Warmwasser"],["wasser","Wasser (kalt)"],["abwasser","Abwasser"],["muell","Müllabfuhr"],["grundsteuer","Grundsteuer"],["gebaeudeversicherung","Gebäudeversicherung"],["hausmeister","Hausmeister"],["allgemeinstrom","Allgemeinstrom"],["gartenpflege","Gartenpflege"],["schornsteinfeger","Schornsteinfeger"],["winterdienst","Winterdienst"],["strassenreinigung","Straßenreinigung"],["sonstige","Sonstige"]];
+  const [nkList,setNkList]=React.useState([]);
+  const [nkOpen,setNkOpen]=React.useState(null);
+  const [nkGrid,setNkGrid]=React.useState({});
+  const [nkSchl,setNkSchl]=React.useState({});
+  const loadNk=(pid)=>api("/immo/nk?property_id="+pid).then(d=>setNkList(d.abrechnungen||[])).catch(()=>setNkList([]));
+  React.useEffect(()=>{setNkOpen(null);if(propertyId)loadNk(propertyId);},[propertyId]);
+  const openNk=async(aid)=>{try{setNkGrid({});setNkSchl({});setNkOpen(await api("/immo/nk/"+aid));}catch(e){alert(e.message);}};
+  const newNk=async()=>{const jahr=parseInt(prompt(_L("Abrechnungsjahr","Hesap yılı","Settlement year"),String(new Date().getFullYear()-1)));if(!jahr)return;try{const a=await api("/immo/nk",{method:"POST",body:JSON.stringify({property_id:propertyId,jahr:jahr})});setNkGrid({});setNkSchl({});setNkOpen(a);loadNk(propertyId);}catch(e){alert(e.message);}};
+  const nkPosOf=(kat)=>((nkOpen&&nkOpen.positionen)||[]).find(p=>p.kategorie===kat);
+  const nkSaveRow=async(kat)=>{const raw=nkGrid[kat];if(raw===undefined)return;const amt=parseFloat(raw);const ex=nkPosOf(kat);
+    try{let a;
+      if(ex){if(!(amt>0))a=await api("/immo/nk/"+nkOpen.id+"/position/"+ex.id,{method:"DELETE"});
+             else a=await api("/immo/nk/"+nkOpen.id+"/position/"+ex.id,{method:"PATCH",body:JSON.stringify({betrag:amt})});}
+      else if(amt>0){const body={kategorie:kat,betrag:amt};if(nkSchl[kat])body.schluessel=nkSchl[kat];
+             a=await api("/immo/nk/"+nkOpen.id+"/position",{method:"POST",body:JSON.stringify(body)});}
+      else return;
+      setNkOpen(a);setNkGrid(g=>{const n={...g};delete n[kat];return n;});
+    }catch(e){alert(e.message);}};
+  const nkSaveSchl=async(kat,schl)=>{setNkSchl(s=>({...s,[kat]:schl}));const ex=nkPosOf(kat);
+    if(ex){try{setNkOpen(await api("/immo/nk/"+nkOpen.id+"/position/"+ex.id,{method:"PATCH",body:JSON.stringify({schluessel:schl})}));}catch(e){alert(e.message);}}};
+  const finalizeNk=async()=>{if(!confirm(_L("Abrechnung abschließen?\n\nDanach nicht mehr änderbar (nur Entsperren).","Hesap kapatılsın mı?\n\nSonra değiştirilemez (sadece kilit açma).","Finalise?\n\nNot editable afterwards (only unlock).")))return;try{const a=await api("/immo/nk/"+nkOpen.id+"/finalisieren",{method:"POST"});setNkOpen(a);loadNk(propertyId);if(showToast)showToast(_L("Abgeschlossen ✓","Kapatıldı ✓","Finalised ✓"),"success");}catch(e){alert(e.message);}};
+  const unlockNk=async()=>{if(!confirm(_L("Entsperren und wieder bearbeitbar machen?","Kilidi aç ve düzenlenebilir yap?","Unlock and make editable again?")))return;try{setNkOpen(await api("/immo/nk/"+nkOpen.id+"/entsperren",{method:"POST"}));loadNk(propertyId);}catch(e){alert(e.message);}};
+  const nkPdf=async(tid)=>{try{const r=await fetch(API+"/immo/nk/"+nkOpen.id+"/pdf"+(tid?"?tenancy_id="+tid:""),{headers:{Authorization:"Bearer "+_tk()}});if(!r.ok){alert("PDF "+r.status);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Nebenkosten_"+nkOpen.jahr+(tid?"_"+tid:"_Uebersicht")+".pdf";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}catch(e){alert(e.message);}};
+  if(!nkOpen)return(<div>
+    <div style={{...css.card,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+      <div><div style={{fontWeight:700,fontSize:15}}>📑 {_L("Nebenkostenabrechnung","Yan gider hesabı","Utility-cost statement")}</div>
+        <div style={{fontSize:12,color:theme.textMuted}}>{_L("Jährliche Abrechnung je Mieter (§556 BGB)","Kiracı başına yıllık hesap (§556 BGB)","Annual statement per tenant (§556 BGB)")}</div></div>
+      <button style={_btn(theme.accent)} onClick={newNk}>➕ {_L("Neue Abrechnung","Yeni hesap","New statement")}</button>
+    </div>
+    {nkList.map(a=>(<div key={a.id} onClick={()=>openNk(a.id)} style={{...css.card,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+      <span style={{fontWeight:600,color:theme.text}}>📑 {_L("Abrechnung","Hesap","Statement")} {a.jahr}</span>
+      <span style={{fontSize:12,fontWeight:700,color:a.final?theme.accent:"#f59e0b"}}>{a.final?"🔒 "+_L("abgeschlossen","kapatıldı","final"):"✎ "+_L("Entwurf","Taslak","Draft")}</span>
+    </div>))}
+    {nkList.length===0&&<div style={{...css.card,textAlign:"center",color:theme.textMuted,padding:24}}>{_L("Noch keine Abrechnung.","Henüz hesap yok.","No statement yet.")}</div>}
+  </div>);
+  const a=nkOpen;const erg=a.ergebnis||{tenants:[],leerstand:0,umlagefaehige_summe:0,hinweise:[]};const locked=!!a.final;
+  return(<div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+      <button style={{...css.btnOutline,padding:"7px 12px",fontSize:13}} onClick={()=>{setNkOpen(null);loadNk(propertyId);}}>← {_L("Zurück","Geri","Back")}</button>
+      <div style={{fontWeight:800,fontSize:16}}>📑 {_L("Abrechnung","Hesap","Statement")} {a.jahr}</div>
+      <span style={{fontSize:12,fontWeight:700,color:locked?theme.accent:"#f59e0b"}}>{locked?"🔒 "+_L("abgeschlossen","kapatıldı","final"):"✎ "+_L("Entwurf","Taslak","Draft")}</span>
+    </div>
+    {locked&&<div style={{background:"rgba(16,185,129,0.12)",border:"1px solid "+theme.accent,borderRadius:10,padding:"9px 12px",marginBottom:12,fontSize:13}}>🔒 {_L("Abgeschlossen — die Berechnung ist eingefroren und unveränderbar.","Kapatıldı — hesap donduruldu ve değiştirilemez.","Finalised — the calculation is frozen and immutable.")}</div>}
+    <div style={{...css.card,marginBottom:12}}>
+      <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>{_L("Kostenpositionen","Gider kalemleri","Cost positions")}</div>
+      <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Beträge eintragen — leer lassen, was nicht anfällt.","Tutarları girin — olmayanı boş bırakın.","Enter amounts — leave blank what does not apply.")}</div>
+      {NK_STD.map(([kat,label])=>{const pos=nkPosOf(kat);
+        const bval=nkGrid[kat]!==undefined?nkGrid[kat]:(pos&&pos.betrag!=null?String(pos.betrag):"");
+        const sval=nkSchl[kat]!==undefined?nkSchl[kat]:(pos?pos.schluessel:"");
+        return(<div key={kat} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid "+theme.border}}>
+          <span style={{flex:"1 1 110px",minWidth:90,fontSize:14,color:theme.text,fontWeight:pos?700:400}}>{label}</span>
+          {!locked&&<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{flex:"0 1 132px",padding:"6px 8px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer"}}>{NK_SCHL.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>}
+          {locked?<b style={{minWidth:80,textAlign:"right",color:theme.text}}>{pos?_e(pos.betrag):"—"}</b>
+           :<input type="number" inputMode="decimal" placeholder="€ 0,00" value={bval}
+              onChange={e=>setNkGrid(g=>({...g,[kat]:e.target.value}))} onBlur={()=>nkSaveRow(kat)}
+              onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
+              style={{flex:"0 1 100px",minWidth:80,padding:"8px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(pos?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>}
+        </div>);})}
+      <div style={{marginTop:12,fontSize:14,fontWeight:700,display:"flex",justifyContent:"space-between"}}><span>{_L("Summe umlagefähig","Toplam dağıtılabilir","Umlagefähig total")}</span><b style={{color:theme.accent}}>{_e(erg.umlagefaehige_summe)}</b></div>
+    </div>
+    <div style={{...css.card,marginBottom:12}}>
+      <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>{_L("Ergebnis je Mieter","Kiracı başına sonuç","Result per tenant")}</div>
+      {(erg.tenants||[]).map(t=>{const g=t.typ==="guthaben";const n=t.typ==="nachzahlung";return(<div key={t.tenancy_id} style={{padding:"9px 0",borderBottom:"1px solid "+theme.border}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontWeight:700,color:theme.text}}>{t.name}</span>
+          <span style={{fontWeight:800,color:g?theme.accent:(n?theme.danger:theme.textMuted)}}>{g?_L("Guthaben","Alacak","Credit"):n?_L("Nachzahlung","Ek ödeme","Back-payment"):"±0"} {_e(Math.abs(t.saldo))}</span>
+        </div>
+        <div style={{fontSize:11,color:theme.textMuted,marginTop:2}}>{_L("Anteil","Pay","Share")} {_e(t.umlage)} − {_L("Vorauszahlung","Avans","Advance")} {_e(t.vorauszahlung)}
+          {locked&&<span onClick={()=>nkPdf(t.tenancy_id)} style={{color:theme.accent,cursor:"pointer",marginLeft:8}}>📄 PDF</span>}</div>
+      </div>);})}
+      {(erg.tenants||[]).length===0&&<div style={{fontSize:12,color:"#b45309",padding:"6px 0"}}>ℹ️ {_L("Keine aktiven Mieter im Zeitraum — alle Kosten trägt der Vermieter (Leerstand). Richtiges Jahr gewählt?","Dönemde aktif kiracı yok — tüm maliyet ev sahibinde (Leerstand). Doğru yıl mı?","No active tenants in the period — all costs go to the landlord (vacancy). Right year?")}</div>}
+      {(erg.leerstand||0)>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"9px 0",fontStyle:"italic",color:theme.textMuted}}>
+        <span>{_L("Leerstand (Vermieter trägt)","Boşluk (ev sahibi taşır)","Vacancy (landlord bears)")}</span><b>{_e(erg.leerstand)}</b></div>}
+    </div>
+    {(erg.hinweise||[]).map((h,i)=><div key={i} style={{fontSize:12,color:"#b45309",marginBottom:6}}>ℹ️ {h}</div>)}
+    {a.frist_ueberschritten&&<div style={{fontSize:12,color:"#b45309",marginBottom:10}}>⚠️ {_L("12-Monats-Frist (§556 III BGB) überschritten — Nachforderung ggf. ausgeschlossen.","12 aylık süre (§556 III BGB) aşıldı — ek talep hakkı düşmüş olabilir.","12-month deadline (§556 III) passed — a back-claim may be barred.")}</div>}
+    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+      <button style={{...css.btnOutline,padding:"9px 14px"}} onClick={()=>nkPdf(null)}>📄 {_L("Übersicht-PDF","Genel PDF","Overview PDF")}</button>
+      {!locked?<button style={_btn(theme.accent)} onClick={finalizeNk}>🔒 {_L("Abschließen","Kapat","Finalise")}</button>
+              :<button style={{...css.btnOutline,padding:"9px 14px",borderColor:"#f59e0b",color:"#f59e0b"}} onClick={unlockNk}>🔓 {_L("Entsperren","Kilidi aç","Unlock")}</button>}
+    </div>
+  </div>);
+}
+
+// ── Nebenkosten sidebar view — reach it straight from the menu, not buried in a property's Details.
+function NebenkostenView({showToast}){
+  const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
+  const [props_,setProps]=React.useState(null);
+  const [pid,setPid]=React.useState(null);
+  React.useEffect(()=>{api("/immo/properties").then(d=>{const ps=d.properties||[];setProps(ps);if(ps.length===1)setPid(ps[0].id);}).catch(()=>setProps([]));},[]);
+  if(props_===null)return <div style={{padding:24,color:theme.textMuted}}>{_L("Lädt…","Yükleniyor…","Loading…")}</div>;
+  if(props_.length===0)return <div style={{...css.card,textAlign:"center",color:theme.textMuted,padding:30}}>{_L("Zuerst eine Immobilie anlegen.","Önce mülk ekleyin.","Add a property first.")}</div>;
+  return(<div style={{maxWidth:820,margin:"0 auto"}}>
+    <div style={{fontSize:22,fontWeight:800,color:theme.text,marginBottom:4}}>📑 {_L("Nebenkosten","Yan giderler","Utility costs")}</div>
+    <div style={{fontSize:13,color:theme.textMuted,marginBottom:14}}>{_L("Jährliche Betriebskostenabrechnung je Mieter (§556 BGB).","Kiracı başına yıllık yan gider hesabı (§556 BGB).","Annual utility-cost statement per tenant (§556 BGB).")}</div>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+      {props_.map(p=>(<button key={p.id} onClick={()=>setPid(p.id)} style={{padding:"9px 14px",borderRadius:10,border:"1.5px solid "+(pid===p.id?theme.accent:theme.border),background:pid===p.id?theme.accent:"transparent",color:pid===p.id?"#fff":theme.text,fontSize:13,fontWeight:600,cursor:"pointer"}}>🏠 {p.adresse||p.name}</button>))}
+    </div>
+    {pid?<NkEditor propertyId={pid} showToast={showToast}/>:<div style={{color:theme.textMuted}}>{_L("Bitte eine Immobilie wählen.","Bir mülk seçin.","Pick a property.")}</div>}
+  </div>);
+}
+
+
 function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
   const _e=n=>"€"+(Number(n)||0).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -3414,73 +3528,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
         <button style={_btn("#ef4444")} onClick={saveExp}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
       {exps.map(x=><div key={x.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div><b style={{color:theme.danger}}>{_e(x.betrag)}</b> <span style={css.badge(theme.blueSoft,theme.blue)}>{katLbl(x.kategorie)}</span><div style={{fontSize:12,color:theme.textMuted}}>{x.datum} · {x.beschreibung}</div></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("expenses",x.id)}>✕</span></div>)}
     </div>)}
-    {tab==="nebenkosten"&&<div>
-      {/* Nebenkostenabrechnung (Sprint 2). Debt/shares/Vorauszahlung/Leerstand come from the backend. */}
-      {!nkOpen?<div>
-        <div style={{...css.card,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-          <div><div style={{fontWeight:700,fontSize:15}}>📑 {_L("Nebenkostenabrechnung","Yan gider hesabı","Utility-cost statement")}</div>
-            <div style={{fontSize:12,color:theme.textMuted}}>{_L("Jährliche Abrechnung je Mieter (§556 BGB)","Kiracı başına yıllık hesap (§556 BGB)","Annual statement per tenant (§556 BGB)")}</div></div>
-          <button style={_btn(theme.accent)} onClick={()=>newNk(sel.id)}>➕ {_L("Neue Abrechnung","Yeni hesap","New statement")}</button>
-        </div>
-        {nkList.map(a=>(<div key={a.id} onClick={()=>openNk(a.id)} style={{...css.card,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
-          <span style={{fontWeight:600,color:theme.text}}>📑 {_L("Abrechnung","Hesap","Statement")} {a.jahr}</span>
-          <span style={{fontSize:12,fontWeight:700,color:a.final?theme.accent:"#f59e0b"}}>{a.final?"🔒 "+_L("abgeschlossen","kapatıldı","final"):"✎ "+_L("Entwurf","Taslak","Draft")}</span>
-        </div>))}
-        {nkList.length===0&&<div style={{...css.card,textAlign:"center",color:theme.textMuted,padding:24}}>{_L("Noch keine Abrechnung.","Henüz hesap yok.","No statement yet.")}</div>}
-      </div>:(()=>{const a=nkOpen;const erg=a.ergebnis||{tenants:[],leerstand:0,umlagefaehige_summe:0,hinweise:[]};const locked=!!a.final;return(<div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-          <button style={{...css.btnOutline,padding:"7px 12px",fontSize:13}} onClick={()=>{setNkOpen(null);loadNk(sel.id);}}>← {_L("Zurück","Geri","Back")}</button>
-          <div style={{fontWeight:800,fontSize:16}}>📑 {_L("Abrechnung","Hesap","Statement")} {a.jahr}</div>
-          <span style={{fontSize:12,fontWeight:700,color:locked?theme.accent:"#f59e0b"}}>{locked?"🔒 "+_L("abgeschlossen","kapatıldı","final"):"✎ "+_L("Entwurf","Taslak","Draft")}</span>
-        </div>
-        {locked&&<div style={{background:"rgba(16,185,129,0.12)",border:"1px solid "+theme.accent,borderRadius:10,padding:"9px 12px",marginBottom:12,fontSize:13}}>🔒 {_L("Abgeschlossen — die Berechnung ist eingefroren und unveränderbar.","Kapatıldı — hesap donduruldu ve değiştirilemez.","Finalised — the calculation is frozen and immutable.")}</div>}
-
-        {/* OPEN cost grid — every category is a visible row with its own amount field. No dropdown to
-            pick from, no "add one at a time": type an amount, it auto-saves on blur/Enter, tab to next. */}
-        <div style={{...css.card,marginBottom:12}}>
-          <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>{_L("Kostenpositionen","Gider kalemleri","Cost positions")}</div>
-          <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Beträge eintragen — leer lassen, was nicht anfällt.","Tutarları girin — olmayanı boş bırakın.","Enter amounts — leave blank what does not apply.")}</div>
-          {NK_STD.map(([kat,label])=>{const pos=nkPosOf(kat);
-            const bval=nkGrid[kat]!==undefined?nkGrid[kat]:(pos&&pos.betrag!=null?String(pos.betrag):"");
-            const sval=nkSchl[kat]!==undefined?nkSchl[kat]:(pos?pos.schluessel:"");
-            return(<div key={kat} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid "+theme.border}}>
-              <span style={{flex:"1 1 110px",minWidth:90,fontSize:14,color:theme.text,fontWeight:pos?700:400}}>{label}</span>
-              {!locked&&<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{flex:"0 1 132px",padding:"6px 8px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer"}}>{NK_SCHL.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>}
-              {locked?<b style={{minWidth:80,textAlign:"right",color:theme.text}}>{pos?_e(pos.betrag):"—"}</b>
-               :<input type="number" inputMode="decimal" placeholder="€ 0,00" value={bval}
-                  onChange={e=>setNkGrid(g=>({...g,[kat]:e.target.value}))}
-                  onBlur={()=>nkSaveRow(kat)}
-                  onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
-                  style={{flex:"0 1 100px",minWidth:80,padding:"8px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(pos?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>}
-            </div>);})}
-          <div style={{marginTop:12,fontSize:14,fontWeight:700,display:"flex",justifyContent:"space-between"}}><span>{_L("Summe umlagefähig","Toplam dağıtılabilir","Umlagefähig total")}</span><b style={{color:theme.accent}}>{_e(erg.umlagefaehige_summe)}</b></div>
-        </div>
-
-        {/* result cards */}
-        <div style={{...css.card,marginBottom:12}}>
-          <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>{_L("Ergebnis je Mieter","Kiracı başına sonuç","Result per tenant")}</div>
-          {(erg.tenants||[]).map(t=>{const g=t.typ==="guthaben";const n=t.typ==="nachzahlung";return(<div key={t.tenancy_id} style={{padding:"9px 0",borderBottom:"1px solid "+theme.border}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontWeight:700,color:theme.text}}>{t.name}</span>
-              <span style={{fontWeight:800,color:g?theme.accent:(n?theme.danger:theme.textMuted)}}>{g?_L("Guthaben","Alacak","Credit"):n?_L("Nachzahlung","Ek ödeme","Back-payment"):"±0"} {_e(Math.abs(t.saldo))}</span>
-            </div>
-            <div style={{fontSize:11,color:theme.textMuted,marginTop:2}}>{_L("Anteil","Pay","Share")} {_e(t.umlage)} − {_L("Vorauszahlung","Avans","Advance")} {_e(t.vorauszahlung)}
-              {locked&&<span onClick={()=>nkPdf(t.tenancy_id)} style={{color:theme.accent,cursor:"pointer",marginLeft:8}}>📄 PDF</span>}</div>
-          </div>);})}
-          {(erg.leerstand||0)>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"9px 0",fontStyle:"italic",color:theme.textMuted}}>
-            <span>{_L("Leerstand (Vermieter trägt)","Boşluk (ev sahibi taşır)","Vacancy (landlord bears)")}</span><b>{_e(erg.leerstand)}</b></div>}
-        </div>
-
-        {(erg.hinweise||[]).map((h,i)=><div key={i} style={{fontSize:12,color:"#b45309",marginBottom:6}}>ℹ️ {h}</div>)}
-        {a.frist_ueberschritten&&<div style={{fontSize:12,color:"#b45309",marginBottom:10}}>⚠️ {_L("12-Monats-Frist (§556 III BGB) überschritten — Nachforderung ggf. ausgeschlossen.","12 aylık süre (§556 III BGB) aşıldı — ek talep hakkı düşmüş olabilir.","12-month deadline (§556 III) passed — a back-claim may be barred.")}</div>}
-
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button style={{...css.btnOutline,padding:"9px 14px"}} onClick={()=>nkPdf(null)}>📄 {_L("Übersicht-PDF","Genel PDF","Overview PDF")}</button>
-          {!locked?<button style={_btn(theme.accent)} onClick={finalizeNk}>🔒 {_L("Abschließen","Kapat","Finalise")}</button>
-                  :<button style={{...css.btnOutline,padding:"9px 14px",borderColor:"#f59e0b",color:"#f59e0b"}} onClick={unlockNk}>🔓 {_L("Entsperren","Kilidi aç","Unlock")}</button>}
-        </div>
-      </div>);})()}
-    </div>}
+    {tab==="nebenkosten"&&<div><NkEditor propertyId={sel.id} showToast={showToast}/></div>}
     {tab==="dokumente"&&<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Dokument hochladen","Belge yükle","Upload document")}</div>
         <label style={{..._btn("#6366f1"),display:"inline-block"}}>📎 {_L("Datei wählen","Dosya seç","Choose file")}<input type="file" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)upDoc(f,"other");e.target.value="";}}/></label></div>
@@ -7861,9 +7909,9 @@ function App(){
   }}/><CookieConsent/></Fragment>;
   // SendInvoicesView: InvoicesView'in sendOnly=true ile kopyasi — sadece email gonder buton'u
   const SendInvoicesView=(props)=><InvoicesView {...props} sendOnly={true}/>;
-  const views={dashboard:DashboardView,bu_ay:BuAyView,invoices:InvoicesView,angebote:AngeboteView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,immobilien_dash:ImmoDashboardView,immobilien:ImmobilienView,mieter:MieterView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView,kasse_v2:KasseAppView};
+  const views={dashboard:DashboardView,bu_ay:BuAyView,invoices:InvoicesView,angebote:AngeboteView,send_invoices:SendInvoicesView,upload:UploadView,bookkeeping:BookkeepingView,immobilien_dash:ImmoDashboardView,immobilien:ImmobilienView,mieter:MieterView,nebenkosten:NebenkostenView,export:ExportView,chat:ChatView,vault:VaultView,companies:CompaniesView,pricing:PricingView,help:HelpView,feedback:FeedbackView,tableimport:TableImportView,audit:AuditView,advisor:AdvisorView,jobs:JobsView,steuer:SteuerView,notifications:NotificationsView,steuer_uebersicht:SteuerOverviewView,declaration:DeclarationView,kasse:KasseView,kasse_v2:KasseAppView};
   const _t=typeof t==="function"?t:k=>k;
-  const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),send_invoices:(getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),immobilien_dash:(getLang()==="de"?"🏠 Immobilien Cockpit":getLang()==="tr"?"🏠 Gayrimenkul Kokpiti":"🏠 Property Cockpit"),immobilien:(getLang()==="de"?"🏠 Immobilien":getLang()==="tr"?"🏠 Gayrimenkul":"🏠 Properties"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
+  const pageLabels={dashboard:_t("dashboard"),invoices:_t("invoices"),send_invoices:(getLang()==="de"?"Rechnungen senden":getLang()==="tr"?"Faturaları gönder":"Send invoices"),upload:_t("upload"),bookkeeping:_t("bookkeeping"),immobilien_dash:(getLang()==="de"?"🏠 Immobilien Cockpit":getLang()==="tr"?"🏠 Gayrimenkul Kokpiti":"🏠 Property Cockpit"),immobilien:(getLang()==="de"?"🏠 Immobilien":getLang()==="tr"?"🏠 Gayrimenkul":"🏠 Properties"),nebenkosten:(getLang()==="de"?"📑 Nebenkosten":getLang()==="tr"?"📑 Yan Giderler":"📑 Utility Costs"),export:_t("export"),chat:_t("chat"),vault:_t("vault"),companies:_t("companies"),pricing:_t("pricing"),help:_t("help"),feedback:_t("feedback"),tableimport:_t("tableimport"),editor:_t("editor")};
   // Feature-flag guard: if current page is hidden by env, fall back to dashboard.
   const _FEAT=window.FEATURES||{};
   const _hiddenPages={upload:_FEAT.upload===false,tableimport:_FEAT.tableimport===false,chat:_FEAT.ai_chat===false};
