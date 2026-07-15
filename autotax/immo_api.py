@@ -244,6 +244,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "kaution": (round(float(t.kaution), 2) if t.kaution is not None else None),
                 "miete_historie": (getattr(t, "miete_historie", None) or None),
                 "erstmonat_betrag": getattr(t, "erstmonat_betrag", None),
+                "personenzahl": getattr(t, "personenzahl", None),
                 "anmeldung_done": bool(t.anmeldung_done),
                 "wgb_done": t.wgb_erstellt_am is not None,
                 "wgb_erstellt_am": str(t.wgb_erstellt_am) if t.wgb_erstellt_am else None,
@@ -839,7 +840,8 @@ def _tenancy_dict(t):
             "anmeldung_done": bool(getattr(t, "anmeldung_done", False)),
             "wgb_erstellt_am": str(t.wgb_erstellt_am) if getattr(t, "wgb_erstellt_am", None) else None,
             "telefon": getattr(t, "telefon", None), "email": getattr(t, "email", None),
-            "notiz": getattr(t, "notiz", None), "erstmonat_betrag": getattr(t, "erstmonat_betrag", None)}
+            "notiz": getattr(t, "notiz", None), "erstmonat_betrag": getattr(t, "erstmonat_betrag", None),
+            "personenzahl": getattr(t, "personenzahl", None)}
 
 
 # Month math lives in autotax/immo_rules.py (pure, DB-free) so that the API layer and
@@ -899,6 +901,7 @@ class TenancyPatch(BaseModel):
     email: Optional[str] = Field(None, max_length=200)
     notiz: Optional[str] = None
     erstmonat_betrag: Optional[float] = None    # vereinbarte Erstmiete; -1 = löschen (zurück zu Tagesanteil)
+    personenzahl: Optional[int] = None          # Sprint 2 (Nebenkosten): Personenzahl key basis
 
 
 # ── UNITS ─────────────────────────────────────────────────────────────
@@ -1004,6 +1007,8 @@ def update_tenancy(tid: int, body: TenancyPatch, user: dict = Depends(get_curren
         if body.notiz is not None: t.notiz = body.notiz
         if body.erstmonat_betrag is not None:
             t.erstmonat_betrag = None if body.erstmonat_betrag < 0 else body.erstmonat_betrag
+        if body.personenzahl is not None:
+            t.personenzahl = None if body.personenzahl < 0 else int(body.personenzahl)
         db.commit(); db.refresh(t)
         return {"success": True, **_tenancy_dict(t)}
     finally:

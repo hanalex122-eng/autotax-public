@@ -159,6 +159,21 @@ def main():
     ah = [t for t in r.json()["ergebnis"]["tenants"] if t["tenancy_id"] == 101][0]
     ok(ah["vorauszahlung"] == 999 * 12, f"after unlock it recomputes live (999×12) — {ah['vorauszahlung']}")
 
+    print("\n[C4] Personenzahl is collectable now (Sprint 2 data-ready), computed in Sprint 3")
+    r = cl.patch("/immo/tenancies/101", json={"personenzahl": 3})
+    ok(r.status_code == 200, "the tenant edit accepts personenzahl")
+    card = cl.get("/immo/mieter").json()["mieter"]
+    ah = [m for m in card if m["tenancy_id"] == 101][0]
+    ok(ah["personenzahl"] == 3, f"…and it is returned on the card ({ah.get('personenzahl')})")
+    # a personenzahl position is accepted, stored, and falls back to Wohnfläche WITH a note (not computed yet)
+    r = cl.post("/immo/nk", json={"property_id": 10, "jahr": 2024})
+    a2 = r.json()["id"]
+    d = cl.post(f"/immo/nk/{a2}/position", json={"kategorie": "wasser", "betrag": 400, "schluessel": "personenzahl"}).json()
+    pos = d["positionen"][0]
+    ok(pos["schluessel"] == "personenzahl", "the personenzahl key is stored on the position")
+    ok(any("Wohnfläche" in h for h in d["ergebnis"]["hinweise"]),
+       f"…and the result notes it falls back to Wohnfläche until Sprint 3 — {d['ergebnis']['hinweise']}")
+
     print("\n[11] Cannot finalise an empty statement")
     r = cl.post("/immo/nk", json={"property_id": 10, "jahr": 2025})
     empty = r.json()["id"]
