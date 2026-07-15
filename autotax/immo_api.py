@@ -2580,3 +2580,513 @@ def protokoll_pdf(pid: int, user: dict = Depends(get_current_user)):
                                  headers={"Content-Disposition": 'attachment; filename="%s"' % fn})
     finally:
         db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  SPRINT 2 — NEBENKOSTENABRECHNUNG (Betriebskostenabrechnung, §556 BGB)
+#
+#  Goal: a legally usable annual utility-cost statement per tenant. Not expense tracking.
+#  Endpoints are THIN: every rule lives in immo_nebenkosten.py (testable without a DB).
+#
+#  Binding principles (.claude/nk_architecture.md):
+#   A. A finalised statement freezes an immutable snapshot; the snapshot — not the PDF —
+#      is the record of truth. A FINAL statement is read from its snapshot, never recomputed.
+#   B. Finalise = legal lock: every write refuses on a final statement (409). Correction =
+#      Unlock or a new Revision.
+#   C. Single-Ledger: the Vorauszahlung comes only from monat_nk_soll (immo_nebenkosten).
+# ══════════════════════════════════════════════════════════════════════
+from autotax import immo_nebenkosten as _nk                          # noqa: E402
+from autotax.models import NkAbrechnung, NkKostenposition            # noqa: E402
+
+
+class NkAbrechnungIn(BaseModel):
+    property_id: int
+    jahr: int
+    zeitraum_von: Optional[str] = None
+    zeitraum_bis: Optional[str] = None
+
+
+class NkAbrechnungPatch(BaseModel):
+    zeitraum_von: Optional[str] = None
+    zeitraum_bis: Optional[str] = None
+    notiz: Optional[str] = None
+
+
+class NkPositionIn(BaseModel):
+    kategorie: str
+    betrag: float
+    umlagefaehig: Optional[bool] = None
+    umlage_pct: Optional[int] = None
+    schluessel: Optional[str] = None
+    verbrauch_art: Optional[str] = None
+    beleg_datum: Optional[str] = None
+    document_id: Optional[int] = None
+    notiz: Optional[str] = None
+
+
+class NkPositionPatch(BaseModel):
+    kategorie: Optional[str] = None
+    betrag: Optional[float] = None
+    umlagefaehig: Optional[bool] = None
+    umlage_pct: Optional[int] = None
+    schluessel: Optional[str] = None
+    verbrauch_art: Optional[str] = None
+    beleg_datum: Optional[str] = None
+    document_id: Optional[int] = None
+    notiz: Optional[str] = None
+
+
+def _own_abrechnung(db, uid: int, aid: int) -> NkAbrechnung:
+    a = (db.query(NkAbrechnung)
+         .filter(NkAbrechnung.id == aid, NkAbrechnung.user_id == uid, _notdel(NkAbrechnung)).first())
+    if not a:
+        raise HTTPException(status_code=404, detail="Abrechnung nicht gefunden")
+    return a
+
+
+def _nk_editable(a: NkAbrechnung) -> None:
+    try:
+        _nk.require_editable(a.status)
+    except _nk.NkError as e:
+        raise HTTPException(status_code=409, detail=str(e))     # 409: it is a document now
+
+
+def _nk_period(a: NkAbrechnung):
+    von = a.zeitraum_von or date(a.jahr, 1, 1)
+    bis = a.zeitraum_bis or date(a.jahr, 12, 31)
+    return von, bis
+
+
+def _nk_units_tenancies(db, uid: int, property_id: int):
+    units = (db.query(ImmoUnit)
+             .filter(ImmoUnit.property_id == property_id, ImmoUnit.user_id == uid, _notdel(ImmoUnit)).all())
+    uids = [u.id for u in units]
+    tens = (db.query(ImmoTenancy)
+            .filter(ImmoTenancy.user_id == uid, _notdel(ImmoTenancy), ImmoTenancy.unit_id.in_(uids)).all()
+            if uids else [])
+    return units, tens
+
+
+def _pos_dict(p: NkKostenposition) -> dict:
+    return {"id": p.id, "kategorie": p.kategorie, "label": _nk.kategorie_label(p.kategorie),
+            "betrag": p.betrag, "umlagefaehig": bool(p.umlagefaehig), "umlage_pct": p.umlage_pct,
+            "schluessel": p.schluessel, "schluessel_label": _nk.SCHLUESSEL_LABEL.get(p.schluessel, p.schluessel),
+            "verbrauch_art": p.verbrauch_art, "document_id": p.document_id,
+            "beleg_datum": str(p.beleg_datum) if p.beleg_datum else None, "notiz": p.notiz or ""}
+
+
+def _abr_dict(db, uid: int, a: NkAbrechnung, with_result: bool = True) -> dict:
+    p = db.query(ImmoProperty).filter(ImmoProperty.id == a.property_id).first()
+    out = {
+        "id": a.id, "property_id": a.property_id,
+        "property_adresse": (p.adresse if p else "") or (p.name if p else ""),
+        "jahr": a.jahr, "zeitraum_von": str(a.zeitraum_von) if a.zeitraum_von else None,
+        "zeitraum_bis": str(a.zeitraum_bis) if a.zeitraum_bis else None,
+        "status": a.status, "final": _nk.is_final(a.status),
+        "finalized_at": str(a.finalized_at) if a.finalized_at else None, "notiz": a.notiz or "",
+    }
+    if not with_result:
+        return out
+    positionen = (db.query(NkKostenposition)
+                  .filter(NkKostenposition.abrechnung_id == a.id, NkKostenposition.user_id == uid,
+                          _notdel(NkKostenposition)).order_by(NkKostenposition.id).all())
+    out["positionen"] = [_pos_dict(x) for x in positionen]
+    von, bis = _nk_period(a)
+    # A FINAL statement is served from its frozen snapshot (Principle A); a draft is computed live.
+    if _nk.is_final(a.status) and a.ergebnis_snapshot:
+        import json as _json
+        snap = _json.loads(a.ergebnis_snapshot)
+        out["ergebnis"] = {"tenants": snap.get("allocation", []), "leerstand": snap.get("leerstand_share", 0),
+                           "umlagefaehige_summe": snap.get("umlagefaehige_summe", 0),
+                           "hinweise": snap.get("hinweise", [])}
+        out["frist_ueberschritten"] = snap.get("frist_ueberschritten", False)
+        out["aus_snapshot"] = True
+    else:
+        units, tens = _nk_units_tenancies(db, uid, a.property_id)
+        v = _nk.verteile(positionen, units, tens, von, bis)
+        out["ergebnis"] = _nk.ergebnis(v, tens, von, bis)
+        out["frist_ueberschritten"] = _nk.frist_ueberschritten(bis)
+        out["aus_snapshot"] = False
+    return out
+
+
+@router.post("/nk")
+def create_nk(body: NkAbrechnungIn, user: dict = Depends(get_current_user)):
+    """A new statement for a property + year. Period defaults to the full calendar year."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        _own_property(db, uid, body.property_id)
+        von = _pdate(body.zeitraum_von) or date(body.jahr, 1, 1)
+        bis = _pdate(body.zeitraum_bis) or date(body.jahr, 12, 31)
+        a = NkAbrechnung(user_id=uid, property_id=body.property_id, jahr=body.jahr,
+                         zeitraum_von=von, zeitraum_bis=bis, status=_nk.STATUS_ENTWURF)
+        db.add(a); db.commit(); db.refresh(a)
+        return {"success": True, **_abr_dict(db, uid, a)}
+    finally:
+        db.close()
+
+
+@router.get("/nk")
+def list_nk(property_id: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        q = db.query(NkAbrechnung).filter(NkAbrechnung.user_id == uid, _notdel(NkAbrechnung))
+        if property_id:
+            q = q.filter(NkAbrechnung.property_id == property_id)
+        rows = q.order_by(NkAbrechnung.jahr.desc(), NkAbrechnung.id.desc()).all()
+        return {"abrechnungen": [_abr_dict(db, uid, a, with_result=False) for a in rows]}
+    finally:
+        db.close()
+
+
+@router.get("/nk/{aid}")
+def get_nk(aid: int, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        return _abr_dict(db, uid, _own_abrechnung(db, uid, aid))
+    finally:
+        db.close()
+
+
+@router.patch("/nk/{aid}")
+def update_nk(aid: int, body: NkAbrechnungPatch, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        a = _own_abrechnung(db, uid, aid)
+        _nk_editable(a)
+        if body.zeitraum_von is not None:
+            a.zeitraum_von = _pdate(body.zeitraum_von)
+        if body.zeitraum_bis is not None:
+            a.zeitraum_bis = _pdate(body.zeitraum_bis)
+        if body.notiz is not None:
+            a.notiz = body.notiz[:2000]
+        db.commit(); db.refresh(a)
+        return {"success": True, **_abr_dict(db, uid, a)}
+    finally:
+        db.close()
+
+
+@router.delete("/nk/{aid}")
+def delete_nk(aid: int, user: dict = Depends(get_current_user)):
+    """Only a DRAFT may be deleted. A finalised statement is evidence — unlock or revise instead."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        a = _own_abrechnung(db, uid, aid)
+        _nk_editable(a)
+        a.is_deleted = True; a.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"success": True}
+    finally:
+        db.close()
+
+
+@router.post("/nk/{aid}/position")
+def add_nk_position(aid: int, body: NkPositionIn, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        a = _own_abrechnung(db, uid, aid)
+        _nk_editable(a)
+        kat = body.kategorie.strip()
+        # umlagefähig + Schlüssel default from the BetrKV knowledge unless the caller overrides
+        umlagefaehig = body.umlagefaehig if body.umlagefaehig is not None else _nk.umlagefaehig_default(kat)
+        schluessel = body.schluessel or _nk.default_schluessel(kat)
+        if schluessel not in _nk.SCHLUESSEL:
+            raise HTTPException(status_code=400, detail="Unbekannter Umlageschlüssel")
+        pct = 100 if body.umlage_pct is None else max(0, min(100, int(body.umlage_pct)))
+        p = NkKostenposition(abrechnung_id=a.id, user_id=uid, kategorie=kat[:40],
+                             betrag=round(float(body.betrag), 2), umlagefaehig=bool(umlagefaehig),
+                             umlage_pct=pct, schluessel=schluessel, verbrauch_art=body.verbrauch_art,
+                             document_id=body.document_id, beleg_datum=_pdate(body.beleg_datum),
+                             notiz=(body.notiz or "")[:300] or None)
+        db.add(p); db.commit()
+        return {"success": True, **_abr_dict(db, uid, a)}
+    finally:
+        db.close()
+
+
+@router.patch("/nk/{aid}/position/{pid}")
+def update_nk_position(aid: int, pid: int, body: NkPositionPatch, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        a = _own_abrechnung(db, uid, aid)
+        _nk_editable(a)
+        p = (db.query(NkKostenposition)
+             .filter(NkKostenposition.id == pid, NkKostenposition.abrechnung_id == aid,
+                     NkKostenposition.user_id == uid, _notdel(NkKostenposition)).first())
+        if not p:
+            raise HTTPException(status_code=404, detail="Kostenposition nicht gefunden")
+        if body.kategorie is not None:
+            p.kategorie = body.kategorie.strip()[:40]
+        if body.betrag is not None:
+            p.betrag = round(float(body.betrag), 2)
+        if body.umlagefaehig is not None:
+            p.umlagefaehig = bool(body.umlagefaehig)
+        if body.umlage_pct is not None:
+            p.umlage_pct = max(0, min(100, int(body.umlage_pct)))
+        if body.schluessel is not None:
+            if body.schluessel not in _nk.SCHLUESSEL:
+                raise HTTPException(status_code=400, detail="Unbekannter Umlageschlüssel")
+            p.schluessel = body.schluessel
+        if body.verbrauch_art is not None:
+            p.verbrauch_art = body.verbrauch_art or None
+        if body.document_id is not None:
+            p.document_id = body.document_id
+        if body.beleg_datum is not None:
+            p.beleg_datum = _pdate(body.beleg_datum)
+        if body.notiz is not None:
+            p.notiz = (body.notiz or "")[:300] or None
+        db.commit()
+        return {"success": True, **_abr_dict(db, uid, a)}
+    finally:
+        db.close()
+
+
+@router.delete("/nk/{aid}/position/{pid}")
+def delete_nk_position(aid: int, pid: int, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        a = _own_abrechnung(db, uid, aid)
+        _nk_editable(a)
+        p = (db.query(NkKostenposition)
+             .filter(NkKostenposition.id == pid, NkKostenposition.abrechnung_id == aid,
+                     NkKostenposition.user_id == uid, _notdel(NkKostenposition)).first())
+        if not p:
+            raise HTTPException(status_code=404, detail="Kostenposition nicht gefunden")
+        p.is_deleted = True; p.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"success": True, **_abr_dict(db, uid, a)}
+    finally:
+        db.close()
+
+
+@router.post("/nk/{aid}/finalisieren")
+def finalize_nk(aid: int, user: dict = Depends(get_current_user)):
+    """Freeze the immutable snapshot and lock the statement (Principle A + B).
+    From now on it is read from the snapshot, and every write is refused (409)."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        a = _own_abrechnung(db, uid, aid)
+        _nk_editable(a)
+        p = db.query(ImmoProperty).filter(ImmoProperty.id == a.property_id).first()
+        positionen = (db.query(NkKostenposition)
+                      .filter(NkKostenposition.abrechnung_id == a.id, NkKostenposition.user_id == uid,
+                              _notdel(NkKostenposition)).order_by(NkKostenposition.id).all())
+        if not positionen:
+            raise HTTPException(status_code=400, detail="Keine Kostenpositionen — nichts abzurechnen.")
+        units, tens = _nk_units_tenancies(db, uid, a.property_id)
+        von, bis = _nk_period(a)
+        snap = _nk.build_snapshot(
+            {"id": a.id, "jahr": a.jahr},
+            {"id": p.id if p else None, "adresse": (p.adresse if p else "") or (p.name if p else "")},
+            units, tens, positionen, von, bis)
+        import json as _json
+        a.ergebnis_snapshot = _json.dumps(snap, ensure_ascii=False)
+        a.calculation_version = _nk.CALCULATION_VERSION
+        a.status = _nk.STATUS_FINAL
+        a.finalized_at = datetime.now(timezone.utc)
+        db.commit(); db.refresh(a)
+        return {"success": True, **_abr_dict(db, uid, a)}
+    finally:
+        db.close()
+
+
+@router.post("/nk/{aid}/entsperren")
+def unlock_nk(aid: int, user: dict = Depends(get_current_user)):
+    """Authorised correction path (Principle B): revert final → entwurf. The previous snapshot is
+    cleared; a re-finalise builds a fresh one. This is the ONLY way to edit a finalised statement."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        a = _own_abrechnung(db, uid, aid)
+        if not _nk.is_final(a.status):
+            return {"success": True, **_abr_dict(db, uid, a)}
+        a.status = _nk.STATUS_ENTWURF
+        a.ergebnis_snapshot = None
+        a.finalized_at = None
+        db.commit(); db.refresh(a)
+        return {"success": True, "entsperrt": True, **_abr_dict(db, uid, a)}
+    finally:
+        db.close()
+
+
+# ── the PDF: the per-tenant Nebenkostenabrechnung (formell ordnungsgemäß, §556) ──
+
+
+@router.get("/nk/{aid}/pdf")
+def nk_pdf(aid: int, tenancy_id: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
+    """Per-tenant statement (tenancy_id given) or the landlord's overview (no tenancy_id).
+
+    For a FINAL statement the numbers come from the frozen snapshot (Principle A) — never recomputed —
+    so the PDF and the record of truth can never drift apart."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle)
+
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        a = _own_abrechnung(db, uid, aid)
+        data = _abr_dict(db, uid, a)                    # final → from snapshot; draft → live
+        erg = data["ergebnis"]
+        p = db.query(ImmoProperty).filter(ImmoProperty.id == a.property_id).first()
+        comp = (db.query(UserCompany).filter(UserCompany.user_id == uid, UserCompany.is_default == True).first()  # noqa: E712
+                or db.query(UserCompany).filter(UserCompany.user_id == uid).order_by(UserCompany.id.desc()).first())
+        positionen = data.get("positionen", [])
+        von, bis = _nk_period(a)
+        zeitraum = "%s – %s" % (von.strftime("%d.%m.%Y"), bis.strftime("%d.%m.%Y"))
+
+        ss = getSampleStyleSheet()
+        small = ss["Normal"].clone("s"); small.fontSize = 8.5; small.leading = 11
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=16 * mm,
+                                leftMargin=18 * mm, rightMargin=18 * mm, title="Nebenkostenabrechnung")
+        el = []
+        if comp:
+            el.append(Paragraph("<font size=8>%s%s</font>" % (
+                comp.company_name, (" · " + (comp.address or "").replace("\n", ", ")) if comp.address else ""), ss["Normal"]))
+            el.append(Spacer(1, 4 * mm))
+
+        target = None
+        if tenancy_id is not None:
+            target = next((t for t in erg["tenants"] if t["tenancy_id"] == tenancy_id), None)
+            if not target:
+                raise HTTPException(status_code=404, detail="Mieter nicht in dieser Abrechnung")
+
+        title = "Nebenkostenabrechnung %s" % a.jahr
+        el.append(Paragraph("<b>%s</b>" % title, ss["Title"]))
+        el.append(Spacer(1, 2 * mm))
+        kopf = [["Objekt", (p.adresse if p else "") or (p.name if p else "—")],
+                ["Abrechnungszeitraum", zeitraum]]
+        if target:
+            kopf.append(["Mieter", target["name"]])
+        t = Table(kopf, colWidths=[45 * mm, 125 * mm])
+        t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 9), ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
+                               ("BOTTOMPADDING", (0, 0), (-1, -1), 3), ("TOPPADDING", (0, 0), (-1, -1), 3)]))
+        el.append(t)
+        el.append(Spacer(1, 5 * mm))
+
+        # ── total costs table ────────────────────────────────────────
+        el.append(Paragraph("<b>Gesamtkosten (umlagefähig)</b>", ss["Heading3"]))
+        rows = [["Kostenart", "Betrag", "Umlage %", "Schlüssel"]]
+        for pos in positionen:
+            if not pos["umlagefaehig"]:
+                continue
+            rows.append([pos["label"], _fmt_eur(pos["betrag"]), "%d%%" % pos["umlage_pct"],
+                         pos["schluessel_label"]])
+        rows.append(["Summe umlagefähig", _fmt_eur(erg["umlagefaehige_summe"]), "", ""])
+        tc = Table(rows, colWidths=[62 * mm, 30 * mm, 25 * mm, 45 * mm], repeatRows=1)
+        tc.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.grey),
+            ("GRID", (0, 0), (-1, -2), 0.25, colors.HexColor("#e5e7eb")),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ]))
+        el.append(tc)
+        # the non-umlagefähige costs are shown as NOT passed on (transparency)
+        nicht = [pos for pos in positionen if not pos["umlagefaehig"]]
+        if nicht:
+            el.append(Spacer(1, 2 * mm))
+            el.append(Paragraph("<font size=8 color='#6b7280'>Nicht umlagefähig (nicht auf den Mieter "
+                                "verteilt): %s</font>" % ", ".join("%s %s" % (n["label"], _fmt_eur(n["betrag"])) for n in nicht), small))
+        el.append(Spacer(1, 5 * mm))
+
+        if target:
+            # ── this tenant's share per line ─────────────────────────
+            el.append(Paragraph("<b>Ihr Anteil</b>", ss["Heading3"]))
+            trows = [["Kostenart", "Verteilung", "Ihr Anteil"]]
+            for pp in target["positionen"]:
+                trows.append([pp["label"], pp.get("anteil_text", ""), _fmt_eur(pp["anteil_betrag"])])
+            trows.append(["Summe Ihr Anteil", "", _fmt_eur(target["umlage"])])
+            tt = Table(trows, colWidths=[55 * mm, 65 * mm, 30 * mm], repeatRows=1)
+            tt.setStyle(TableStyle([
+                ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.grey),
+                ("GRID", (0, 0), (-1, -2), 0.25, colors.HexColor("#e5e7eb")),
+                ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+            ]))
+            el.append(tt)
+            el.append(Spacer(1, 5 * mm))
+
+            # ── result ───────────────────────────────────────────────
+            saldo = target["saldo"]
+            typ_txt = ("Guthaben" if target["typ"] == "guthaben" else
+                       "Nachzahlung" if target["typ"] == "nachzahlung" else "ausgeglichen")
+            col = "#059669" if target["typ"] == "guthaben" else ("#dc2626" if target["typ"] == "nachzahlung" else "#111827")
+            erows = [["Ihr Anteil an den Nebenkosten", _fmt_eur(target["umlage"])],
+                     ["Geleistete Vorauszahlungen", _fmt_eur(target["vorauszahlung"])],
+                     [typ_txt, _fmt_eur(abs(saldo))]]
+            te = Table(erows, colWidths=[120 * mm, 42 * mm])
+            te.setStyle(TableStyle([
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("LINEABOVE", (0, -1), (-1, -1), 0.6, colors.grey),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("TEXTCOLOR", (0, -1), (-1, -1), colors.HexColor(col)),
+                ("TOPPADDING", (0, -1), (-1, -1), 4),
+            ]))
+            el.append(te)
+        else:
+            # ── overview: all tenants + the landlord's vacancy share ─
+            el.append(Paragraph("<b>Verteilung auf die Mieter</b>", ss["Heading3"]))
+            orows = [["Mieter", "Anteil", "Vorauszahlung", "Ergebnis"]]
+            for r in erg["tenants"]:
+                res = ("Guthaben " + _fmt_eur(r["saldo"])) if r["typ"] == "guthaben" else \
+                      ("Nachzahlung " + _fmt_eur(-r["saldo"])) if r["typ"] == "nachzahlung" else "±0"
+                orows.append([r["name"], _fmt_eur(r["umlage"]), _fmt_eur(r["vorauszahlung"]), res])
+            orows.append(["Leerstand (Vermieter trägt)", _fmt_eur(erg["leerstand"]), "", ""])
+            to = Table(orows, colWidths=[52 * mm, 30 * mm, 35 * mm, 45 * mm], repeatRows=1)
+            to.setStyle(TableStyle([
+                ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Oblique"),
+                ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.grey),
+                ("GRID", (0, 0), (-1, -2), 0.25, colors.HexColor("#e5e7eb")),
+                ("ALIGN", (1, 0), (2, -1), "RIGHT"),
+            ]))
+            el.append(to)
+
+        if erg.get("hinweise"):
+            el.append(Spacer(1, 3 * mm))
+            for h in erg["hinweise"]:
+                el.append(Paragraph("<font size=8 color='#b45309'>Hinweis: %s</font>" % h, small))
+        if data.get("frist_ueberschritten"):
+            el.append(Spacer(1, 2 * mm))
+            el.append(Paragraph("<font size=8 color='#b45309'>Hinweis: Die 12-Monats-Frist nach §556 III "
+                                "BGB ist überschritten — eine Nachforderung kann ausgeschlossen sein; "
+                                "ein Guthaben bleibt zu erstatten.</font>", small))
+
+        el.append(Spacer(1, 6 * mm))
+        iban = ("<br/>Zahlungen bitte auf: %s" % comp.iban) if (comp and comp.iban) else ""
+        el.append(Paragraph("<font size=8 color='#6b7280'>Erstellt mit AutoTax · Vorlage, kein Ersatz "
+                            "für eine rechtliche Prüfung. Einwendungen §556 III BGB.%s%s</font>"
+                            % (iban, "" if data["final"] else " · ENTWURF, noch nicht abgeschlossen"), small))
+        doc.build(el)
+        buf.seek(0)
+        who = ("_" + str(tenancy_id)) if tenancy_id else "_uebersicht"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="nebenkosten_%s%s.pdf"' % (aid, who)})
+    finally:
+        db.close()
+
+
+def _fmt_eur(v) -> str:
+    s = "{:,.2f}".format(float(v or 0))          # 1,234.56
+    return "€ " + s.replace(",", "X").replace(".", ",").replace("X", ".")   # → 1.234,56
