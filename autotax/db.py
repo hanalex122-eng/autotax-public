@@ -97,12 +97,15 @@ def init_db():
         _iu = inspect(engine)
         if "immo_unit" in _iu.get_table_names():
             _uc = [c["name"] for c in _iu.get_columns("immo_unit")]
-            if "mea" not in _uc:
-                with engine.begin() as conn:
+            with engine.begin() as conn:
+                if "mea" not in _uc:
                     conn.execute(text("ALTER TABLE immo_unit ADD COLUMN mea DOUBLE PRECISION"))
                     logger.info("Added 'mea' column to immo_unit")
+                if "eigennutzung_personen" not in _uc:   # Eigennutzung: owner lives in this unit
+                    conn.execute(text("ALTER TABLE immo_unit ADD COLUMN eigennutzung_personen INTEGER"))
+                    logger.info("Added 'eigennutzung_personen' column to immo_unit")
     except Exception as e:
-        logger.warning("immo_unit mea migration skipped: %s", e)
+        logger.warning("immo_unit column migration skipped: %s", e)
     # Sprint 1 (Übergabeprotokoll): a photo may belong to a handover + a room.
     # The new tables (immo_protokoll / immo_zaehlerstand) come from create_all; only the two
     # columns on the existing immo_document table need an ALTER. Additive + nullable.

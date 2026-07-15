@@ -176,6 +176,26 @@ res_b = NK.ergebnis(NK.verteile([Pos("muell", 400.0, schluessel="personenzahl")]
 byname = {r["name"]: r for r in res_b["tenants"]}
 ok(byname["A"]["personenzahl"] == 3 and byname["B"]["personenzahl"] == 1, "each result row exposes personenzahl")
 
+print("\n[Eig] Eigennutzung — owner lives in a flat and is counted in the person split (SaaS scenario)")
+# Building: owner in unit 1 (4 persons, Eigennutzung), VANELLE unit 2 (1), YURONG unit 3 (1). Wasser 1267.
+u_own = Unit(1); u_own.eigennutzung_personen = 4
+eig_units = [u_own, Unit(2), Unit(3)]
+eig_tens = [Tenancy(701, 2, "VANELLE", VON, None, personenzahl=1),
+            Tenancy(702, 3, "YURONG", VON, None, personenzahl=1)]      # unit 1 has NO tenant (owner lives there)
+ve = NK.verteile([Pos("wasser", 1267.0, schluessel="personenzahl")], eig_units, eig_tens, VON, BIS)
+res_e = NK.ergebnis(ve, eig_tens, VON, BIS)
+bynm = {r["name"]: r for r in res_e["tenants"]}
+eq("VANELLE pays 1/6 of 1267", bynm["VANELLE"]["umlage"], round(1267/6, 2))
+eq("YURONG pays 1/6 of 1267", bynm["YURONG"]["umlage"], round(1267/6, 2))
+eq("owner bears 4/6 (Eigennutzung), NOT the tenants", res_e["eigennutzung"], round(1267*4/6, 2))
+eq("no true vacancy", res_e["leerstand"], 0.0)
+eq("INVARIANT Σ tenants + Eigennutzung + Leerstand == 1267",
+   round(sum(r["umlage"] for r in res_e["tenants"]) + res_e["eigennutzung"] + res_e["leerstand"], 2), 1267.0)
+# without Eigennutzung set, the two tenants would wrongly split 100% (1/2 each) — prove the difference
+ve0 = NK.verteile([Pos("wasser", 1267.0, schluessel="personenzahl")], [Unit(1), Unit(2), Unit(3)], eig_tens, VON, BIS)
+r0 = {r["name"]: r["umlage"] for r in NK.ergebnis(ve0, eig_tens, VON, BIS)["tenants"]}
+ok(r0["VANELLE"] == round(1267/2, 2), f"WITHOUT Eigennutzung: tenants wrongly split 1/2 each ({r0['VANELLE']}) — the feature fixes this")
+
 print("\n[9] snapshot records the RAW schluessel (personenzahl), engine version 2")
 snap = NK.build_snapshot({"id": 1, "jahr": 2026}, {"id": 10, "adresse": "x"}, [Unit(1), Unit(2)],
                          [Tenancy(901, 1, "A", VON, None, personenzahl=2), Tenancy(902, 2, "B", VON, None, personenzahl=2)],

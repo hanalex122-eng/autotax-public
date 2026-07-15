@@ -3206,6 +3206,10 @@ function NkEditor({propertyId,showToast}){
   const [nkPers,setNkPers]=React.useState({});
   const nkSavePers=async(tid)=>{const raw=nkPers[tid];if(raw===undefined)return;try{await api("/immo/tenancies/"+tid,{method:"PATCH",body:JSON.stringify({personenzahl:raw===""?-1:parseInt(raw)})});setNkOpen(await api("/immo/nk/"+nkOpen.id));setNkPers(p=>{const n={...p};delete n[tid];return n;});}catch(e){alert(e.message);}};
   const nkUsesPers=nkOpen&&(nkOpen.positionen||[]).some(p=>p.schluessel==="personenzahl");
+  // Eigennutzung — a unit the OWNER lives in (no tenant). Enter the owner's persons so a Personenzahl
+  // split counts them; the owner bears that share (not the tenants). Saved on the unit.
+  const [nkEig,setNkEig]=React.useState({});
+  const nkSaveEig=async(uid)=>{const raw=nkEig[uid];if(raw===undefined)return;try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify({eigennutzung_personen:raw===""?-1:parseInt(raw)})});setNkOpen(await api("/immo/nk/"+nkOpen.id));setNkEig(p=>{const n={...p};delete n[uid];return n;});}catch(e){alert(e.message);}};
   if(!nkOpen)return(<div>
     <div style={{...css.card,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
       <div><div style={{fontWeight:700,fontSize:15}}>📑 {_L("Nebenkostenabrechnung","Yan gider hesabı","Utility-cost statement")}</div>
@@ -3255,6 +3259,15 @@ function NkEditor({propertyId,showToast}){
             onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
             style={{width:110,padding:"7px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(t.personenzahl!=null?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
         </div>);})}
+      {/* owner-occupied / vacant units — enter the OWNER's persons (Eigennutzung), counts in the split */}
+      {(nkOpen.eigennutzung_units||[]).map(u=>{const pv=nkEig[u.id]!==undefined?nkEig[u.id]:(u.eigennutzung_personen!=null?String(u.eigennutzung_personen):"");return(
+        <div key={"u"+u.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"5px 0",borderTop:"1px dashed "+theme.border}}>
+          <span style={{fontSize:14,color:theme.text}}>🏠 {u.name} <span style={{fontSize:11,color:theme.textMuted}}>· {_L("Vermieter (Eigennutzung)","Ev sahibi (kendi oturuyor)","Owner (self-occupied)")}</span></span>
+          <input type="number" min="0" inputMode="numeric" placeholder={_L("Personen","Kişi","Persons")} value={pv}
+            onChange={e=>setNkEig(p=>({...p,[u.id]:e.target.value}))} onBlur={()=>nkSaveEig(u.id)}
+            onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
+            style={{width:110,padding:"7px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(u.eigennutzung_personen!=null?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
+        </div>);})}
     </div>}
     <div style={{...css.card,marginBottom:12}}>
       <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>{_L("Ergebnis je Mieter","Kiracı başına sonuç","Result per tenant")}</div>
@@ -3267,6 +3280,8 @@ function NkEditor({propertyId,showToast}){
           {locked&&<span onClick={()=>nkPdf(t.tenancy_id)} style={{color:theme.accent,cursor:"pointer",marginLeft:8}}>📄 PDF</span>}</div>
       </div>);})}
       {(erg.tenants||[]).length===0&&<div style={{fontSize:12,color:"#b45309",padding:"6px 0"}}>ℹ️ {_L("Keine aktiven Mieter im Zeitraum — alle Kosten trägt der Vermieter (Leerstand). Richtiges Jahr gewählt?","Dönemde aktif kiracı yok — tüm maliyet ev sahibinde (Leerstand). Doğru yıl mı?","No active tenants in the period — all costs go to the landlord (vacancy). Right year?")}</div>}
+      {(erg.eigennutzung||0)>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"9px 0",fontStyle:"italic",color:theme.textMuted}}>
+        <span>🏠 {_L("Eigennutzung (Vermieter-Anteil)","Ev sahibi kendi payı","Owner self-use share")}</span><b>{_e(erg.eigennutzung)}</b></div>}
       {(erg.leerstand||0)>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"9px 0",fontStyle:"italic",color:theme.textMuted}}>
         <span>{_L("Leerstand (Vermieter trägt)","Boşluk (ev sahibi taşır)","Vacancy (landlord bears)")}</span><b>{_e(erg.leerstand)}</b></div>}
     </div>

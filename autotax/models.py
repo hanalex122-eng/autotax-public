@@ -898,6 +898,11 @@ class ImmoUnit(Base):
     # Sprint 2 (Nebenkosten): Miteigentumsanteil / an agreed allocation key that overrides Wohnfläche
     # (WEG statements, non-area keys). Nullable; Wohnfläche is the §556a default when empty.
     mea = Column(Float, nullable=True)
+    # Eigennutzung: the OWNER lives in this unit with N persons (no tenancy, no rent). It still
+    # consumes, so in a Nebenkosten split it is counted in the denominator (persons/area) and its
+    # share is the landlord's own (Eigennutzungsanteil), not pushed onto the tenants. Nullable:
+    # a rented or truly vacant unit leaves it empty.
+    eigennutzung_personen = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)

@@ -205,7 +205,8 @@ def verteile(positionen, units, tenancies, von: date, bis: date):
 
     per_tenant = {t.id: {"name": getattr(t, "mieter_name", ""), "summe": 0.0, "positionen": []}
                   for t in active}
-    leerstand = 0.0
+    leerstand = 0.0       # truly vacant time — landlord bears it as a LOSS
+    eigennutzung = 0.0    # owner-occupied time — landlord's OWN cost (counted in the split)
     umlagefaehige_summe = 0.0
     hinweise = []
     seen_fallback = set()
@@ -226,20 +227,30 @@ def verteile(positionen, units, tenancies, von: date, bis: date):
             hinweise.append(note)
             seen_fallback.add(note)
 
-        # weights across ALL units in the period (occupied AND vacant), so the vacant share is visible
+        # weights across ALL units in the period. A unit's time not covered by a tenancy is either
+        # OWNER-OCCUPIED (Eigennutzung — the owner's persons/area count in the denominator, share is
+        # the owner's own cost) or VACANT (Leerstand — landlord's loss). Both stay with the landlord,
+        # never redistributed to the tenants, but they are reported separately.
         total_w = 0.0
         occ_w = {}       # tenancy_id -> weight
+        owner_w = 0.0    # weight of owner-occupied (Eigennutzung) time
+        vacant_w = 0.0   # weight of truly vacant time
         for u in units:
             u_tenancies = [t for t in active if t.unit_id == u.id]
-            if u_tenancies:
-                for t in u_tenancies:
-                    w = basis_weight(schluessel, u, t, za[t.id])
-                    occ_w[t.id] = occ_w.get(t.id, 0.0) + w
-                    total_w += w
-            # a unit's VACANT time also carries weight, and that weight goes to the landlord bucket
+            for t in u_tenancies:
+                w = basis_weight(schluessel, u, t, za[t.id])
+                occ_w[t.id] = occ_w.get(t.id, 0.0) + w
+                total_w += w
             vac_za = _unit_vacant_zeitanteil(u, tenancies, von, bis)
             if vac_za > 0:
-                total_w += basis_weight(schluessel, u, _Dummy(), vac_za)
+                eig = getattr(u, "eigennutzung_personen", None)
+                dummy = _Dummy(); dummy.personenzahl = eig     # owner's persons for the person split
+                w = basis_weight(schluessel, u, dummy, vac_za)
+                total_w += w
+                if eig is not None and int(eig) > 0:
+                    owner_w += w
+                else:
+                    vacant_w += w
 
         if total_w <= 0:
             hinweise.append(f"Position '{kategorie_label(getattr(pos, 'kategorie', ''))}' konnte nicht "
@@ -262,10 +273,15 @@ def verteile(positionen, units, tenancies, von: date, bis: date):
                 "schluessel": schluessel,
                 "anteil_text": _anteil_text(schluessel, w, total_w),
             })
-        # whatever is not assigned to a tenant (vacancy + rounding) is the landlord's bucket
-        leerstand = round(leerstand + (betrag - assigned), 2)
+        # the non-tenant remainder splits between the owner's Eigennutzung and true Leerstand by weight
+        rest = round(betrag - assigned, 2)
+        eig_share = round(betrag * owner_w / total_w, 2) if owner_w > 0 else 0.0
+        eig_share = min(eig_share, rest)
+        eigennutzung = round(eigennutzung + eig_share, 2)
+        leerstand = round(leerstand + (rest - eig_share), 2)
 
     return {"per_tenant": per_tenant, "leerstand": round(leerstand, 2),
+            "eigennutzung": round(eigennutzung, 2),
             "umlagefaehige_summe": umlagefaehige_summe, "hinweise": hinweise}
 
 
@@ -334,6 +350,7 @@ def ergebnis(verteilung, tenancies, von: date, bis: date):
         })
     rows.sort(key=lambda r: (r["name"] or ""))
     return {"tenants": rows, "leerstand": verteilung["leerstand"],
+            "eigennutzung": verteilung.get("eigennutzung", 0.0),
             "umlagefaehige_summe": verteilung["umlagefaehige_summe"], "hinweise": verteilung["hinweise"]}
 
 
@@ -380,6 +397,7 @@ def build_snapshot(abrechnung_meta, property_meta, units, tenancies, positionen,
                         "schluessel": getattr(p, "schluessel", "wohnflaeche")} for p in positionen],
         "allocation": e["tenants"],          # per tenant: shares (allocation_ratios in anteil_text) + saldo
         "leerstand_share": e["leerstand"],
+        "eigennutzung_share": e.get("eigennutzung", 0.0),
         "umlagefaehige_summe": e["umlagefaehige_summe"],
         "final_result": [{"tenancy_id": r["tenancy_id"], "name": r["name"], "saldo": r["saldo"],
                           "typ": r["typ"]} for r in e["tenants"]],

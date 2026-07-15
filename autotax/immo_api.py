@@ -830,7 +830,8 @@ def _own_unit(db, uid, uid_):
 
 def _unit_dict(u):
     return {"id": u.id, "property_id": u.property_id, "name": u.name or "", "wohnflaeche": u.wohnflaeche,
-            "soll_miete": u.soll_miete}
+            "soll_miete": u.soll_miete, "mea": getattr(u, "mea", None),
+            "eigennutzung_personen": getattr(u, "eigennutzung_personen", None)}
 
 
 def _tenancy_dict(t):
@@ -877,6 +878,7 @@ class UnitPatch(BaseModel):
     name: Optional[str] = None
     wohnflaeche: Optional[float] = None
     soll_miete: Optional[float] = None
+    eigennutzung_personen: Optional[int] = None    # Eigennutzung: owner lives here with N persons; -1 = clear
 
 
 class TenancyIn(BaseModel):
@@ -938,6 +940,8 @@ def update_unit(uid_: int, body: UnitPatch, user: dict = Depends(get_current_use
         if body.name is not None: u.name = body.name
         if body.wohnflaeche is not None: u.wohnflaeche = body.wohnflaeche
         if body.soll_miete is not None: u.soll_miete = body.soll_miete
+        if body.eigennutzung_personen is not None:
+            u.eigennutzung_personen = None if body.eigennutzung_personen < 0 else int(body.eigennutzung_personen)
         db.commit(); db.refresh(u)
         return {"success": True, **_unit_dict(u)}
     finally:
@@ -2702,6 +2706,7 @@ def _abr_dict(db, uid: int, a: NkAbrechnung, with_result: bool = True) -> dict:
         import json as _json
         snap = _json.loads(a.ergebnis_snapshot)
         out["ergebnis"] = {"tenants": snap.get("allocation", []), "leerstand": snap.get("leerstand_share", 0),
+                           "eigennutzung": snap.get("eigennutzung_share", 0),
                            "umlagefaehige_summe": snap.get("umlagefaehige_summe", 0),
                            "hinweise": snap.get("hinweise", [])}
         out["frist_ueberschritten"] = snap.get("frist_ueberschritten", False)
@@ -2712,7 +2717,21 @@ def _abr_dict(db, uid: int, a: NkAbrechnung, with_result: bool = True) -> dict:
         out["ergebnis"] = _nk.ergebnis(v, tens, von, bis)
         out["frist_ueberschritten"] = _nk.frist_ueberschritten(bis)
         out["aus_snapshot"] = False
+        # Units with no active tenant in the period → owner-occupied (Eigennutzung) or vacant.
+        # The UI shows these so the landlord can enter their own person count (counts in the split).
+        ten_units = {t.unit_id for t in tens if _nk_period_active(t, von, bis)}
+        out["eigennutzung_units"] = [
+            {"id": u.id, "name": u.name or ("Whg " + str(u.id)), "wohnflaeche": u.wohnflaeche,
+             "eigennutzung_personen": getattr(u, "eigennutzung_personen", None)}
+            for u in units if u.id not in ten_units]
     return out
+
+
+def _nk_period_active(t, von, bis):
+    for (y, m) in _nk._period_months(von, bis):
+        if _nk._rules.tenancy_active_in_month(t, y, m):
+            return True
+    return False
 
 
 @router.post("/nk")
