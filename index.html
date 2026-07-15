@@ -3274,7 +3274,10 @@ function NebenkostenView({showToast}){
     <div style={{fontSize:22,fontWeight:800,color:theme.text,marginBottom:4}}>📑 {_L("Nebenkosten","Yan giderler","Utility costs")}</div>
     <div style={{fontSize:13,color:theme.textMuted,marginBottom:14}}>{_L("Jährliche Betriebskostenabrechnung je Mieter (§556 BGB).","Kiracı başına yıllık yan gider hesabı (§556 BGB).","Annual utility-cost statement per tenant (§556 BGB).")}</div>
     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
-      {props_.map(p=>(<button key={p.id} onClick={()=>setPid(p.id)} style={{padding:"9px 14px",borderRadius:10,border:"1.5px solid "+(pid===p.id?theme.accent:theme.border),background:pid===p.id?theme.accent:"transparent",color:pid===p.id?"#fff":theme.text,fontSize:13,fontWeight:600,cursor:"pointer"}}>🏠 {p.adresse||p.name}</button>))}
+      {props_.map(p=>(<button key={p.id} onClick={()=>setPid(p.id)} style={{padding:"9px 14px",borderRadius:10,border:"1.5px solid "+(pid===p.id?theme.accent:theme.border),background:pid===p.id?theme.accent:"transparent",color:pid===p.id?"#fff":theme.text,fontSize:13,cursor:"pointer",textAlign:"left"}}>
+        <div style={{fontWeight:700}}>🏠 {p.name||p.adresse||("Immobilie "+p.id)}</div>
+        {p.adresse&&p.adresse!==p.name&&<div style={{fontSize:11,opacity:0.85,marginTop:1}}>{p.adresse}</div>}
+      </button>))}
     </div>
     {pid?<NkEditor propertyId={pid} showToast={showToast}/>:<div style={{color:theme.textMuted}}>{_L("Bitte eine Immobilie wählen.","Bir mülk seçin.","Pick a property.")}</div>}
   </div>);
