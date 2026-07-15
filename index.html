@@ -3411,7 +3411,11 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const _inp={...css.input,marginBottom:8,width:"100%"};
   const S=acc?acc.summe:null;
   const units=acc?acc.units:[];
-  const tncs=acc?acc.tenancies:[];
+  // Tenant list for the Mieteingang dropdown — robust: use the accounting result, but if it is
+  // missing/empty (e.g. a swallowed fetch error) fall back to the independently-loaded tFull dict,
+  // so the dropdown never ends up silently empty when the tenant actually exists.
+  const tncs=(acc&&acc.tenancies&&acc.tenancies.length)?acc.tenancies
+    :Object.values(tFull||{}).map(t=>({tenancy_id:t.id,mieter_name:t.mieter_name,von:t.von,bis:t.bis,soll:0,ist:0,rueckstand:0,monate:0}));
   // ============ LIST VIEW ============
   if(!sel){
     return (<div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -3506,6 +3510,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
     </div>}
     {tab==="einnahmen"&&(<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Mieteingang erfassen","Kira girişi","Add rent payment")}</div>
+        {tncs.length===0&&<div style={{fontSize:12,color:"#b45309",marginBottom:8}}>⚠️ {_L("Keine Mieter geladen — Seite neu laden (Strg+Umschalt+R) oder unter 'Einheiten & Mieter' einen Mieter anlegen.","Kiracı yüklenmedi — sayfayı yenile (Ctrl+Shift+R) veya 'Daire & Kiracı' altında kiracı ekle.","No tenants loaded — reload (Ctrl+Shift+R) or add a tenant under 'Units & Tenants'.")}</div>}
         <select style={{..._inp,cursor:"pointer"}} value={rf.tid} onChange={e=>setRf({...rf,tid:e.target.value})}><option value="">{_L("— Mieter wählen —","— Kiracı seç —","— Select tenant —")}</option>{tncs.map(t=><option key={t.tenancy_id} value={t.tenancy_id}>{t.mieter_name} ({t.von}→{t.bis||"…"})</option>)}</select>
         <input style={_inp} type="number" placeholder={_L("Betrag €","Tutar €","Amount")} value={rf.betrag} onChange={e=>setRf({...rf,betrag:e.target.value})}/>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
