@@ -3509,9 +3509,13 @@ function ZaehlerMatrix({propertyId,showToast}){
   const [saving,setSaving]=React.useState(false);
   const load=(y)=>{setData(null);api("/immo/properties/"+propertyId+"/zaehler-matrix?jahr="+y).then(d=>{setData(d);setEd({});setVon(d.von);setBis(d.bis);}).catch(()=>setData(false));};
   React.useEffect(()=>{load(jahr);},[propertyId,jahr]);
+  // auto-focus the first Anfang cell once data is loaded (start typing immediately)
+  React.useEffect(()=>{if(data&&data.units&&data.units.length){const t=setTimeout(()=>{const el=document.getElementById("zc-0-0-1");if(el){el.focus();if(el.select)el.select();}},70);return()=>clearTimeout(t);}},[data]);
   const raw=(u,art,f)=>{const a=u.arts[art];const v=a[f];return v==null?"":String(v);};
   const val=(uid,art,f)=>{const e=ed[uid]&&ed[uid][art]&&ed[uid][art][f];if(e!==undefined)return e;const u=data.units.find(x=>x.unit_id===uid);return raw(u,art,f);};
   const setv=(uid,art,f,v)=>setEd(p=>({...p,[uid]:{...(p[uid]||{}),[art]:{...((p[uid]||{})[art]||{}),[f]:v}}}));
+  // Excel-like keys: Enter → same column, next flat (fill a whole column fast); Tab stays browser-default (→).
+  const onKey=(e,ui,ai,f)=>{if(e.key==="Enter"){e.preventDefault();const n=document.getElementById("zc-"+(ui+1)+"-"+ai+"-"+f);if(n){n.focus();if(n.select)n.select();}}};
   // per-meter status: leer=boş, half=yarım(eksik), err=Ende<Anfang, ok=tam
   const status=(uid,art)=>{const a=val(uid,art,"anfang"),b=val(uid,art,"ende");
     if(a===""&&b==="")return"leer";if(a===""||b==="")return"half";
@@ -3550,20 +3554,27 @@ function ZaehlerMatrix({propertyId,showToast}){
         <span style={{color:theme.accent,fontWeight:700}}>✓ {st.ok}</span> · <span style={{color:"#f59e0b",fontWeight:700}}>⚠ {st.half}</span>{st.err>0&&<span style={{color:theme.danger,fontWeight:700}}> · ✕ {st.err}</span>}
         <div style={{fontSize:11,color:theme.textMuted}}>{(data.units||[]).length} {_L("Wohnungen","daire","flats")}</div></div>
     </div>
-    <div style={{fontSize:12,color:theme.textMuted,marginBottom:10}}>{_L("Trage je Wohnung den Zählerstand am Anfang und am Ende des Jahres ein. Nebenkosten (Verbrauch/HeizkostenV) nutzt sie automatisch.","Her daire için yıl başı ve yıl sonu sayaç değerini gir. Nebenkosten (Verbrauch/HeizkostenV) bunları otomatik kullanır.","Enter each flat's meter reading at the start and end of the year. Nebenkosten uses them automatically.")}</div>
+    <div style={{fontSize:12,color:theme.textMuted,marginBottom:6}}>{_L("Trage je Wohnung den Zählerstand am Anfang und am Ende des Jahres ein. Nebenkosten (Verbrauch/HeizkostenV) nutzt sie automatisch.","Her daire için yıl başı ve yıl sonu sayaç değerini gir. Nebenkosten (Verbrauch/HeizkostenV) bunları otomatik kullanır.","Enter each flat's meter reading at the start and end of the year. Nebenkosten uses them automatically.")}</div>
+    <div style={{fontSize:11,color:theme.textDim,marginBottom:12,display:"flex",gap:14,flexWrap:"wrap"}}>
+      <span>⌨️ <b>Tab</b> → {_L("nächste Zelle","sonraki hücre","next cell")}</span>
+      <span><b>Enter</b> ↓ {_L("gleiche Spalte, nächste Wohnung","aynı kolon, sonraki daire","same column, next flat")}</span>
+      <span style={{color:theme.accent}}>✓ {_L("vollständig","tam","complete")}</span>
+      <span style={{color:"#f59e0b"}}>⚠ {_L("halb","yarım","half")}</span>
+      <span style={{color:theme.danger}}>✕ {_L("Ende<Anfang","hata","error")}</span>
+    </div>
     {(data.units||[]).length===0&&<div style={{...css.card,textAlign:"center",color:theme.textMuted,padding:20}}>{_L("Keine Wohnungen — zuerst Einheiten anlegen.","Daire yok — önce daire ekle.","No units — add flats first.")}</div>}
-    {(data.units||[]).map(u=>(<div key={u.unit_id} style={{...css.card,marginBottom:10}}>
+    {(data.units||[]).map((u,ui)=>(<div key={u.unit_id} style={{...css.card,marginBottom:10}}>
       <div style={{fontWeight:800,fontSize:15,marginBottom:8}}>🏠 {u.unit_name} {u.wohnflaeche!=null&&<span style={{fontSize:12,fontWeight:400,color:theme.textMuted}}>· {u.wohnflaeche} m²</span>}</div>
-      <div style={{display:"grid",gridTemplateColumns:"minmax(90px,1.1fr) minmax(90px,1fr) 1fr 1fr 46px",gap:6,alignItems:"center",fontSize:10.5,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:".03em",padding:"0 0 4px"}}>
-        <span>{_L("Zähler","Sayaç","Meter")}</span><span>{_L("Zähler-Nr.","Sayaç No","Meter no.")}</span><span>{_L("Anfang","Başlangıç","Start")}</span><span>{_L("Ende","Bitiş","End")}</span><span></span></div>
-      {ARTS.map(([art,lbl])=>{const s=status(u.unit_id,art);const einh=u.arts[art].einheit;const zw=u.arts[art].zwischen;return(
-        <div key={art} style={{display:"grid",gridTemplateColumns:"minmax(90px,1.1fr) minmax(90px,1fr) 1fr 1fr 46px",gap:6,alignItems:"center",padding:"4px 0",borderLeft:"3px solid "+stCol[s],paddingLeft:8,marginBottom:3}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(84px,1.1fr) minmax(84px,1fr) 1fr 1fr 42px",gap:6,alignItems:"center",fontSize:10.5,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:".03em",padding:"0 0 4px"}}>
+        <span>{_L("Zähler","Sayaç","Meter")}</span><span>{_L("Zähler-Nr.","Sayaç No","Meter no.")}</span><span style={{color:"#3b82f6"}}>▸ {_L("Anfang","Başlangıç","Start")}</span><span style={{color:theme.accent}}>▸ {_L("Ende","Bitiş","End")}</span><span></span></div>
+      {ARTS.map(([art,lbl],ai)=>{const s=status(u.unit_id,art);const einh=u.arts[art].einheit;return(
+        <div key={art} style={{display:"grid",gridTemplateColumns:"minmax(84px,1.1fr) minmax(84px,1fr) 1fr 1fr 42px",gap:6,alignItems:"center",padding:"4px 0",borderLeft:"3px solid "+stCol[s],paddingLeft:8,marginBottom:3}}>
           <span style={{fontSize:13,color:theme.text}}>{lbl}</span>
-          <input style={_inp} value={val(u.unit_id,art,"zaehler_nr")} onChange={e=>setv(u.unit_id,art,"zaehler_nr",e.target.value)} placeholder="—"/>
-          <input style={{..._inp,textAlign:"right"}} type="number" inputMode="decimal" value={val(u.unit_id,art,"anfang")} onChange={e=>setv(u.unit_id,art,"anfang",e.target.value)} placeholder={einh}/>
-          <input style={{..._inp,textAlign:"right",borderColor:s==="err"?theme.danger:theme.border}} type="number" inputMode="decimal" value={val(u.unit_id,art,"ende")} onChange={e=>setv(u.unit_id,art,"ende",e.target.value)} placeholder={einh}/>
-          <span style={{fontSize:11,textAlign:"right",color:s==="err"?theme.danger:s==="half"?"#f59e0b":theme.textMuted}}>
-            {s==="ok"?"+"+(Math.round((parseFloat(val(u.unit_id,art,"ende"))-parseFloat(val(u.unit_id,art,"anfang")))*100)/100):s==="err"?"✕":s==="half"?"⚠":""}</span>
+          <input id={"zc-"+ui+"-"+ai+"-0"} style={_inp} value={val(u.unit_id,art,"zaehler_nr")} onChange={e=>setv(u.unit_id,art,"zaehler_nr",e.target.value)} onKeyDown={e=>onKey(e,ui,ai,0)} placeholder="—"/>
+          <input id={"zc-"+ui+"-"+ai+"-1"} style={{..._inp,textAlign:"right",background:"rgba(59,130,246,0.06)",borderColor:s==="half"&&val(u.unit_id,art,"anfang")===""?"#f59e0b":theme.border}} type="number" inputMode="decimal" value={val(u.unit_id,art,"anfang")} onChange={e=>setv(u.unit_id,art,"anfang",e.target.value)} onKeyDown={e=>onKey(e,ui,ai,1)} placeholder={einh}/>
+          <input id={"zc-"+ui+"-"+ai+"-2"} style={{..._inp,textAlign:"right",background:"rgba(16,185,129,0.06)",borderColor:s==="err"?theme.danger:(s==="half"&&val(u.unit_id,art,"ende")===""?"#f59e0b":theme.border)}} type="number" inputMode="decimal" value={val(u.unit_id,art,"ende")} onChange={e=>setv(u.unit_id,art,"ende",e.target.value)} onKeyDown={e=>onKey(e,ui,ai,2)} placeholder={einh}/>
+          <span style={{fontSize:12,textAlign:"right",fontWeight:700,color:s==="err"?theme.danger:s==="half"?"#f59e0b":s==="ok"?theme.accent:theme.textMuted}}>
+            {s==="ok"?"✓":s==="err"?"✕":s==="half"?"⚠":""}</span>
         </div>);})}
       {ARTS.some(([art])=>u.arts[art].zwischen>0)&&<div style={{fontSize:11,color:theme.textDim,marginTop:4}}>ℹ️ {_L("Zwischenablesung(en) vorhanden (z.B. Mieterwechsel) — werden mitgerechnet.","Ara okuma(lar) var (ör. kiracı değişimi) — hesaba katılır.","Interim reading(s) present — included.")}</div>}
     </div>))}
