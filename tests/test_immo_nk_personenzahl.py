@@ -197,6 +197,30 @@ ve0 = NK.verteile([Pos("wasser", 1267.0, schluessel="personenzahl")], [Unit(1), 
 r0 = {r["name"]: r["umlage"] for r in NK.ergebnis(ve0, eig_tens, VON, BIS)["tenants"]}
 ok(r0["VANELLE"] == round(1267/2, 2), f"WITHOUT Eigennutzung: tenants wrongly split 1/2 each ({r0['VANELLE']}) — the feature fixes this")
 
+# ── the LOCKED product behaviours for Eigennutzung (Sprint 3 architecture decision: model B) ──
+print("\n[Eig-2] Owner NOT living there (eigennutzung_personen unset) → 0 persons, the flat is Leerstand")
+u_off = Unit(1)  # eigennutzung_personen stays None → owner does not live here, no tenant → vacant
+off_tens = [Tenancy(711, 2, "A", VON, None, personenzahl=1), Tenancy(712, 3, "B", VON, None, personenzahl=1)]
+vo = NK.verteile([Pos("wasser", 1200.0, schluessel="personenzahl")], [u_off, Unit(2), Unit(3)], off_tens, VON, BIS)
+ro = NK.ergebnis(vo, off_tens, VON, BIS)
+rno = {r["name"]: r["umlage"] for r in ro["tenants"]}
+eq("empty flat contributes 0 persons — water splits over the 2 tenants only", rno["A"], 600.0)
+eq("no Eigennutzung share when the owner does not live in", ro["eigennutzung"], 0.0)
+eq("a person-key vacant flat adds no cost (no one consumes there)", ro["leerstand"], 0.0)
+
+print("\n[Eig-3] Eigennutzung and Leerstand are SEPARATE buckets (both in one building, area key)")
+# unit1 owner-occupied (2 pers), unit2 tenant, unit3 TRULY vacant — Grundsteuer 900 by area, 3×50 m²
+u_mix1 = Unit(1); u_mix1.eigennutzung_personen = 2
+mix_tens = [Tenancy(721, 2, "A", VON, None, personenzahl=1)]   # unit3 has no tenant and no eigennutzung → vacant
+vx = NK.verteile([Pos("grundsteuer", 900.0, schluessel="wohnflaeche")], [u_mix1, Unit(2), Unit(3)], mix_tens, VON, BIS)
+rx = NK.ergebnis(vx, mix_tens, VON, BIS)
+eq("tenant bears its 1/3", rx["tenants"][0]["umlage"], 300.0)
+eq("Eigennutzung bucket = owner flat 1/3", rx["eigennutzung"], 300.0)
+eq("Leerstand bucket = truly vacant flat 1/3", rx["leerstand"], 300.0)
+ok(rx["eigennutzung"] != 0 and rx["leerstand"] != 0, "the two concepts coexist WITHOUT merging")
+eq("INVARIANT Σ tenants + Eigennutzung + Leerstand == 900",
+   round(rx["tenants"][0]["umlage"] + rx["eigennutzung"] + rx["leerstand"], 2), 900.0)
+
 print("\n[9] snapshot records the RAW schluessel (personenzahl), engine version 3")
 snap = NK.build_snapshot({"id": 1, "jahr": 2026}, {"id": 10, "adresse": "x"}, [Unit(1), Unit(2)],
                          [Tenancy(901, 1, "A", VON, None, personenzahl=2), Tenancy(902, 2, "B", VON, None, personenzahl=2)],
