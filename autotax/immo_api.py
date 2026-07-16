@@ -2643,6 +2643,7 @@ class NkPositionIn(BaseModel):
     umlage_pct: Optional[int] = None
     schluessel: Optional[str] = None
     verbrauch_art: Optional[str] = None
+    grund_prozent: Optional[int] = None     # HeizkostenV Grundkosten share (clamped 30-50 in code)
     individuell: Optional[dict] = None      # {tenancy_id: betrag} for the Individuell key
     beleg_datum: Optional[str] = None
     document_id: Optional[int] = None
@@ -2652,6 +2653,7 @@ class NkPositionIn(BaseModel):
 class NkPositionPatch(BaseModel):
     kategorie: Optional[str] = None
     betrag: Optional[float] = None
+    grund_prozent: Optional[int] = None     # HeizkostenV Grundkosten share (clamped 30-50); -1 clears
     umlagefaehig: Optional[bool] = None
     umlage_pct: Optional[int] = None
     schluessel: Optional[str] = None
@@ -2715,8 +2717,21 @@ def _pos_dict(p: NkKostenposition) -> dict:
             "betrag": p.betrag, "umlagefaehig": bool(p.umlagefaehig), "umlage_pct": p.umlage_pct,
             "schluessel": p.schluessel, "schluessel_label": _nk.SCHLUESSEL_LABEL.get(p.schluessel, p.schluessel),
             "verbrauch_art": p.verbrauch_art, "individuell": _nk._parse_individuell(p.individuell),
+            "grund_prozent": getattr(p, "grund_prozent", None), "heizkostenv": _nk.is_heizkostenv(p.kategorie),
             "document_id": p.document_id,
             "beleg_datum": str(p.beleg_datum) if p.beleg_datum else None, "notiz": p.notiz or ""}
+
+
+def _nk_readings(db, uid: int, units):
+    """Meter readings for the property's units → [{unit_id, art, stand, datum}] for the Verbrauch key."""
+    uids = [u.id for u in units]
+    if not uids:
+        return []
+    rows = (db.query(ImmoZaehlerstand)
+            .filter(ImmoZaehlerstand.user_id == uid, ImmoZaehlerstand.unit_id.in_(uids),
+                    _notdel(ImmoZaehlerstand)).all())
+    return [{"unit_id": z.unit_id, "art": z.art, "stand": float(z.stand or 0), "datum": z.datum}
+            for z in rows if z.datum is not None]
 
 
 def _abr_dict(db, uid: int, a: NkAbrechnung, with_result: bool = True) -> dict:
@@ -2748,7 +2763,7 @@ def _abr_dict(db, uid: int, a: NkAbrechnung, with_result: bool = True) -> dict:
         out["aus_snapshot"] = True
     else:
         units, tens = _nk_units_tenancies(db, uid, a.property_id)
-        v = _nk.verteile(positionen, units, tens, von, bis)
+        v = _nk.verteile(positionen, units, tens, von, bis, _nk_readings(db, uid, units))
         out["ergebnis"] = _nk.ergebnis(v, tens, von, bis)
         out["frist_ueberschritten"] = _nk.frist_ueberschritten(bis)
         out["aus_snapshot"] = False
@@ -2876,6 +2891,7 @@ def add_nk_position(aid: int, body: NkPositionIn, user: dict = Depends(get_curre
         p = NkKostenposition(abrechnung_id=a.id, user_id=uid, kategorie=kat[:40],
                              betrag=round(float(body.betrag), 2), umlagefaehig=bool(umlagefaehig),
                              umlage_pct=pct, schluessel=schluessel, verbrauch_art=body.verbrauch_art,
+                             grund_prozent=(_nk.clamp_grund(body.grund_prozent) if body.grund_prozent is not None else None),
                              individuell=_dump_individuell(body.individuell),
                              document_id=body.document_id, beleg_datum=_pdate(body.beleg_datum),
                              notiz=(body.notiz or "")[:300] or None)
@@ -2911,6 +2927,8 @@ def update_nk_position(aid: int, pid: int, body: NkPositionPatch, user: dict = D
             p.schluessel = body.schluessel
         if body.verbrauch_art is not None:
             p.verbrauch_art = body.verbrauch_art or None
+        if body.grund_prozent is not None:
+            p.grund_prozent = None if body.grund_prozent < 0 else _nk.clamp_grund(body.grund_prozent)
         if body.individuell is not None:
             p.individuell = _dump_individuell(body.individuell)
         if body.document_id is not None:
@@ -2964,7 +2982,7 @@ def finalize_nk(aid: int, user: dict = Depends(get_current_user)):
         snap = _nk.build_snapshot(
             {"id": a.id, "jahr": a.jahr},
             {"id": p.id if p else None, "adresse": (p.adresse if p else "") or (p.name if p else "")},
-            units, tens, positionen, von, bis)
+            units, tens, positionen, von, bis, readings=_nk_readings(db, uid, units))
         import json as _json
         a.ergebnis_snapshot = _json.dumps(snap, ensure_ascii=False)
         a.calculation_version = _nk.CALCULATION_VERSION

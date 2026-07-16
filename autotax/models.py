@@ -1102,6 +1102,7 @@ class NkKostenposition(Base):
     umlage_pct = Column(Integer, nullable=False, default=100)      # mixed Hausmeister etc. (0-100)
     schluessel = Column(String(20), nullable=False, default="wohnflaeche")  # allocation method
     verbrauch_art = Column(String(15), nullable=True)   # -> ImmoZaehlerstand.art (Verbrauch key, S3)
+    grund_prozent = Column(Integer, nullable=True)      # HeizkostenV Grundkosten share 30-50 (S4); null=default 30
     individuell = Column(Text, nullable=True)           # JSON {tenancy_id: betrag} (Individuell key, S3)
     document_id = Column(Integer, ForeignKey("immo_document.id"), nullable=True)   # the receipt
     beleg_datum = Column(Date, nullable=True)

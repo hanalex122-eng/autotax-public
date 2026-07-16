@@ -31,8 +31,8 @@ from typing import Optional
 
 from autotax import immo_rules as _rules
 
-CALCULATION_VERSION = 3   # v3 (Sprint 3): Individuell assigns exact per-tenant amounts (v2 fell back
-                          # to Wohnfläche). v2: Personenzahl computed. v1: only Wohnfläche/Wohneinheiten.
+CALCULATION_VERSION = 4   # v4 (Sprint 4): Verbrauch by Zählerstände + HeizkostenV Grund/Verbrauch split.
+                          # v3: Individuell. v2: Personenzahl. v1: only Wohnfläche/Wohneinheiten.
 
 # ── vocabulary ────────────────────────────────────────────────────────
 
@@ -45,9 +45,31 @@ SCHLUESSEL_LABEL = {
     "wohneinheiten": "Wohneinheiten", "verbrauch": "Verbrauch", "individuell": "Individuell",
 }
 
-# Which allocation methods actually compute. verbrauch/individuell still fall back to Wohnfläche
-# with a note (Sprint 3+). personenzahl computes since Sprint 3 (this sprint).
+# Which allocation methods compute via basis_weight (area/person/units). verbrauch and individuell are
+# handled by their OWN branches in verteile (readings / explicit amounts), not basis_weight.
 _COMPUTED = ("wohnflaeche", "wohneinheiten", "personenzahl")
+
+# HeizkostenV (§7): heating & hot water must NOT be split 100% by meter — a Grundkosten share (by area)
+# and a Verbrauchskosten share (by meter). grund_prozent is 30–50 (Verbrauch = 50–70). Default 30/70.
+HEIZKOSTENV_KATEGORIEN = ("heizkosten", "warmwasser")
+GRUND_PROZENT_DEFAULT = 30
+GRUND_PROZENT_MIN = 30
+GRUND_PROZENT_MAX = 50
+# a cost line's meter art defaults from its category when verbrauch_art is not set explicitly
+_ART_DEFAULT = {"heizkosten": "heizung", "warmwasser": "warmwasser", "wasser": "wasser",
+                "abwasser": "wasser", "allgemeinstrom": "strom"}
+
+
+def clamp_grund(p) -> int:
+    try:
+        p = int(p)
+    except (TypeError, ValueError):
+        return GRUND_PROZENT_DEFAULT
+    return max(GRUND_PROZENT_MIN, min(GRUND_PROZENT_MAX, p))
+
+
+def is_heizkostenv(kategorie: str) -> bool:
+    return kategorie in HEIZKOSTENV_KATEGORIEN
 
 # BetrKV §2 operating-cost categories + the umlagefähig knowledge (the correctness core).
 # `umlagefaehig` False = the landlord must NOT pass this on (the #1 statement-invalidating mistake).
@@ -209,11 +231,145 @@ def _flaeche(unit) -> float:
     return float(getattr(unit, "wohnflaeche", 0) or 0)
 
 
+# ── Verbrauch: consumption from meter readings (Zählerstände) ──────────
+
+
+def _series(readings, unit_id, art):
+    """All readings for one unit + art, sorted by date (readings without a date are ignored — a
+    consumption difference needs dated readings)."""
+    rr = [r for r in (readings or [])
+          if r.get("unit_id") == unit_id and r.get("art") == art and r.get("datum") is not None]
+    return sorted(rr, key=lambda r: r["datum"])
+
+
+def _stand_at(series, when):
+    """The meter value at `when`: the last reading with datum ≤ when; before the first reading, the
+    first reading's value (so a period that starts before any reading uses the earliest known stand)."""
+    if not series:
+        return None
+    prior = [r for r in series if r["datum"] <= when]
+    if prior:
+        return float(prior[-1]["stand"])
+    return float(series[0]["stand"])
+
+
+def _verbrauch(series, start, end):
+    """Consumption between two dates = Stand(end) − Stand(start). Needs ≥ 2 dated readings to be a
+    real measured difference; otherwise None (→ the caller falls the whole line back to Wohnfläche)."""
+    if len(series) < 2:
+        return None
+    s = _stand_at(series, start)
+    e = _stand_at(series, end)
+    if s is None or e is None:
+        return None
+    return max(0.0, round(e - s, 4))
+
+
+def _t_span(t, von, bis):
+    """A tenant's interval clamped to the statement period."""
+    tv = getattr(t, "von", None) or von
+    tb = getattr(t, "bis", None) or bis
+    return (tv if tv > von else von), (tb if tb < bis else bis)
+
+
+def _verbrauch_weights(units, active, tenancies, readings, art, von, bis):
+    """Consumption weights per tenant, plus the owner (Eigennutzung) and vacancy remainder of each
+    unit's total consumption. Returns (occ_w, owner_w, vacant_w, total, ok). ok=False when a unit that
+    is occupied in the period has no usable readings → the caller falls the line back to Wohnfläche."""
+    occ_w = {}
+    owner_w = 0.0
+    vacant_w = 0.0
+    total = 0.0
+    ok = True
+    for u in units:
+        series = _series(readings, u.id, art)
+        u_tenancies = [t for t in active if t.unit_id == u.id]
+        u_total = _verbrauch(series, von, bis)
+        if u_total is None:
+            # no measured consumption for this unit. Only a problem if the unit is occupied/relevant.
+            if u_tenancies or getattr(u, "eigennutzung_personen", None) is not None:
+                ok = False
+            continue
+        assigned_c = 0.0
+        for t in u_tenancies:
+            ts, te = _t_span(t, von, bis)
+            c = _verbrauch(series, ts, te) or 0.0
+            occ_w[t.id] = occ_w.get(t.id, 0.0) + c
+            total += c
+            assigned_c += c
+        rem = max(0.0, round(u_total - assigned_c, 4))   # owner/vacant part of this unit's consumption
+        eig = getattr(u, "eigennutzung_personen", None)
+        if eig is not None and int(eig) > 0:
+            owner_w += rem
+        else:
+            vacant_w += rem
+        total += rem
+    return occ_w, owner_w, vacant_w, round(total, 4), ok
+
+
+def _verb_text(w, total, art):
+    unit = {"wasser": "m³", "warmwasser": "m³", "heizung": "kWh", "gas": "m³", "strom": "kWh"}.get(art, "")
+    return f"{round(w, 2)} / {round(total, 2)} {unit}".strip()
+
+
+# ── shared weight/assignment machinery (area & person keys, and HeizkostenV Grund part) ──
+
+
+def _area_person_weights(schluessel, units, active, tenancies, za, von, bis):
+    """occ_w per tenant + owner_w + vacant_w for the area/person/units keys (basis_weight × Zeitanteil)."""
+    occ_w = {}
+    owner_w = 0.0
+    vacant_w = 0.0
+    total_w = 0.0
+    for u in units:
+        for t in [t for t in active if t.unit_id == u.id]:
+            w = basis_weight(schluessel, u, t, za[t.id])
+            occ_w[t.id] = occ_w.get(t.id, 0.0) + w
+            total_w += w
+        vac_za = _unit_vacant_zeitanteil(u, tenancies, von, bis)
+        if vac_za > 0:
+            eig = getattr(u, "eigennutzung_personen", None)
+            dummy = _Dummy(); dummy.personenzahl = eig
+            w = basis_weight(schluessel, u, dummy, vac_za)
+            total_w += w
+            if eig is not None and int(eig) > 0:
+                owner_w += w
+            else:
+                vacant_w += w
+    return occ_w, owner_w, vacant_w, total_w
+
+
+def _assign_line(per_tenant, active, betrag, occ_w, owner_w, total_w, kategorie, schluessel_row, anteil_text_fn):
+    """Split `betrag` across the tenants by their weights; append a per-position row to each. Returns
+    (eigennutzung_share, leerstand_share) for the non-tenant remainder. total_w must be > 0."""
+    assigned = 0.0
+    for t in active:
+        w = occ_w.get(t.id, 0.0)
+        if w <= 0:
+            continue
+        share = round(betrag * w / total_w, 2)
+        assigned = round(assigned + share, 2)
+        per_tenant[t.id]["summe"] = round(per_tenant[t.id]["summe"] + share, 2)
+        per_tenant[t.id]["positionen"].append({
+            "kategorie": kategorie, "label": kategorie_label(kategorie),
+            "anteil_betrag": share, "schluessel": schluessel_row,
+            "anteil_text": anteil_text_fn(w, total_w),
+        })
+    rest = round(betrag - assigned, 2)
+    eig = round(betrag * owner_w / total_w, 2) if owner_w > 0 else 0.0
+    eig = min(eig, rest)
+    return eig, round(rest - eig, 2)
+
+
 # ── the distribution engine ───────────────────────────────────────────
 
 
-def verteile(positionen, units, tenancies, von: date, bis: date):
+def verteile(positionen, units, tenancies, von: date, bis: date, readings=None):
     """Split every umlagefähige cost position across the tenants.
+
+    `readings` (optional) is a list of meter readings [{unit_id, art, stand, datum}] used by the
+    Verbrauch key (and the HeizkostenV Verbrauchskosten part). Omitted / insufficient → Verbrauch lines
+    fall back to Wohnfläche with a note.
 
     Returns {
       per_tenant:   {tenancy_id: {name, summe, positionen:[{kategorie, anteil_betrag, anteil_text}]}},
@@ -288,64 +444,62 @@ def verteile(positionen, units, tenancies, von: date, bis: date):
             leerstand = round(leerstand + round(betrag - assigned, 2), 2)
             continue
 
-        # resolve the key actually used (personenzahl may fall back on missing data; so may verbrauch)
-        schluessel, note = _effective_schluessel(raw_schluessel, active)
-        if note and note not in seen_fallback:
-            hinweise.append(note)
-            seen_fallback.add(note)
+        kategorie = getattr(pos, "kategorie", "")
 
-        # weights across ALL units in the period. A unit's time not covered by a tenancy is either
-        # OWNER-OCCUPIED (Eigennutzung — the owner's persons/area count in the denominator, share is
-        # the owner's own cost) or VACANT (Leerstand — landlord's loss). Both stay with the landlord,
-        # never redistributed to the tenants, but they are reported separately.
-        total_w = 0.0
-        occ_w = {}       # tenancy_id -> weight
-        owner_w = 0.0    # weight of owner-occupied (Eigennutzung) time
-        vacant_w = 0.0   # weight of truly vacant time
-        for u in units:
-            u_tenancies = [t for t in active if t.unit_id == u.id]
-            for t in u_tenancies:
-                w = basis_weight(schluessel, u, t, za[t.id])
-                occ_w[t.id] = occ_w.get(t.id, 0.0) + w
-                total_w += w
-            vac_za = _unit_vacant_zeitanteil(u, tenancies, von, bis)
-            if vac_za > 0:
-                eig = getattr(u, "eigennutzung_personen", None)
-                dummy = _Dummy(); dummy.personenzahl = eig     # owner's persons for the person split
-                w = basis_weight(schluessel, u, dummy, vac_za)
-                total_w += w
-                if eig is not None and int(eig) > 0:
-                    owner_w += w
+        # ── Verbrauch: split by MEASURED consumption (Zählerstände). Heating/hot water additionally
+        # obey HeizkostenV (§7): a Grundkosten share by Wohnfläche + a Verbrauchskosten share by meter.
+        if raw_schluessel == "verbrauch":
+            art = getattr(pos, "verbrauch_art", None) or _ART_DEFAULT.get(kategorie)
+            occ_c, owner_c, vacant_c, total_c, ok = _verbrauch_weights(
+                units, active, tenancies, readings, art, von, bis)
+            if ok and total_c > 0:
+                if is_heizkostenv(kategorie):
+                    gp = getattr(pos, "grund_prozent", None)
+                    grund = clamp_grund(gp if gp is not None else GRUND_PROZENT_DEFAULT)
+                    grund_amt = round(betrag * grund / 100.0, 2)
+                    verb_amt = round(betrag - grund_amt, 2)
+                    ao, aow, avc, atot = _area_person_weights("wohnflaeche", units, active, tenancies, za, von, bis)
+                    if atot > 0:
+                        e1, l1 = _assign_line(per_tenant, active, grund_amt, ao, aow, atot, kategorie, "wohnflaeche",
+                                              lambda w, tt, g=grund: f"Grundkosten {g}% · {_anteil_text('wohnflaeche', w, tt)}")
+                    else:
+                        e1, l1 = 0.0, grund_amt
+                    e2, l2 = _assign_line(per_tenant, active, verb_amt, occ_c, owner_c, total_c, kategorie, "verbrauch",
+                                          lambda w, tt, g=grund, a=art: f"Verbrauch {100 - g}% · {_verb_text(w, tt, a)}")
+                    eigennutzung = round(eigennutzung + e1 + e2, 2)
+                    leerstand = round(leerstand + l1 + l2, 2)
                 else:
-                    vacant_w += w
+                    e, l = _assign_line(per_tenant, active, betrag, occ_c, owner_c, total_c, kategorie, "verbrauch",
+                                        lambda w, tt, a=art: _verb_text(w, tt, a))
+                    eigennutzung = round(eigennutzung + e, 2)
+                    leerstand = round(leerstand + l, 2)
+                continue
+            # insufficient readings → fall back to Wohnfläche WITH a note (never a silent wrong number)
+            note = (f"„{kategorie_label(kategorie)}“: Verbrauchsabrechnung nicht möglich "
+                    f"(Zählerstände unvollständig) — nach Wohnfläche verteilt.")
+            if note not in seen_fallback:
+                hinweise.append(note)
+                seen_fallback.add(note)
+            schluessel = "wohnflaeche"
+        else:
+            # resolve the key actually used (personenzahl may fall back on missing data)
+            schluessel, note = _effective_schluessel(raw_schluessel, active)
+            if note and note not in seen_fallback:
+                hinweise.append(note)
+                seen_fallback.add(note)
 
+        # generic area / person / units path (and the Verbrauch fallback). A unit's non-tenant time is
+        # Eigennutzung (owner) or Leerstand (vacant) — both stay with the landlord, reported separately.
+        occ_w, owner_w, vacant_w, total_w = _area_person_weights(schluessel, units, active, tenancies, za, von, bis)
         if total_w <= 0:
-            hinweise.append(f"Position '{kategorie_label(getattr(pos, 'kategorie', ''))}' konnte nicht "
-                            f"verteilt werden (keine Wohnfläche/Basis hinterlegt).")
+            hinweise.append(f"Position '{kategorie_label(kategorie)}' konnte nicht verteilt werden "
+                            f"(keine Wohnfläche/Basis hinterlegt).")
             leerstand = round(leerstand + betrag, 2)      # nothing to split on → landlord carries it
             continue
-
-        assigned = 0.0
-        for t in active:
-            w = occ_w.get(t.id, 0.0)
-            if w <= 0:
-                continue
-            share = round(betrag * w / total_w, 2)
-            assigned = round(assigned + share, 2)
-            per_tenant[t.id]["summe"] = round(per_tenant[t.id]["summe"] + share, 2)
-            per_tenant[t.id]["positionen"].append({
-                "kategorie": getattr(pos, "kategorie", ""),
-                "label": kategorie_label(getattr(pos, "kategorie", "")),
-                "anteil_betrag": share,
-                "schluessel": schluessel,
-                "anteil_text": _anteil_text(schluessel, w, total_w),
-            })
-        # the non-tenant remainder splits between the owner's Eigennutzung and true Leerstand by weight
-        rest = round(betrag - assigned, 2)
-        eig_share = round(betrag * owner_w / total_w, 2) if owner_w > 0 else 0.0
-        eig_share = min(eig_share, rest)
-        eigennutzung = round(eigennutzung + eig_share, 2)
-        leerstand = round(leerstand + (rest - eig_share), 2)
+        e_share, l_share = _assign_line(per_tenant, active, betrag, occ_w, owner_w, total_w, kategorie, schluessel,
+                                        lambda w, tt, s=schluessel: _anteil_text(s, w, tt))
+        eigennutzung = round(eigennutzung + e_share, 2)
+        leerstand = round(leerstand + l_share, 2)
 
     return {"per_tenant": per_tenant, "leerstand": round(leerstand, 2),
             "eigennutzung": round(eigennutzung, 2),
@@ -437,12 +591,12 @@ def frist_ueberschritten(zeitraum_bis: date, as_of: Optional[date] = None) -> bo
 # ── the immutable snapshot (Principle A) ──────────────────────────────
 
 
-def build_snapshot(abrechnung_meta, property_meta, units, tenancies, positionen, von, bis, as_of=None):
+def build_snapshot(abrechnung_meta, property_meta, units, tenancies, positionen, von, bis, as_of=None, readings=None):
     """Freeze EVERYTHING used in the calculation, so the statement re-produces years later even if the
     master data changed. The snapshot — not the PDF — is the record of truth. Stored at finalise on
     NkAbrechnung.ergebnis_snapshot; every read of a FINAL statement derives from this, never from live
-    master data."""
-    v = verteile(positionen, units, tenancies, von, bis)
+    master data. `readings` freezes the meter values so a Verbrauch/HeizkostenV line re-produces too."""
+    v = verteile(positionen, units, tenancies, von, bis, readings)
     e = ergebnis(v, tenancies, von, bis)
     return {
         "calculation_version": CALCULATION_VERSION,
@@ -462,8 +616,14 @@ def build_snapshot(abrechnung_meta, property_meta, units, tenancies, positionen,
                         "umlagefaehig": bool(getattr(p, "umlagefaehig", True)),
                         "umlage_pct": int(getattr(p, "umlage_pct", 100) or 100),
                         "schluessel": getattr(p, "schluessel", "wohnflaeche"),
+                        "verbrauch_art": getattr(p, "verbrauch_art", None),
+                        "grund_prozent": (clamp_grund(getattr(p, "grund_prozent", None))
+                                          if is_heizkostenv(getattr(p, "kategorie", "")) else None),
                         "individuell": _parse_individuell(getattr(p, "individuell", None)) or None}
                        for p in positionen],
+        "readings": [{"unit_id": r.get("unit_id"), "art": r.get("art"), "stand": r.get("stand"),
+                      "datum": str(r.get("datum")) if r.get("datum") else None}
+                     for r in (readings or [])],
         "allocation": e["tenants"],          # per tenant: shares (allocation_ratios in anteil_text) + saldo
         "leerstand_share": e["leerstand"],
         "eigennutzung_share": e.get("eigennutzung", 0.0),

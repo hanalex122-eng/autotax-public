@@ -82,7 +82,7 @@ UNITS = [Unit(1), Unit(2), Unit(3)]
 
 
 print("\n[0] CALCULATION_VERSION bumped (v2 computes persons, v3 computes Individuell)")
-ok(NK.CALCULATION_VERSION == 3, f"version is 3 — {NK.CALCULATION_VERSION}")
+ok(NK.CALCULATION_VERSION == 4, f"version is 4 — {NK.CALCULATION_VERSION}")
 ok("personenzahl" in NK._COMPUTED, "personenzahl is now a computed key")
 
 print("\n[1] Split by persons — the core case")
@@ -225,7 +225,7 @@ print("\n[9] snapshot records the RAW schluessel (personenzahl), engine version 
 snap = NK.build_snapshot({"id": 1, "jahr": 2026}, {"id": 10, "adresse": "x"}, [Unit(1), Unit(2)],
                          [Tenancy(901, 1, "A", VON, None, personenzahl=2), Tenancy(902, 2, "B", VON, None, personenzahl=2)],
                          [Pos("muell", 400.0, schluessel="personenzahl")], VON, BIS)
-ok(snap["calculation_version"] == 3, "snapshot stamped with version 3")
+ok(snap["calculation_version"] == 4, "snapshot stamped with version 4")
 ok(snap["cost_lines"][0]["schluessel"] == "personenzahl", "the chosen key is frozen in the snapshot")
 ok(all("personenzahl" in t for t in snap["tenants"]), "each tenant's personenzahl is frozen for re-production")
 
@@ -274,7 +274,7 @@ print("\n[14] Individuell — snapshot freezes the exact result and the entries 
 snap2 = NK.build_snapshot({"id": 2, "jahr": 2026}, {"id": 11, "adresse": "y"}, IU, itens,
                           [Pos("strom", 1200.0, schluessel="individuell", individuell={201: 500, 202: 300, 203: 400})],
                           VON, BIS)
-ok(snap2["calculation_version"] == 3, "individuell snapshot stamped v3")
+ok(snap2["calculation_version"] == 4, "individuell snapshot stamped v4")
 ok(snap2["cost_lines"][0]["schluessel"] == "individuell", "individuell key frozen")
 ok(snap2["cost_lines"][0]["individuell"] == {201: 500.0, 202: 300.0, 203: 400.0}, "per-tenant entries frozen for re-production")
 _alloc = {a["name"]: a["umlage"] for a in snap2["allocation"]}

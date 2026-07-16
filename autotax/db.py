@@ -106,6 +106,17 @@ def init_db():
                     logger.info("Added 'eigennutzung_personen' column to immo_unit")
     except Exception as e:
         logger.warning("immo_unit column migration skipped: %s", e)
+    # Sprint 4 (HeizkostenV): nk_kostenposition.grund_prozent (Grundkosten share 30-50). Additive + nullable.
+    try:
+        _ik = inspect(engine)
+        if "nk_kostenposition" in _ik.get_table_names():
+            _kc = [c["name"] for c in _ik.get_columns("nk_kostenposition")]
+            if "grund_prozent" not in _kc:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE nk_kostenposition ADD COLUMN grund_prozent INTEGER"))
+                    logger.info("Added 'grund_prozent' column to nk_kostenposition")
+    except Exception as e:
+        logger.warning("nk_kostenposition column migration skipped: %s", e)
     # Sprint 1 (Übergabeprotokoll): a photo may belong to a handover + a room.
     # The new tables (immo_protokoll / immo_zaehlerstand) come from create_all; only the two
     # columns on the existing immo_document table need an ALTER. Additive + nullable.
