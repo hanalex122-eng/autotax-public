@@ -2845,6 +2845,8 @@ function MieterView({onNav,showToast}){
   const isMob=useIsMobile();
   const [rows,setRows]=React.useState([]);
   const [eig,setEig]=React.useState([]);   // owner-occupied / rent-free occupants (Eigennutzung)
+  const [eigEdit,setEigEdit]=React.useState(null);  // unit_id whose Eigennutzung person count is being edited
+  const [eigVal,setEigVal]=React.useState("");
   const [loading,setLoading]=React.useState(true);
   const [filter,setFilter]=React.useState("alle");
   const _now=new Date(); const curY=_now.getFullYear(); const curM=_now.getMonth()+1;
@@ -2852,6 +2854,8 @@ function MieterView({onNav,showToast}){
   const [payDate,setPayDate]=React.useState(_now.toISOString().slice(0,10));
   const [payAmt,setPayAmt]=React.useState("");
   const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setEig(d.eigennutzer||[]);setLoading(false);}).catch(()=>setLoading(false));};
+  const saveEigCard=async(uid)=>{try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify({eigennutzung_personen:eigVal===""?-1:parseInt(eigVal)})});setEigEdit(null);load();if(showToast)showToast(_L("Gespeichert ✓","Kaydedildi ✓","Saved ✓"),"success");}catch(e){alert(e.message);}};
+  const delEigCard=async(uid)=>{if(!confirm(_L("Eigennutzung entfernen? Die Wohnung bleibt bestehen.","Ev sahibi (Eigennutzung) kaydı kaldırılsın mı? Daire silinmez.","Remove owner-occupancy? The unit stays.")))return;try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify({eigennutzung_personen:-1})});load();if(showToast)showToast(_L("Entfernt","Kaldırıldı","Removed"),"info");}catch(e){alert(e.message);}};
   React.useEffect(()=>{load();},[]);
   // ── Tek-sayfa Erfassung: daire + adres + kiracı bir kerede ──
   const _erf0=()=>({daire:"",adresse:"",qm:"",name:"",von:new Date().toISOString().slice(0,10),kalt:"",nk:""});
@@ -3178,7 +3182,17 @@ function MieterView({onNav,showToast}){
             <span>👤 {u.personenzahl} {_L("Personen","kişi","persons")}</span>
             <span style={{color:theme.textMuted}}>{_L("keine Miete","kira yok","no rent")}</span>
           </div>
-          <div style={{marginTop:8,fontSize:12}}><span onClick={()=>onNav&&onNav("immobilien")} style={{color:theme.accent,cursor:"pointer"}}>✎ {_L("In „Meine Immobilien“ ändern","„Meine Immobilien“de düzenle","Edit in My properties")}</span></div>
+          {eigEdit===u.unit_id
+            ? <div style={{display:"flex",gap:8,marginTop:10,alignItems:"center",flexWrap:"wrap"}}>
+                <input type="number" min="0" value={eigVal} onChange={e=>setEigVal(e.target.value)} placeholder={_L("Personen","Kişi","Persons")} style={{width:100,padding:"8px 10px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13}}/>
+                <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12,color:theme.accent,borderColor:theme.accent}} onClick={()=>saveEigCard(u.unit_id)}>✓ {_L("Speichern","Kaydet","Save")}</button>
+                <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>setEigEdit(null)}>{_L("Abbrechen","İptal","Cancel")}</button>
+              </div>
+            : <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>{setEigEdit(u.unit_id);setEigVal(String(u.personenzahl==null?"":u.personenzahl));}}>✎ {_L("Bearbeiten","Düzenle","Edit")}</button>
+                <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12}} onClick={()=>onNav&&onNav("immobilien")}>🏠 {_L("Wohnung","Daire","Unit")}</button>
+                <button style={{...css.btnOutline,padding:"7px 11px",fontSize:12,color:theme.danger,borderColor:theme.danger}} onClick={()=>delEigCard(u.unit_id)}>🗑️ {_L("Löschen","Sil","Delete")}</button>
+              </div>}
         </div>))}
       </div>
     </div>}
@@ -3208,6 +3222,8 @@ function NkEditor({propertyId,showToast}){
   React.useEffect(()=>{setNkOpen(null);if(propertyId)loadNk(propertyId);},[propertyId]);
   const openNk=async(aid)=>{try{setNkGrid({});setNkSchl({});setNkOpen(await api("/immo/nk/"+aid));}catch(e){alert(e.message);}};
   const newNk=async()=>{const jahr=parseInt(prompt(_L("Abrechnungsjahr","Hesap yılı","Settlement year"),String(new Date().getFullYear()-1)));if(!jahr)return;try{const a=await api("/immo/nk",{method:"POST",body:JSON.stringify({property_id:propertyId,jahr:jahr})});setNkGrid({});setNkSchl({});setNkOpen(a);loadNk(propertyId);}catch(e){alert(e.message);}};
+  // one-click create for a specific year (used by the wrong-year banner) — no prompt, no language needed
+  const createNkYear=async(jahr)=>{try{const a=await api("/immo/nk",{method:"POST",body:JSON.stringify({property_id:propertyId,jahr:jahr})});setNkGrid({});setNkSchl({});setNkOpen(a);loadNk(propertyId);}catch(e){alert(e.message);}};
   // Delete a DRAFT statement (wrongly created ones). Finalised statements are immutable (409) — those
   // must be unlocked first. Backend soft-deletes; the list reloads.
   const delNk=async(aid,e)=>{if(e)e.stopPropagation();
@@ -3284,7 +3300,11 @@ function NkEditor({propertyId,showToast}){
     </div>}
     {/* wrong-year guard: no active tenant in the period (the common cause of "nothing splits") */}
     {!locked&&(erg.tenants||[]).length===0&&<div style={{background:"rgba(245,158,11,0.12)",border:"1.5px solid #f59e0b",borderRadius:10,padding:"11px 13px",marginBottom:12,fontSize:13,color:"#b45309"}}>
-      ⚠️ {_L("In "+a.jahr+" wohnt kein Mieter im Haus — dann lässt sich nichts auf Mieter verteilen. Prüfe das Einzugsdatum der Mieter und lege ggf. eine Abrechnung für das richtige Jahr an.","Bu binada "+a.jahr+" yılında oturan kiracı yok — o yüzden kiracıya bölünecek bir şey çıkmıyor. Kiracıların taşınma tarihine bak, doğru yıl için (ör. 2026) yeni bir Abrechnung aç.","No tenant lived in the building in "+a.jahr+" — so nothing can be split. Check the tenants' move-in dates and create a statement for the right year.")}</div>}
+      <div>⚠️ {_L("In "+a.jahr+" wohnt kein Mieter im Haus — dann lässt sich nichts auf Mieter verteilen. Wähle das richtige Jahr:","Bu binada "+a.jahr+" yılında oturan kiracı yok — bölünecek bir şey çıkmıyor. Doğru yılı seç:","No tenant lived in the building in "+a.jahr+" — nothing can be split. Pick the right year:")}</div>
+      <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+        {[new Date().getFullYear(),new Date().getFullYear()-1].filter(yy=>yy!==a.jahr).map(yy=>
+          <button key={yy} onClick={()=>createNkYear(yy)} style={{padding:"8px 16px",background:theme.accent,color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:800,cursor:"pointer"}}>➕ {yy}</button>)}
+      </div></div>}
     <div style={{...css.card,marginBottom:12}}>
       <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>{_L("Kostenpositionen","Gider kalemleri","Cost positions")}</div>
       <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Je Zeile: Gesamt­rechnung eintragen und wählen, WIE sie verteilt wird — das Programm rechnet.","Her satırda: toplam faturayı yaz ve NASIL bölüneceğini seç — hesabı program yapar.","Per line: enter the total invoice and choose HOW it splits — the program does the maths.")}</div>
