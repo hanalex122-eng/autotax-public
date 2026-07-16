@@ -15,7 +15,7 @@ import os
 import time
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -2382,6 +2382,106 @@ def delete_zaehler(zid: int, user: dict = Depends(get_current_user)):
         z.deleted_at = datetime.now(timezone.utc)
         db.commit()
         return {"success": True}
+    finally:
+        db.close()
+
+
+# ── Zählerstände matrix: enter ALL flats' meter readings on ONE screen (unit-centric, scales to 20+) ──
+# The Nebenkosten Verbrauch/HeizkostenV engine reads these same ImmoZaehlerstand rows — no new table.
+_NK_METER_ARTS = ["wasser", "warmwasser", "heizung", "gas"]
+
+
+@router.get("/properties/{pid}/zaehler-matrix")
+def zaehler_matrix(pid: int, jahr: int = Query(...), user: dict = Depends(get_current_user)):
+    """Per unit × meter type: the Anfangsstand (reading at year start) + Endstand (year end) + meter no.
+    So the landlord fills a whole building's readings on one screen and Nebenkosten uses them directly."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        _own_property(db, uid, pid)
+        von, bis = date(jahr, 1, 1), date(jahr, 12, 31)
+        units = (db.query(ImmoUnit).filter(ImmoUnit.property_id == pid, ImmoUnit.user_id == uid,
+                                            _notdel(ImmoUnit)).order_by(ImmoUnit.id).all())
+        uids = [u.id for u in units]
+        rows = (db.query(ImmoZaehlerstand)
+                .filter(ImmoZaehlerstand.user_id == uid, ImmoZaehlerstand.unit_id.in_(uids),
+                        _notdel(ImmoZaehlerstand)).all()) if uids else []
+        out_units = []
+        for u in units:
+            arts = {}
+            for art in _NK_METER_ARTS:
+                series = [z for z in rows if z.unit_id == u.id and z.art == art]
+                anf = next((z for z in series if z.datum == von), None)
+                end = next((z for z in series if z.datum == bis), None)
+                nr = (anf.zaehler_nr if anf else (end.zaehler_nr if end else "")) or ""
+                mid = [z for z in series if z.datum and von < z.datum < bis]
+                arts[art] = {"einheit": _prot.ZAEHLER_ARTEN[art], "label": _prot.ZAEHLER_LABEL.get(art, art),
+                             "zaehler_nr": nr,
+                             "anfang": (anf.stand if anf else None), "ende": (end.stand if end else None),
+                             "zwischen": len(mid)}
+            out_units.append({"unit_id": u.id, "unit_name": u.name or ("Whg " + str(u.id)),
+                              "wohnflaeche": u.wohnflaeche, "arts": arts})
+        return {"property_id": pid, "jahr": jahr, "von": str(von), "bis": str(bis),
+                "arten": _NK_METER_ARTS, "units": out_units}
+    finally:
+        db.close()
+
+
+class ZaehlerBulkEntry(BaseModel):
+    unit_id: int
+    art: str
+    zaehler_nr: Optional[str] = None
+    anfang: Optional[float] = None
+    ende: Optional[float] = None
+
+
+class ZaehlerBulkIn(BaseModel):
+    jahr: int
+    von: Optional[str] = None
+    bis: Optional[str] = None
+    entries: List[ZaehlerBulkEntry] = []
+
+
+@router.post("/properties/{pid}/zaehler-bulk")
+def zaehler_bulk(pid: int, body: ZaehlerBulkIn, user: dict = Depends(get_current_user)):
+    """Save the whole matrix in one call. Each entry upserts the Anfang reading (at `von`) and the Ende
+    reading (at `bis`) for one unit+meter. Empty values are skipped; Ende < Anfang is saved but flagged."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        _own_property(db, uid, pid)
+        von = _pdate(body.von) or date(body.jahr, 1, 1)
+        bis = _pdate(body.bis) or date(body.jahr, 12, 31)
+        unit_ids = {u.id for u in db.query(ImmoUnit).filter(
+            ImmoUnit.property_id == pid, ImmoUnit.user_id == uid, _notdel(ImmoUnit)).all()}
+        saved = 0
+        warnings = []
+
+        def upsert(unit_id, art, datum, stand, nr):
+            z = (db.query(ImmoZaehlerstand)
+                 .filter(ImmoZaehlerstand.unit_id == unit_id, ImmoZaehlerstand.art == art,
+                         ImmoZaehlerstand.datum == datum, ImmoZaehlerstand.user_id == uid,
+                         _notdel(ImmoZaehlerstand)).first())
+            if z:
+                z.stand = stand
+                if nr is not None:
+                    z.zaehler_nr = (nr or None)
+            else:
+                db.add(ImmoZaehlerstand(user_id=uid, unit_id=unit_id, art=art, stand=stand, datum=datum,
+                                        zaehler_nr=(nr or None), einheit=_prot.ZAEHLER_ARTEN.get(art)))
+
+        for e in body.entries:
+            if e.unit_id not in unit_ids or e.art not in _prot.ZAEHLER_ARTEN:
+                continue
+            if e.anfang is not None and e.ende is not None and e.ende < e.anfang:
+                warnings.append(f"Whg {e.unit_id} · {_prot.ZAEHLER_LABEL.get(e.art, e.art)}: "
+                                f"Endstand ({e.ende}) < Anfangsstand ({e.anfang})")
+            if e.anfang is not None:
+                upsert(e.unit_id, e.art, von, float(e.anfang), e.zaehler_nr); saved += 1
+            if e.ende is not None:
+                upsert(e.unit_id, e.art, bis, float(e.ende), e.zaehler_nr); saved += 1
+        db.commit()
+        return {"success": True, "saved": saved, "warnings": warnings}
     finally:
         db.close()
 

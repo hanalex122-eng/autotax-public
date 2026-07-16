@@ -3496,6 +3496,85 @@ function NebenkostenView({showToast}){
 }
 
 
+// ── Zählerstände matrix — enter EVERY flat's meter readings on ONE screen (unit-centric, scales to 20+).
+// The Nebenkosten Verbrauch/HeizkostenV engine reads these same readings automatically.
+function ZaehlerMatrix({propertyId,showToast}){
+  const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
+  const ARTS=[["wasser","💧 "+_L("Wasser (kalt)","Su (soğuk)","Water")],["warmwasser","🚿 "+_L("Warmwasser","Sıcak su","Hot water")],["heizung","🌡️ "+_L("Heizung","Isıtma","Heating")],["gas","🔥 "+_L("Gas","Gaz","Gas")]];
+  const [jahr,setJahr]=React.useState(new Date().getFullYear());
+  const [von,setVon]=React.useState(jahr+"-01-01");
+  const [bis,setBis]=React.useState(jahr+"-12-31");
+  const [data,setData]=React.useState(null);
+  const [ed,setEd]=React.useState({});           // {unit_id:{art:{zaehler_nr,anfang,ende}}}
+  const [saving,setSaving]=React.useState(false);
+  const load=(y)=>{setData(null);api("/immo/properties/"+propertyId+"/zaehler-matrix?jahr="+y).then(d=>{setData(d);setEd({});setVon(d.von);setBis(d.bis);}).catch(()=>setData(false));};
+  React.useEffect(()=>{load(jahr);},[propertyId,jahr]);
+  const raw=(u,art,f)=>{const a=u.arts[art];const v=a[f];return v==null?"":String(v);};
+  const val=(uid,art,f)=>{const e=ed[uid]&&ed[uid][art]&&ed[uid][art][f];if(e!==undefined)return e;const u=data.units.find(x=>x.unit_id===uid);return raw(u,art,f);};
+  const setv=(uid,art,f,v)=>setEd(p=>({...p,[uid]:{...(p[uid]||{}),[art]:{...((p[uid]||{})[art]||{}),[f]:v}}}));
+  // per-meter status: leer=boş, half=yarım(eksik), err=Ende<Anfang, ok=tam
+  const status=(uid,art)=>{const a=val(uid,art,"anfang"),b=val(uid,art,"ende");
+    if(a===""&&b==="")return"leer";if(a===""||b==="")return"half";
+    if(parseFloat(b)<parseFloat(a))return"err";return"ok";};
+  const stats=()=>{let ok=0,half=0,err=0;(data.units||[]).forEach(u=>ARTS.forEach(([art])=>{const s=status(u.unit_id,art);if(s==="ok")ok++;else if(s==="half")half++;else if(s==="err")err++;}));return{ok,half,err};};
+  const save=async()=>{
+    const entries=[];
+    (data.units||[]).forEach(u=>ARTS.forEach(([art])=>{
+      const a=val(u.unit_id,art,"anfang"),b=val(u.unit_id,art,"ende"),nr=val(u.unit_id,art,"zaehler_nr");
+      if(a!==""||b!==""||nr!=="")entries.push({unit_id:u.unit_id,art:art,zaehler_nr:nr||null,anfang:a===""?null:parseFloat(a),ende:b===""?null:parseFloat(b)});
+    }));
+    const st=stats();
+    let msg=_L("Speichern?","Kaydet?","Save?")+"\n\n"+_L("Vollständig","Tam","Complete")+": "+st.ok+" · "+_L("Halb (unvollständig)","Yarım","Half")+": "+st.half+" · "+_L("Fehler (Ende<Anfang)","Hata","Error")+": "+st.err;
+    if(!confirm(msg))return;
+    setSaving(true);
+    try{const r=await api("/immo/properties/"+propertyId+"/zaehler-bulk",{method:"POST",body:JSON.stringify({jahr:jahr,von:von,bis:bis,entries:entries})});
+      if(showToast)showToast(_L("Gespeichert","Kaydedildi","Saved")+" ✓ ("+r.saved+")","success");
+      if(r.warnings&&r.warnings.length)alert("⚠️\n"+r.warnings.join("\n"));
+      load(jahr);
+    }catch(e){alert(e.message);}finally{setSaving(false);}
+  };
+  if(data===null)return <div style={{padding:20,color:theme.textMuted}}>{_L("Lädt…","Yükleniyor…","Loading…")}</div>;
+  if(data===false)return <div style={{...css.card,color:theme.danger}}>{_L("Konnte nicht laden.","Yüklenemedi.","Failed to load.")}</div>;
+  const st=stats();const _inp={width:"100%",boxSizing:"border-box",padding:"7px 8px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:7,color:theme.text,fontSize:13,fontFamily:"inherit"};
+  const stCol={leer:theme.border,half:"#f59e0b",err:theme.danger,ok:theme.accent};
+  return(<div>
+    <div style={{...css.card,marginBottom:12,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+      <div><div style={{fontSize:11,color:theme.textDim}}>{_L("Ablesejahr","Okuma yılı","Reading year")}</div>
+        <select value={jahr} onChange={e=>setJahr(parseInt(e.target.value))} style={{..._inp,width:"auto",fontWeight:700,cursor:"pointer"}}>
+          {[0,1,2,3].map(d=>new Date().getFullYear()-d).map(y=><option key={y} value={y}>{y}</option>)}</select></div>
+      <div><div style={{fontSize:11,color:theme.textDim}}>{_L("Anfang (Datum)","Başlangıç tarihi","Start date")}</div>
+        <input type="date" value={von} onChange={e=>setVon(e.target.value)} style={{..._inp,width:"auto"}}/></div>
+      <div><div style={{fontSize:11,color:theme.textDim}}>{_L("Ende (Datum)","Bitiş tarihi","End date")}</div>
+        <input type="date" value={bis} onChange={e=>setBis(e.target.value)} style={{..._inp,width:"auto"}}/></div>
+      <div style={{marginLeft:"auto",fontSize:13,textAlign:"right"}}>
+        <span style={{color:theme.accent,fontWeight:700}}>✓ {st.ok}</span> · <span style={{color:"#f59e0b",fontWeight:700}}>⚠ {st.half}</span>{st.err>0&&<span style={{color:theme.danger,fontWeight:700}}> · ✕ {st.err}</span>}
+        <div style={{fontSize:11,color:theme.textMuted}}>{(data.units||[]).length} {_L("Wohnungen","daire","flats")}</div></div>
+    </div>
+    <div style={{fontSize:12,color:theme.textMuted,marginBottom:10}}>{_L("Trage je Wohnung den Zählerstand am Anfang und am Ende des Jahres ein. Nebenkosten (Verbrauch/HeizkostenV) nutzt sie automatisch.","Her daire için yıl başı ve yıl sonu sayaç değerini gir. Nebenkosten (Verbrauch/HeizkostenV) bunları otomatik kullanır.","Enter each flat's meter reading at the start and end of the year. Nebenkosten uses them automatically.")}</div>
+    {(data.units||[]).length===0&&<div style={{...css.card,textAlign:"center",color:theme.textMuted,padding:20}}>{_L("Keine Wohnungen — zuerst Einheiten anlegen.","Daire yok — önce daire ekle.","No units — add flats first.")}</div>}
+    {(data.units||[]).map(u=>(<div key={u.unit_id} style={{...css.card,marginBottom:10}}>
+      <div style={{fontWeight:800,fontSize:15,marginBottom:8}}>🏠 {u.unit_name} {u.wohnflaeche!=null&&<span style={{fontSize:12,fontWeight:400,color:theme.textMuted}}>· {u.wohnflaeche} m²</span>}</div>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(90px,1.1fr) minmax(90px,1fr) 1fr 1fr 46px",gap:6,alignItems:"center",fontSize:10.5,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:".03em",padding:"0 0 4px"}}>
+        <span>{_L("Zähler","Sayaç","Meter")}</span><span>{_L("Zähler-Nr.","Sayaç No","Meter no.")}</span><span>{_L("Anfang","Başlangıç","Start")}</span><span>{_L("Ende","Bitiş","End")}</span><span></span></div>
+      {ARTS.map(([art,lbl])=>{const s=status(u.unit_id,art);const einh=u.arts[art].einheit;const zw=u.arts[art].zwischen;return(
+        <div key={art} style={{display:"grid",gridTemplateColumns:"minmax(90px,1.1fr) minmax(90px,1fr) 1fr 1fr 46px",gap:6,alignItems:"center",padding:"4px 0",borderLeft:"3px solid "+stCol[s],paddingLeft:8,marginBottom:3}}>
+          <span style={{fontSize:13,color:theme.text}}>{lbl}</span>
+          <input style={_inp} value={val(u.unit_id,art,"zaehler_nr")} onChange={e=>setv(u.unit_id,art,"zaehler_nr",e.target.value)} placeholder="—"/>
+          <input style={{..._inp,textAlign:"right"}} type="number" inputMode="decimal" value={val(u.unit_id,art,"anfang")} onChange={e=>setv(u.unit_id,art,"anfang",e.target.value)} placeholder={einh}/>
+          <input style={{..._inp,textAlign:"right",borderColor:s==="err"?theme.danger:theme.border}} type="number" inputMode="decimal" value={val(u.unit_id,art,"ende")} onChange={e=>setv(u.unit_id,art,"ende",e.target.value)} placeholder={einh}/>
+          <span style={{fontSize:11,textAlign:"right",color:s==="err"?theme.danger:s==="half"?"#f59e0b":theme.textMuted}}>
+            {s==="ok"?"+"+(Math.round((parseFloat(val(u.unit_id,art,"ende"))-parseFloat(val(u.unit_id,art,"anfang")))*100)/100):s==="err"?"✕":s==="half"?"⚠":""}</span>
+        </div>);})}
+      {ARTS.some(([art])=>u.arts[art].zwischen>0)&&<div style={{fontSize:11,color:theme.textDim,marginTop:4}}>ℹ️ {_L("Zwischenablesung(en) vorhanden (z.B. Mieterwechsel) — werden mitgerechnet.","Ara okuma(lar) var (ör. kiracı değişimi) — hesaba katılır.","Interim reading(s) present — included.")}</div>}
+    </div>))}
+    {(data.units||[]).length>0&&<div style={{position:"sticky",bottom:0,background:theme.surface,padding:"10px 0",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",borderTop:"1px solid "+theme.border}}>
+      <button disabled={saving} style={{padding:"10px 20px",background:theme.accent,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:800,cursor:saving?"wait":"pointer",opacity:saving?0.6:1}} onClick={save}>💾 {saving?_L("Speichert…","Kaydediliyor…","Saving…"):_L("Alle speichern","Hepsini kaydet","Save all")}</button>
+      <span style={{fontSize:12,color:theme.textMuted}}>{_L("Tam","Complete","Complete")}: <b style={{color:theme.accent}}>{st.ok}</b> · {_L("Yarım","Half","Half")}: <b style={{color:"#f59e0b"}}>{st.half}</b>{st.err>0&&<span> · {_L("Hata","Error","Error")}: <b style={{color:theme.danger}}>{st.err}</b></span>}</span>
+    </div>}
+  </div>);
+}
+
+
 function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
   const _e=n=>"€"+(Number(n)||0).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -3666,7 +3745,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
     </div>);
   }
   // ============ DETAIL VIEW ============
-  const TABS=[["uebersicht","📊 "+_L("Übersicht","Özet","Overview")],["einheiten","🏘️ "+_L("Einheiten & Mieter","Daire & Kiracı","Units & Tenants")],["einnahmen","📈 "+_L("Mieteingang","Kira girişi","Rent")],["ausgaben","📉 "+_L("Ausgaben","Gider","Expenses")],["nebenkosten","📑 "+_L("Nebenkosten","Yan gider","Utility costs")],["dokumente","📄 "+_L("Dokumente","Belgeler","Documents")]];
+  const TABS=[["uebersicht","📊 "+_L("Übersicht","Özet","Overview")],["einheiten","🏘️ "+_L("Einheiten & Mieter","Daire & Kiracı","Units & Tenants")],["einnahmen","📈 "+_L("Mieteingang","Kira girişi","Rent")],["ausgaben","📉 "+_L("Ausgaben","Gider","Expenses")],["zaehler","🔢 "+_L("Zählerstände","Sayaçlar","Meters")],["nebenkosten","📑 "+_L("Nebenkosten","Yan gider","Utility costs")],["dokumente","📄 "+_L("Dokumente","Belgeler","Documents")]];
   return (<div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
       <button style={{...css.btnOutline,padding:"8px 12px"}} onClick={()=>{setSel(null);loadProps();}}>← {_L("Zurück","Geri","Back")}</button>
@@ -3748,6 +3827,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
         <button style={_btn("#ef4444")} onClick={saveExp}>💾 {_L("Speichern","Kaydet","Save")}</button></div>
       {exps.map(x=><div key={x.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div><b style={{color:theme.danger}}>{_e(x.betrag)}</b> <span style={css.badge(theme.blueSoft,theme.blue)}>{katLbl(x.kategorie)}</span><div style={{fontSize:12,color:theme.textMuted}}>{x.datum} · {x.beschreibung}</div></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("expenses",x.id)}>✕</span></div>)}
     </div>)}
+    {tab==="zaehler"&&<div><ZaehlerMatrix propertyId={sel.id} showToast={showToast}/></div>}
     {tab==="nebenkosten"&&<div><NkEditor propertyId={sel.id} showToast={showToast}/></div>}
     {tab==="dokumente"&&<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Dokument hochladen","Belge yükle","Upload document")}</div>
