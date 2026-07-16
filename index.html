@@ -3256,23 +3256,41 @@ function NkEditor({propertyId,showToast}){
     {locked&&<div style={{background:"rgba(16,185,129,0.12)",border:"1px solid "+theme.accent,borderRadius:10,padding:"9px 12px",marginBottom:12,fontSize:13}}>🔒 {_L("Abgeschlossen — die Berechnung ist eingefroren und unveränderbar.","Kapatıldı — hesap donduruldu ve değiştirilemez.","Finalised — the calculation is frozen and immutable.")}</div>}
     <div style={{...css.card,marginBottom:12}}>
       <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>{_L("Kostenpositionen","Gider kalemleri","Cost positions")}</div>
-      <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Beträge eintragen — leer lassen, was nicht anfällt.","Tutarları girin — olmayanı boş bırakın.","Enter amounts — leave blank what does not apply.")}</div>
+      <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Je Zeile: Gesamt­rechnung eintragen und wählen, WIE sie verteilt wird — das Programm rechnet.","Her satırda: toplam faturayı yaz ve NASIL bölüneceğini seç — hesabı program yapar.","Per line: enter the total invoice and choose HOW it splits — the program does the maths.")}</div>
+      {/* column headers so the three boxes are unmistakable */}
+      <div style={{display:"flex",alignItems:"center",gap:8,padding:"0 0 5px",fontSize:10.5,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.03em"}}>
+        <span style={{flex:"1 1 110px",minWidth:90}}>{_L("Kostenart","Gider türü","Cost type")}</span>
+        {!locked&&<span style={{flex:"0 1 132px"}}>{_L("Wie verteilen?","Nasıl bölünür?","How to split?")}</span>}
+        <span style={{flex:"0 1 100px",textAlign:"right"}}>{_L("Rechnung €","Toplam fatura €","Invoice €")}</span>
+      </div>
       {NK_STD.map(([kat,label])=>{const pos=nkPosOf(kat);
         const bval=nkGrid[kat]!==undefined?nkGrid[kat]:(pos&&pos.betrag!=null?String(pos.betrag):"");
         const sval=nkSchl[kat]!==undefined?nkSchl[kat]:(pos?pos.schluessel:"");
         // per-row dynamic sub-form: Individuell → tenant table; Verbrauch → deferred note
         const indMap=(pos&&nkInd[pos.id]!==undefined)?nkInd[pos.id]:((pos&&pos.individuell)||{});
         const indSum=Object.keys(indMap).reduce((s,k)=>s+(parseFloat(indMap[k])||0),0);
+        // inline proof that the program divided THIS line: each tenant's computed share for this kat
+        const lineShares=pos?(erg.tenants||[]).map(t=>({name:t.name,b:(t.positionen||[]).filter(pp=>pp.kategorie===kat).reduce((s,pp)=>s+(Number(pp.anteil_betrag)||0),0)})).filter(x=>x.b>0):[];
+        const lineMethod=pos?(pos.schluessel_label||pos.schluessel||""):"";
+        const posBetrag=pos?Number(pos.betrag)||0:0;
+        const showLineResult=!locked&&pos&&posBetrag>0&&sval!=="individuell"&&sval!=="verbrauch";
+        const hasSub=sval==="individuell"||sval==="verbrauch"||showLineResult;
         return(<React.Fragment key={kat}>
-          <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:sval==="individuell"||sval==="verbrauch"?"none":"1px solid "+theme.border}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:hasSub?"none":"1px solid "+theme.border}}>
           <span style={{flex:"1 1 110px",minWidth:90,fontSize:14,color:theme.text,fontWeight:pos?700:400}}>{label}</span>
           {!locked&&<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{flex:"0 1 132px",padding:"6px 8px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer"}}>{NK_SCHL.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>}
           {locked?<b style={{minWidth:80,textAlign:"right",color:theme.text}}>{pos?_e(pos.betrag):"—"}</b>
-           :<input type="number" inputMode="decimal" placeholder="€ 0,00" value={bval}
+           :<input type="number" inputMode="decimal" placeholder={_L("Gesamt €","Toplam €","Total €")} value={bval}
               onChange={e=>setNkGrid(g=>({...g,[kat]:e.target.value}))} onBlur={()=>nkSaveRow(kat)}
               onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
               style={{flex:"0 1 100px",minWidth:80,padding:"8px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(pos?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>}
           </div>
+          {/* inline result — proves the total was divided right on the line */}
+          {showLineResult&&<div style={{fontSize:12,padding:"1px 0 7px 2px",borderBottom:"1px solid "+theme.border}}>
+            {(lineShares.length>0&&!(sval==="personenzahl"&&persTotal<=0))
+              ?<span style={{color:theme.textMuted}}>✓ {_e(posBetrag)} {_L("verteilt nach","şuna göre bölündü:","split by")} <b style={{color:theme.text}}>{lineMethod}</b> → {lineShares.map(x=>x.name+" "+_e(x.b)).join(" · ")}{(sval==="personenzahl"&&persTotal>0)?" ("+persTotal+" "+_L("Pers.","kişi","pers.")+")":""}</span>
+              :<span style={{color:"#b45309"}}>⏳ {sval==="personenzahl"?_L("Personenzahl unten eintragen, dann wird verteilt","Aşağıya kişi sayısı gir, sonra bölünür","enter head counts below to split"):_L("noch nicht verteilbar (Fläche/Mieter fehlt)","henüz bölünemiyor (alan/kiracı eksik)","cannot split yet")}</span>}
+          </div>}
           {/* Individuell: exact amount per tenant for THIS line */}
           {!locked&&sval==="individuell"&&<div style={{padding:"8px 10px 10px 10px",marginBottom:6,background:theme.surfaceAlt,borderRadius:10,border:"1px solid "+theme.border,borderTop:"none"}}>
             {!pos?<div style={{fontSize:12,color:"#b45309"}}>ℹ️ {_L("Erst einen Betrag eintragen, dann je Mieter aufteilen.","Önce tutar girin, sonra kiracıya böl.","Enter an amount first, then split per tenant.")}</div>
