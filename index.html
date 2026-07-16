@@ -3258,6 +3258,15 @@ function NkEditor({propertyId,showToast}){
       <span style={{fontSize:12,fontWeight:700,color:locked?theme.accent:"#f59e0b"}}>{locked?"🔒 "+_L("abgeschlossen","kapatıldı","final"):"✎ "+_L("Entwurf","Taslak","Draft")}</span>
     </div>
     {locked&&<div style={{background:"rgba(16,185,129,0.12)",border:"1px solid "+theme.accent,borderRadius:10,padding:"9px 12px",marginBottom:12,fontSize:13}}>🔒 {_L("Abgeschlossen — die Berechnung ist eingefroren und unveränderbar.","Kapatıldı — hesap donduruldu ve değiştirilemez.","Finalised — the calculation is frozen and immutable.")}</div>}
+    {/* who is in this statement — the tenants for the chosen period (+ Eigennutzung) */}
+    {(erg.tenants||[]).length>0&&<div style={{...css.card,marginBottom:12,padding:"10px 12px"}}>
+      <span style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em"}}>👥 {_L("Mieter in dieser Abrechnung","Bu hesaptaki kiracılar","Tenants in this statement")}</span>
+      <div style={{marginTop:4,fontSize:14,color:theme.text,fontWeight:700}}>{(erg.tenants||[]).map(t=>t.name).join("  ·  ")}
+        {persEigSum>0&&<span style={{color:theme.textMuted,fontWeight:400}}>  ·  🏠 {_L("Eigennutzung","Kendi kullanımın","Self-use")}</span>}</div>
+    </div>}
+    {/* wrong-year guard: no active tenant in the period (the common cause of "nothing splits") */}
+    {!locked&&(erg.tenants||[]).length===0&&<div style={{background:"rgba(245,158,11,0.12)",border:"1.5px solid #f59e0b",borderRadius:10,padding:"11px 13px",marginBottom:12,fontSize:13,color:"#b45309"}}>
+      ⚠️ {_L("In "+a.jahr+" wohnt kein Mieter im Haus — dann lässt sich nichts auf Mieter verteilen. Prüfe das Einzugsdatum der Mieter und lege ggf. eine Abrechnung für das richtige Jahr an.","Bu binada "+a.jahr+" yılında oturan kiracı yok — o yüzden kiracıya bölünecek bir şey çıkmıyor. Kiracıların taşınma tarihine bak, doğru yıl için (ör. 2026) yeni bir Abrechnung aç.","No tenant lived in the building in "+a.jahr+" — so nothing can be split. Check the tenants' move-in dates and create a statement for the right year.")}</div>}
     <div style={{...css.card,marginBottom:12}}>
       <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>{_L("Kostenpositionen","Gider kalemleri","Cost positions")}</div>
       <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Je Zeile: Gesamt­rechnung eintragen und wählen, WIE sie verteilt wird — das Programm rechnet.","Her satırda: toplam faturayı yaz ve NASIL bölüneceğini seç — hesabı program yapar.","Per line: enter the total invoice and choose HOW it splits — the program does the maths.")}</div>
