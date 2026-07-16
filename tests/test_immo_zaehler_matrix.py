@@ -56,7 +56,7 @@ cl = TestClient(app)
 print("\n[1] Empty matrix — every unit × meter present, values null")
 m = cl.get("/immo/properties/10/zaehler-matrix?jahr=2026").json()
 ok(len(m["units"]) == 2, "2 units returned")
-ok(set(m["arten"]) == {"wasser", "warmwasser", "heizung", "gas"}, "4 meter types")
+ok(set(m["arten"]) == {"strom", "wasser", "warmwasser", "heizung", "gas"}, "5 meter types incl. Strom")
 ok(m["units"][0]["arts"]["heizung"]["anfang"] is None, "no readings yet")
 
 print("\n[2] Bulk save — Anfang/Ende per unit for heizung")

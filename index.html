@@ -3500,7 +3500,7 @@ function NebenkostenView({showToast}){
 // The Nebenkosten Verbrauch/HeizkostenV engine reads these same readings automatically.
 function ZaehlerMatrix({propertyId,showToast}){
   const _L=(de,tr,en)=>getLang()==="tr"?tr:(getLang()==="en"?en:de);
-  const ARTS=[["wasser","💧 "+_L("Wasser (kalt)","Su (soğuk)","Water")],["warmwasser","🚿 "+_L("Warmwasser","Sıcak su","Hot water")],["heizung","🌡️ "+_L("Heizung","Isıtma","Heating")],["gas","🔥 "+_L("Gas","Gaz","Gas")]];
+  const ARTS=[["strom","⚡ "+_L("Strom","Elektrik","Electricity")],["wasser","💧 "+_L("Wasser (kalt)","Su (soğuk)","Water")],["warmwasser","🚿 "+_L("Warmwasser","Sıcak su","Hot water")],["heizung","🌡️ "+_L("Heizung","Isıtma","Heating")],["gas","🔥 "+_L("Gas","Gaz","Gas")]];
   const [jahr,setJahr]=React.useState(new Date().getFullYear());
   const [von,setVon]=React.useState(jahr+"-01-01");
   const [bis,setBis]=React.useState(jahr+"-12-31");

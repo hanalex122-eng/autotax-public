@@ -2388,7 +2388,7 @@ def delete_zaehler(zid: int, user: dict = Depends(get_current_user)):
 
 # ── Zählerstände matrix: enter ALL flats' meter readings on ONE screen (unit-centric, scales to 20+) ──
 # The Nebenkosten Verbrauch/HeizkostenV engine reads these same ImmoZaehlerstand rows — no new table.
-_NK_METER_ARTS = ["wasser", "warmwasser", "heizung", "gas"]
+_NK_METER_ARTS = ["strom", "wasser", "warmwasser", "heizung", "gas"]
 
 
 @router.get("/properties/{pid}/zaehler-matrix")
