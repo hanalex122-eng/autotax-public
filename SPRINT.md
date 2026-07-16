@@ -18,7 +18,22 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — next: Sprint 4 = Verbrauch engine + HeizkostenV (separate legal design)
+## NO ACTIVE SPRINT — Sprint 4 (Verbrauch/HeizkostenV) closed & production-verified 2026-07-16
+
+## ✅ SPRINT 4 — Verbrauch / Zählerstand engine + HeizkostenV (canlı `15ddc5b`, 2026-07-16)
+Metered costs split by ACTUAL consumption (Zählerstände); heating/hot-water obey HeizkostenV (§7):
+Grundkosten % by area + Verbrauch % by meter (default 30/70, per-line 30–50, snapshot-frozen). A
+moved-out tenant is billed for their real consumption (Zwischenablesung). Missing readings → Wohnfläche
+fallback + note. CALC_VERSION 3→4. Report: `.claude/heizkosten_v_architecture.md`.
+- Schema: one additive+nullable column `nk_kostenposition.grund_prozent` (boot-ALTER, no backfill).
+- Tests: engine 32/32 + **E2E 27/27 through the real API** (create→readings→NK→finalize→PDF). Suite 42/42.
+- **Go/No-Go GREEN — production-verified with a throwaway test building (created via API, HARD-deleted):**
+  Backup PASS · Migration PASS (grund_prozent added t+210s) · Health PASS · Regression PASS (8 tables
+  SHA256 identical) · **Smoke PASS on prod** (Wasser 700→750/510/440 · HeizkostenV 1000→640/360, Grund
+  300 + Verbrauch 700 · Finalize+Snapshot: meter 70→9999 after finalise, result stayed 640 · PDF ok) ·
+  **Data clean PASS** (after HARD-delete, all 8 core tables byte-identical to the pre-deploy baseline).
+- NOTE: prod has 0 Zählerstände — the owner must enter unit meter readings before their own Verbrauch
+  lines compute; until then they fall back to Wohnfläche with a note.
 
 ## ✅ SPRINT 3 — Allocation Engine (Personenzahl · Individuell · Eigennutzung)
 **Engine-only part deployed `16a3bb5` (2026-07-15).** Extension (in-screen UI + Individuell +
