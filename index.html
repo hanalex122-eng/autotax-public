@@ -3186,6 +3186,12 @@ function NkEditor({propertyId,showToast}){
   React.useEffect(()=>{setNkOpen(null);if(propertyId)loadNk(propertyId);},[propertyId]);
   const openNk=async(aid)=>{try{setNkGrid({});setNkSchl({});setNkOpen(await api("/immo/nk/"+aid));}catch(e){alert(e.message);}};
   const newNk=async()=>{const jahr=parseInt(prompt(_L("Abrechnungsjahr","Hesap yılı","Settlement year"),String(new Date().getFullYear()-1)));if(!jahr)return;try{const a=await api("/immo/nk",{method:"POST",body:JSON.stringify({property_id:propertyId,jahr:jahr})});setNkGrid({});setNkSchl({});setNkOpen(a);loadNk(propertyId);}catch(e){alert(e.message);}};
+  // Delete a DRAFT statement (wrongly created ones). Finalised statements are immutable (409) — those
+  // must be unlocked first. Backend soft-deletes; the list reloads.
+  const delNk=async(aid,e)=>{if(e)e.stopPropagation();
+    if(!confirm(_L("Diese Abrechnung (Entwurf) löschen?","Bu hesabı (taslak) sil?","Delete this draft statement?")))return;
+    try{await api("/immo/nk/"+aid,{method:"DELETE"});if(nkOpen&&nkOpen.id===aid)setNkOpen(null);loadNk(propertyId);
+      if(showToast)showToast(_L("Gelöscht","Silindi","Deleted"),"info");}catch(e){alert(e.message);}};
   const nkPosOf=(kat)=>((nkOpen&&nkOpen.positionen)||[]).find(p=>p.kategorie===kat);
   const nkSaveRow=async(kat)=>{const raw=nkGrid[kat];if(raw===undefined)return;const amt=parseFloat(raw);const ex=nkPosOf(kat);
     try{let a;
@@ -3225,11 +3231,22 @@ function NkEditor({propertyId,showToast}){
     </div>
     {nkList.map(a=>(<div key={a.id} onClick={()=>openNk(a.id)} style={{...css.card,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
       <span style={{fontWeight:600,color:theme.text}}>📑 {_L("Abrechnung","Hesap","Statement")} {a.jahr}</span>
+      <span style={{display:"flex",alignItems:"center",gap:10}}>
       <span style={{fontSize:12,fontWeight:700,color:a.final?theme.accent:"#f59e0b"}}>{a.final?"🔒 "+_L("abgeschlossen","kapatıldı","final"):"✎ "+_L("Entwurf","Taslak","Draft")}</span>
+      {!a.final&&<span onClick={e=>delNk(a.id,e)} title={_L("Löschen","Sil","Delete")} style={{fontSize:15,cursor:"pointer",color:theme.danger,padding:"0 2px"}}>🗑</span>}
+      </span>
     </div>))}
     {nkList.length===0&&<div style={{...css.card,textAlign:"center",color:theme.textMuted,padding:24}}>{_L("Noch keine Abrechnung.","Henüz hesap yok.","No statement yet.")}</div>}
   </div>);
   const a=nkOpen;const erg=a.ergebnis||{tenants:[],leerstand:0,umlagefaehige_summe:0,hinweise:[]};const locked=!!a.final;
+  // Personenzahl allocation: the landlord enters ONLY person counts; the program shows the invoice
+  // total, the auto-summed head count, and each tenant's computed € share (from the engine, exact).
+  const persInvoice=(a.positionen||[]).filter(p=>p.schluessel==="personenzahl").reduce((s,p)=>s+(Number(p.betrag)||0)*((p.umlage_pct==null?100:p.umlage_pct)/100),0);
+  const persShareOf=(t)=>((t.positionen||[]).filter(pp=>pp.schluessel==="personenzahl").reduce((s,pp)=>s+(Number(pp.anteil_betrag)||0),0));
+  const persTenantSum=(erg.tenants||[]).reduce((s,t)=>s+(Number(t.personenzahl)||0),0);
+  const persEigSum=(nkOpen.eigennutzung_units||[]).reduce((s,u)=>s+(Number(u.eigennutzung_personen)||0),0);
+  const persTotal=persTenantSum+persEigSum;
+  const eigShareOf=(u)=>persTotal>0?Math.round(persInvoice*(Number(u.eigennutzung_personen)||0)/persTotal*100)/100:0;
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
       <button style={{...css.btnOutline,padding:"7px 12px",fontSize:13}} onClick={()=>{setNkOpen(null);loadNk(propertyId);}}>← {_L("Zurück","Geri","Back")}</button>
@@ -3282,26 +3299,40 @@ function NkEditor({propertyId,showToast}){
         </React.Fragment>);})}
       <div style={{marginTop:12,fontSize:14,fontWeight:700,display:"flex",justifyContent:"space-between"}}><span>{_L("Summe umlagefähig","Toplam dağıtılabilir","Umlagefähig total")}</span><b style={{color:theme.accent}}>{_e(erg.umlagefaehige_summe)}</b></div>
     </div>
-    {/* Personen je Mieter — opens only when a position is split by Personenzahl (dynamic form). */}
+    {/* Personenzahl ALLOCATION panel — opens when a position is split by Personenzahl. The landlord
+        enters ONLY head counts; the panel shows the invoice, the auto-summed persons and each computed
+        € share (e.g. 567 × 1 / 8 = 70,88 €). No one types a tenant's share by hand. */}
     {!locked&&nkUsesPers&&(erg.tenants||[]).length>0&&<div style={{...css.card,marginBottom:12,border:"1.5px solid "+theme.accent}}>
-      <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>👤 {_L("Personen je Wohnung","Daire başına kişi","Persons per flat")}</div>
-      <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Nur nötig, wenn eine Position nach 'Personenzahl' verteilt wird (z.B. Wasser, Müll).","Sadece bir kalem 'Personenzahl' ile dağıtılıyorsa gerekir (ör. su, çöp).","Only needed when a cost is split by 'Personenzahl' (e.g. water, waste).")}</div>
-      {(erg.tenants||[]).map(t=>{const pv=nkPers[t.tenancy_id]!==undefined?nkPers[t.tenancy_id]:(t.personenzahl!=null?String(t.personenzahl):"");return(
-        <div key={t.tenancy_id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"5px 0"}}>
-          <span style={{fontSize:14,color:theme.text}}>{t.name}</span>
-          <input type="number" min="0" inputMode="numeric" placeholder={_L("Personen","Kişi","Persons")} value={pv}
+      <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>📊 {_L("Personenzahl-Verteilung","Kişi sayısına göre dağıtım","Split by number of persons")}</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        <div style={{flex:"1 1 140px",background:theme.surfaceAlt,borderRadius:10,padding:"8px 12px"}}>
+          <div style={{fontSize:11,color:theme.textMuted}}>{_L("Rechnung (Personenzahl)","Fatura (kişi bazlı)","Invoice (person-based)")}</div>
+          <div style={{fontSize:17,fontWeight:800,color:theme.text}}>{_e(persInvoice)}</div></div>
+        <div style={{flex:"1 1 140px",background:theme.surfaceAlt,borderRadius:10,padding:"8px 12px"}}>
+          <div style={{fontSize:11,color:theme.textMuted}}>{_L("Personen gesamt (autom.)","Toplam kişi (otomatik)","Total persons (auto)")}</div>
+          <div style={{fontSize:17,fontWeight:800,color:persTotal>0?theme.accent:theme.danger}}>{persTotal} {_L("Pers.","kişi","pers.")}</div></div>
+      </div>
+      <div style={{fontSize:12,color:theme.textMuted,marginBottom:6}}>{_L("Nur die Personenzahl eintragen — die Anteile rechnet das System.","Sadece kişi sayısını girin — payları sistem hesaplar.","Enter only the head count — the system computes the shares.")}</div>
+      {(erg.tenants||[]).map(t=>{const pv=nkPers[t.tenancy_id]!==undefined?nkPers[t.tenancy_id]:(t.personenzahl!=null?String(t.personenzahl):"");const share=persShareOf(t);const pc=Number(t.personenzahl)||0;return(
+        <div key={t.tenancy_id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid "+theme.border}}>
+          <span style={{flex:"1 1 90px",fontSize:14,color:theme.text}}>{t.name}</span>
+          <input type="number" min="0" inputMode="numeric" placeholder={_L("Pers.","Kişi","Pers.")} value={pv}
             onChange={e=>setNkPers(p=>({...p,[t.tenancy_id]:e.target.value}))} onBlur={()=>nkSavePers(t.tenancy_id)}
             onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
-            style={{width:110,padding:"7px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(t.personenzahl!=null?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
+            style={{width:76,padding:"7px 8px",background:theme.surfaceAlt,border:"1.5px solid "+(t.personenzahl!=null?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
+          <span style={{flex:"0 0 130px",textAlign:"right",fontSize:13,color:theme.textMuted}}>
+            {persTotal>0&&pc>0?<span>{pc}/{persTotal} → <b style={{color:theme.text}}>{_e(share)}</b></span>:<span style={{color:theme.danger}}>{_L("Personen fehlt","Kişi eksik","persons missing")}</span>}</span>
         </div>);})}
-      {/* owner-occupied / vacant units — enter the OWNER's persons (Eigennutzung), counts in the split */}
-      {(nkOpen.eigennutzung_units||[]).map(u=>{const pv=nkEig[u.id]!==undefined?nkEig[u.id]:(u.eigennutzung_personen!=null?String(u.eigennutzung_personen):"");return(
-        <div key={"u"+u.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"5px 0",borderTop:"1px dashed "+theme.border}}>
-          <span style={{fontSize:14,color:theme.text}}>🏠 {u.name} <span style={{fontSize:11,color:theme.textMuted}}>· {_L("Vermieter (Eigennutzung)","Ev sahibi (kendi oturuyor)","Owner (self-occupied)")}</span></span>
-          <input type="number" min="0" inputMode="numeric" placeholder={_L("Personen","Kişi","Persons")} value={pv}
+      {/* owner-occupied / vacant units — enter the OWNER's persons (Eigennutzung); counts in the split */}
+      {(nkOpen.eigennutzung_units||[]).map(u=>{const pv=nkEig[u.id]!==undefined?nkEig[u.id]:(u.eigennutzung_personen!=null?String(u.eigennutzung_personen):"");const pc=Number(u.eigennutzung_personen)||0;const eshare=eigShareOf(u);return(
+        <div key={"u"+u.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderTop:"1px dashed "+theme.border}}>
+          <span style={{flex:"1 1 90px",fontSize:14,color:theme.text}}>🏠 {u.name} <span style={{fontSize:11,color:theme.textMuted}}>· {_L("Eigennutzung","Kendi oturuyor","Self-use")}</span></span>
+          <input type="number" min="0" inputMode="numeric" placeholder={_L("Pers.","Kişi","Pers.")} value={pv}
             onChange={e=>setNkEig(p=>({...p,[u.id]:e.target.value}))} onBlur={()=>nkSaveEig(u.id)}
             onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
-            style={{width:110,padding:"7px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(u.eigennutzung_personen!=null?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
+            style={{width:76,padding:"7px 8px",background:theme.surfaceAlt,border:"1.5px solid "+(u.eigennutzung_personen!=null?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
+          <span style={{flex:"0 0 130px",textAlign:"right",fontSize:13,color:theme.textMuted}}>
+            {persTotal>0&&pc>0?<span>{pc}/{persTotal} → <b style={{color:theme.text}}>{_e(eshare)}</b></span>:<span>—</span>}</span>
         </div>);})}
     </div>}
     <div style={{...css.card,marginBottom:12}}>
@@ -3326,6 +3357,7 @@ function NkEditor({propertyId,showToast}){
       <button style={{...css.btnOutline,padding:"9px 14px"}} onClick={()=>nkPdf(null)}>📄 {_L("Übersicht-PDF","Genel PDF","Overview PDF")}</button>
       {!locked?<button style={_btn(theme.accent)} onClick={finalizeNk}>🔒 {_L("Abschließen","Kapat","Finalise")}</button>
               :<button style={{...css.btnOutline,padding:"9px 14px",borderColor:"#f59e0b",color:"#f59e0b"}} onClick={unlockNk}>🔓 {_L("Entsperren","Kilidi aç","Unlock")}</button>}
+      {!locked&&<button style={{...css.btnOutline,padding:"9px 14px",borderColor:theme.danger,color:theme.danger}} onClick={e=>delNk(a.id,e)}>🗑 {_L("Löschen","Sil","Delete")}</button>}
     </div>
   </div>);
 }
