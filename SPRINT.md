@@ -18,19 +18,26 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — next: Verbrauch engine, then HeizkostenV (separate legal design), then Mahnung e-mail
+## NO ACTIVE SPRINT — next: Sprint 4 = Verbrauch engine + HeizkostenV (separate legal design)
 
-## ✅ SPRINT 3 CLOSED (2026-07-15) — Personenzahl Allocation Engine
-Deployed `16a3bb5` · Go/No-Go fully green. A single-water-meter (Sammelzähler) statement now splits
-water/Abwasser/Müll by persons per flat × Zeitanteil; a vacant unit contributes 0 (no invented head
-count, not redistributed); missing person count → honest Wohnfläche fallback naming the tenant; the
-Σ(shares)+Leerstand==total invariant holds; CALCULATION_VERSION bumped to 2 so old finalised v1
-statements keep rendering from their snapshot. Rules-only (no DB/UI/endpoint change).
+## ✅ SPRINT 3 — Allocation Engine (Personenzahl · Individuell · Eigennutzung)
+**Engine-only part deployed `16a3bb5` (2026-07-15).** Extension (in-screen UI + Individuell +
+Eigennutzung) code+tests+docs complete — closing with ONE production deploy (Go/No-Go below).
+Full report: `.claude/sprint3_final_report.md`. Arch decisions: `.claude/nk_architecture.md` → D1–D3.
 
-- Backup PASS (SHA256 fingerprint) · Migration N/A (no schema change, proven) · Rollback ready
-  (`8e78939`, no DB rollback) · Smoke 9/9 (the 3/1/2-persons + 1-vacant scenario) · Regression 9/9
-  (all Sprint 0/1/2 functions + Wohnfläche NK unchanged) · core business data SHA256-identical.
-- Deferred: Verbrauch, Individuell (data-ready), HeizkostenV (separate legal/architecture sprint).
+**4 of 5 Umlageschlüssel now fully automatic** (Wohnfläche · Wohneinheiten · Personenzahl · Individuell):
+enter the invoice total once → the engine reads the data and splits per tenant × Zeitanteil.
+- **Personenzahl** — persons per flat; vacant flat = 0; missing count → honest Wohnfläche fallback
+  naming the tenant. `a4fb6bb` adds the in-screen person entry.
+- **Individuell** (`3217cb7`) — exact euro per tenant; rest→landlord; over-assignment scaled+note;
+  reads `NkKostenposition.individuell` (no schema change). Schlüssel-driven **dynamic cost form**.
+- **Eigennutzung** (`2b1f382`, model B) — owner-occupied flat carries `ImmoUnit.eigennutzung_personen`;
+  counted in the person split, borne by the owner, never a tenant/debtor. Eigennutzung ≠ Leerstand.
+- Invariant `Σ tenants + Eigennutzung + Leerstand == total` holds for all keys. CALC_VERSION 2 → 3.
+- Tests: engine 71/71, full suite 40/40, JSX OK. `a8897a9` locks the 3 Eigennutzung behaviours.
+- **Schema:** one additive+nullable column (`immo_unit.eigennutzung_personen`) — the only deviation
+  from the original "code-only" scope, deliberately accepted (see report §2.5).
+- **Deferred → Sprint 4:** Verbrauch engine + HeizkostenV (separate legal design).
 
 ---
 

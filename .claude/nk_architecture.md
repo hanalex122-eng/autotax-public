@@ -315,3 +315,50 @@ never divided) apply to the Personenzahl key exactly as to Wohnfläche.
    Payment Service is a later opt-in. — confirm.
 4. **Umlagefähig default split** as tabled in Q3 (repairs/management/Rücklage/financing OFF; the BetrKV
    operating costs ON). — confirm.
+
+---
+
+# Sprint 3 — allocation-engine architecture decisions (BINDING)
+
+Recorded when the Personenzahl/Individuell/Eigennutzung allocation work was finalised. These lock the
+model so it cannot silently regress.
+
+## D1 — Eigennutzung is modelled on the UNIT, not as a Tenancy (chosen: model B)
+
+**Decision:** an owner-occupied flat carries `ImmoUnit.eigennutzung_personen` (INT, nullable). It is
+NOT modelled as a fake `ImmoTenancy` (the rejected "occupant model" A).
+
+**Rationale (product owner, binding):**
+- The owner is *not a tenant*. No fake record in `ImmoTenancy`.
+- The owner must NEVER appear in Mietkonto, Mahnung, Mieteingang or any debt calculation.
+- Eigennutzung is **not an accounting event** — it is *master data for allocation only*.
+- This is MORE aligned with the Single-Ledger law: the owner never becomes a payment-bearing entity,
+  so there is nothing to filter out of ~20 rent/debt queries and no phantom-tenant / phantom-debtor
+  risk. (Model A would have created a Tenancy that must be suppressed everywhere — fragile.)
+
+**Behaviour (locked by tests `[Eig]`, `[Eig-2]`, `[Eig-3]` in test_immo_nk_personenzahl.py):**
+1. Owner lives in the building (`eigennutzung_personen` > 0) → counted in the Personenzahl denominator;
+   the owner bears that share, reported as the **Eigennutzung** bucket (not billed to tenants).
+2. Owner does not live there (`eigennutzung_personen` unset) → 0 persons; a person-key empty flat adds
+   no cost and produces no Eigennutzung share.
+3. **Eigennutzung ≠ Leerstand** — two separate buckets that coexist in one building. Leerstand is a true
+   vacancy the landlord carries as a loss; Eigennutzung is the landlord's own consumption.
+Invariant, all keys: `Σ tenant shares + Eigennutzung + Leerstand == umlagefähige total`.
+
+**Schema note (deviation from the original "Sprint 3 = code-only" scope, deliberately accepted):**
+`eigennutzung_personen` is genuinely new information (person counts previously lived only on tenancies;
+an owner-occupied flat has no tenancy, so the datum had no home and cannot be derived). Added as a
+single additive + nullable column via a boot-time ALTER — no backfill, no migration tool.
+
+## D2 — Individuell reads its stored map (no fallback)
+
+`NkKostenposition.individuell` (JSON `{tenancy_id: betrag}`) is now consumed by the engine: each tenant
+is billed the EXACT entered euro (no weighting, no Zeitanteil). Unassigned rest → landlord (Leerstand
+bucket); over-assignment → scaled to the invoice + a note; empty → whole line to the landlord + a note.
+No schema change (the column pre-existed). `CALCULATION_VERSION` 2 → 3.
+
+## D3 — What is deliberately still deferred
+
+**Verbrauch** stays a Wohnfläche fallback WITH a visible note — the metered split belongs to the
+separate **Sprint 4 / HeizkostenV** legal design (≥50% consumption rule, Zählerstände integration). Not
+a bug; a scoped deferral.
