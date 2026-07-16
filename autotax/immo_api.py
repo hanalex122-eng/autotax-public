@@ -2628,6 +2628,7 @@ class NkPositionIn(BaseModel):
     umlage_pct: Optional[int] = None
     schluessel: Optional[str] = None
     verbrauch_art: Optional[str] = None
+    individuell: Optional[dict] = None      # {tenancy_id: betrag} for the Individuell key
     beleg_datum: Optional[str] = None
     document_id: Optional[int] = None
     notiz: Optional[str] = None
@@ -2640,6 +2641,7 @@ class NkPositionPatch(BaseModel):
     umlage_pct: Optional[int] = None
     schluessel: Optional[str] = None
     verbrauch_art: Optional[str] = None
+    individuell: Optional[dict] = None      # {tenancy_id: betrag}; {} clears it
     beleg_datum: Optional[str] = None
     document_id: Optional[int] = None
     notiz: Optional[str] = None
@@ -2676,11 +2678,29 @@ def _nk_units_tenancies(db, uid: int, property_id: int):
     return units, tens
 
 
+def _dump_individuell(d):
+    """Normalise an {tenancy_id: betrag} map to a compact JSON string (positive amounts only),
+    or None when empty (so 'Individuell' with no entries stores nothing)."""
+    if not d:
+        return None
+    import json as _json
+    clean = {}
+    for k, v in d.items():
+        try:
+            amt = round(float(v), 2)
+        except (TypeError, ValueError):
+            continue
+        if amt > 0:
+            clean[str(int(k))] = amt
+    return _json.dumps(clean) if clean else None
+
+
 def _pos_dict(p: NkKostenposition) -> dict:
     return {"id": p.id, "kategorie": p.kategorie, "label": _nk.kategorie_label(p.kategorie),
             "betrag": p.betrag, "umlagefaehig": bool(p.umlagefaehig), "umlage_pct": p.umlage_pct,
             "schluessel": p.schluessel, "schluessel_label": _nk.SCHLUESSEL_LABEL.get(p.schluessel, p.schluessel),
-            "verbrauch_art": p.verbrauch_art, "document_id": p.document_id,
+            "verbrauch_art": p.verbrauch_art, "individuell": _nk._parse_individuell(p.individuell),
+            "document_id": p.document_id,
             "beleg_datum": str(p.beleg_datum) if p.beleg_datum else None, "notiz": p.notiz or ""}
 
 
@@ -2826,6 +2846,7 @@ def add_nk_position(aid: int, body: NkPositionIn, user: dict = Depends(get_curre
         p = NkKostenposition(abrechnung_id=a.id, user_id=uid, kategorie=kat[:40],
                              betrag=round(float(body.betrag), 2), umlagefaehig=bool(umlagefaehig),
                              umlage_pct=pct, schluessel=schluessel, verbrauch_art=body.verbrauch_art,
+                             individuell=_dump_individuell(body.individuell),
                              document_id=body.document_id, beleg_datum=_pdate(body.beleg_datum),
                              notiz=(body.notiz or "")[:300] or None)
         db.add(p); db.commit()
@@ -2860,6 +2881,8 @@ def update_nk_position(aid: int, pid: int, body: NkPositionPatch, user: dict = D
             p.schluessel = body.schluessel
         if body.verbrauch_art is not None:
             p.verbrauch_art = body.verbrauch_art or None
+        if body.individuell is not None:
+            p.individuell = _dump_individuell(body.individuell)
         if body.document_id is not None:
             p.document_id = body.document_id
         if body.beleg_datum is not None:

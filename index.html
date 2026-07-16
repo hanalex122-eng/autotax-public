@@ -3210,6 +3210,13 @@ function NkEditor({propertyId,showToast}){
   // split counts them; the owner bears that share (not the tenants). Saved on the unit.
   const [nkEig,setNkEig]=React.useState({});
   const nkSaveEig=async(uid)=>{const raw=nkEig[uid];if(raw===undefined)return;try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify({eigennutzung_personen:raw===""?-1:parseInt(raw)})});setNkOpen(await api("/immo/nk/"+nkOpen.id));setNkEig(p=>{const n={...p};delete n[uid];return n;});}catch(e){alert(e.message);}};
+  // Individuell — the landlord types an EXACT amount per tenant for this one cost line (e.g. sub-meter).
+  // Kept per position id; saved as {tenancy_id: betrag} on the position, then the result recomputes.
+  const [nkInd,setNkInd]=React.useState({});   // {posId: {tenancyId: betrag-string}}
+  const nkSaveInd=async(posId)=>{const m=nkInd[posId];if(m===undefined)return;
+    const body={};Object.keys(m).forEach(tid=>{const v=parseFloat(m[tid]);if(v>0)body[tid]=v;});
+    try{setNkOpen(await api("/immo/nk/"+nkOpen.id+"/position/"+posId,{method:"PATCH",body:JSON.stringify({individuell:body})}));
+      setNkInd(p=>{const n={...p};delete n[posId];return n;});}catch(e){alert(e.message);}};
   if(!nkOpen)return(<div>
     <div style={{...css.card,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
       <div><div style={{fontWeight:700,fontSize:15}}>📑 {_L("Nebenkostenabrechnung","Yan gider hesabı","Utility-cost statement")}</div>
@@ -3236,7 +3243,11 @@ function NkEditor({propertyId,showToast}){
       {NK_STD.map(([kat,label])=>{const pos=nkPosOf(kat);
         const bval=nkGrid[kat]!==undefined?nkGrid[kat]:(pos&&pos.betrag!=null?String(pos.betrag):"");
         const sval=nkSchl[kat]!==undefined?nkSchl[kat]:(pos?pos.schluessel:"");
-        return(<div key={kat} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid "+theme.border}}>
+        // per-row dynamic sub-form: Individuell → tenant table; Verbrauch → deferred note
+        const indMap=(pos&&nkInd[pos.id]!==undefined)?nkInd[pos.id]:((pos&&pos.individuell)||{});
+        const indSum=Object.keys(indMap).reduce((s,k)=>s+(parseFloat(indMap[k])||0),0);
+        return(<React.Fragment key={kat}>
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:sval==="individuell"||sval==="verbrauch"?"none":"1px solid "+theme.border}}>
           <span style={{flex:"1 1 110px",minWidth:90,fontSize:14,color:theme.text,fontWeight:pos?700:400}}>{label}</span>
           {!locked&&<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{flex:"0 1 132px",padding:"6px 8px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer"}}>{NK_SCHL.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>}
           {locked?<b style={{minWidth:80,textAlign:"right",color:theme.text}}>{pos?_e(pos.betrag):"—"}</b>
@@ -3244,11 +3255,35 @@ function NkEditor({propertyId,showToast}){
               onChange={e=>setNkGrid(g=>({...g,[kat]:e.target.value}))} onBlur={()=>nkSaveRow(kat)}
               onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
               style={{flex:"0 1 100px",minWidth:80,padding:"8px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(pos?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>}
-        </div>);})}
+          </div>
+          {/* Individuell: exact amount per tenant for THIS line */}
+          {!locked&&sval==="individuell"&&<div style={{padding:"8px 10px 10px 10px",marginBottom:6,background:theme.surfaceAlt,borderRadius:10,border:"1px solid "+theme.border,borderTop:"none"}}>
+            {!pos?<div style={{fontSize:12,color:"#b45309"}}>ℹ️ {_L("Erst einen Betrag eintragen, dann je Mieter aufteilen.","Önce tutar girin, sonra kiracıya böl.","Enter an amount first, then split per tenant.")}</div>
+             :(erg.tenants||[]).length===0?<div style={{fontSize:12,color:"#b45309"}}>ℹ️ {_L("Keine aktiven Mieter.","Aktif kiracı yok.","No active tenants.")}</div>
+             :<div>
+               <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>✍️ {_L("Individuelle Beträge je Mieter","Kiracı başına manuel tutar","Manual amount per tenant")}</div>
+               {(erg.tenants||[]).map(t=>{const cur=indMap[t.tenancy_id]!==undefined?indMap[t.tenancy_id]:"";return(
+                 <div key={t.tenancy_id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"3px 0"}}>
+                   <span style={{fontSize:13,color:theme.text}}>{t.name}</span>
+                   <input type="number" inputMode="decimal" placeholder="€ 0,00" value={cur}
+                     onChange={e=>setNkInd(p=>({...p,[pos.id]:{...indMap,[t.tenancy_id]:e.target.value}}))}
+                     onBlur={()=>nkSaveInd(pos.id)} onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
+                     style={{width:110,padding:"6px 9px",background:theme.surface,border:"1.5px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13,textAlign:"right"}}/>
+                 </div>);})}
+               <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:12,color:Math.abs(indSum-(pos.betrag||0))<0.005?theme.accent:"#b45309"}}>
+                 <span>{_L("Summe verteilt","Dağıtılan toplam","Distributed total")}</span>
+                 <b>{_e(indSum)} / {_e(pos.betrag)}</b></div>
+               {indSum<(pos.betrag||0)-0.005&&<div style={{fontSize:11,color:theme.textMuted,marginTop:2}}>{_L("Rest trägt der Vermieter.","Kalanı ev sahibi taşır.","Landlord bears the rest.")}</div>}
+             </div>}
+          </div>}
+          {/* Verbrauch: deferred to Sprint 4 (HeizkostenV) — currently splits by Wohnfläche */}
+          {!locked&&sval==="verbrauch"&&<div style={{padding:"8px 10px 10px 10px",marginBottom:6,background:theme.surfaceAlt,borderRadius:10,border:"1px dashed "+theme.border,borderTop:"none",fontSize:12,color:"#b45309"}}>
+            🔧 {_L("Verbrauchserfassung (Zählerstände) folgt in Sprint 4 (HeizkostenV). Aktuell wird diese Position nach Wohnfläche verteilt.","Sayaç/tüketim girişi Sprint 4'te gelecek (HeizkostenV). Şimdilik bu kalem Wohnfläche ile bölünüyor.","Meter-based consumption comes in Sprint 4 (HeizkostenV). For now this line splits by floor area.")}</div>}
+        </React.Fragment>);})}
       <div style={{marginTop:12,fontSize:14,fontWeight:700,display:"flex",justifyContent:"space-between"}}><span>{_L("Summe umlagefähig","Toplam dağıtılabilir","Umlagefähig total")}</span><b style={{color:theme.accent}}>{_e(erg.umlagefaehige_summe)}</b></div>
     </div>
-    {/* Personen je Mieter — for Wasser/Müll split by persons. Enter here; the result recomputes. */}
-    {!locked&&(erg.tenants||[]).length>0&&<div style={{...css.card,marginBottom:12,border:nkUsesPers?"1.5px solid "+theme.accent:undefined}}>
+    {/* Personen je Mieter — opens only when a position is split by Personenzahl (dynamic form). */}
+    {!locked&&nkUsesPers&&(erg.tenants||[]).length>0&&<div style={{...css.card,marginBottom:12,border:"1.5px solid "+theme.accent}}>
       <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>👤 {_L("Personen je Wohnung","Daire başına kişi","Persons per flat")}</div>
       <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Nur nötig, wenn eine Position nach 'Personenzahl' verteilt wird (z.B. Wasser, Müll).","Sadece bir kalem 'Personenzahl' ile dağıtılıyorsa gerekir (ör. su, çöp).","Only needed when a cost is split by 'Personenzahl' (e.g. water, waste).")}</div>
       {(erg.tenants||[]).map(t=>{const pv=nkPers[t.tenancy_id]!==undefined?nkPers[t.tenancy_id]:(t.personenzahl!=null?String(t.personenzahl):"");return(

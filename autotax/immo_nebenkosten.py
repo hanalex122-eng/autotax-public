@@ -24,13 +24,15 @@ Duck-typed inputs (testable without the ORM):
 """
 from __future__ import annotations
 
+import json as _json
 from calendar import monthrange
 from datetime import date
 from typing import Optional
 
 from autotax import immo_rules as _rules
 
-CALCULATION_VERSION = 2   # v2 (Sprint 3): Personenzahl is computed (v1 fell back to Wohnfläche)
+CALCULATION_VERSION = 3   # v3 (Sprint 3): Individuell assigns exact per-tenant amounts (v2 fell back
+                          # to Wohnfläche). v2: Personenzahl computed. v1: only Wohnfläche/Wohneinheiten.
 
 # ── vocabulary ────────────────────────────────────────────────────────
 
@@ -137,6 +139,32 @@ def _computes(schluessel: str) -> bool:
     return schluessel in _COMPUTED
 
 
+def _eur(x) -> str:
+    return "{:,.2f} €".format(float(x or 0)).replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _parse_individuell(raw):
+    """Coerce a position's `individuell` field into {tenancy_id(int): betrag(float)}.
+    Accepts a dict (tests / already-parsed) or a JSON string (the ORM Text column)."""
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        src = raw
+    else:
+        try:
+            src = _json.loads(raw)
+        except Exception:
+            return {}
+    out = {}
+    if isinstance(src, dict):
+        for k, v in src.items():
+            try:
+                out[int(k)] = float(v)
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 def basis_weight(schluessel: str, unit, tenancy, za: float) -> float:
     """The un-normalised weight of one tenancy for one Schlüssel (before dividing by the sum).
     Computes wohnflaeche, wohneinheiten and personenzahl; verbrauch/individuell fall back to
@@ -221,6 +249,45 @@ def verteile(positionen, units, tenancies, von: date, bis: date):
         raw_schluessel = getattr(pos, "schluessel", "wohnflaeche") or "wohnflaeche"
         if raw_schluessel not in SCHLUESSEL:
             raise NkError(f"Unbekannter Umlageschlüssel: {raw_schluessel}")
+
+        # ── Individuell: the landlord assigns an EXACT amount per tenant (e.g. sub-meter readings).
+        # No weighting, no Zeitanteil — the entered euro is final. Any part of the invoice NOT assigned
+        # stays with the landlord (common share). If the entries exceed the invoice (user error) they
+        # are scaled down proportionally so a tenant is never billed more than the cost, and a note is
+        # emitted. Invariant Σ per_tenant + leerstand == betrag is preserved either way.
+        if raw_schluessel == "individuell":
+            ind = _parse_individuell(getattr(pos, "individuell", None))
+            entered = {t.id: round(float(ind.get(t.id, ind.get(str(t.id), 0)) or 0), 2)
+                       for t in active}
+            entered = {tid: v for tid, v in entered.items() if v > 0}
+            summe_entered = round(sum(entered.values()), 2)
+            factor = 1.0
+            if summe_entered > betrag and summe_entered > 0:
+                factor = betrag / summe_entered
+                hinweise.append(
+                    f"Individuelle Beträge für '{kategorie_label(getattr(pos, 'kategorie', ''))}' "
+                    f"übersteigen den Rechnungsbetrag — anteilig auf {_eur(betrag)} gekürzt.")
+            assigned = 0.0
+            for tid, amt in entered.items():
+                share = round(amt * factor, 2)
+                if share <= 0:
+                    continue
+                assigned = round(assigned + share, 2)
+                per_tenant[tid]["summe"] = round(per_tenant[tid]["summe"] + share, 2)
+                per_tenant[tid]["positionen"].append({
+                    "kategorie": getattr(pos, "kategorie", ""),
+                    "label": kategorie_label(getattr(pos, "kategorie", "")),
+                    "anteil_betrag": share,
+                    "schluessel": "individuell",
+                    "anteil_text": "Individuell (fester Betrag)",
+                })
+            if not entered:
+                hinweise.append(
+                    f"'{kategorie_label(getattr(pos, 'kategorie', ''))}': Individuell gewählt, aber "
+                    f"keine Beträge erfasst — Position bleibt beim Vermieter.")
+            leerstand = round(leerstand + round(betrag - assigned, 2), 2)
+            continue
+
         # resolve the key actually used (personenzahl may fall back on missing data; so may verbrauch)
         schluessel, note = _effective_schluessel(raw_schluessel, active)
         if note and note not in seen_fallback:
@@ -394,7 +461,9 @@ def build_snapshot(abrechnung_meta, property_meta, units, tenancies, positionen,
                         "betrag": float(getattr(p, "betrag", 0) or 0),
                         "umlagefaehig": bool(getattr(p, "umlagefaehig", True)),
                         "umlage_pct": int(getattr(p, "umlage_pct", 100) or 100),
-                        "schluessel": getattr(p, "schluessel", "wohnflaeche")} for p in positionen],
+                        "schluessel": getattr(p, "schluessel", "wohnflaeche"),
+                        "individuell": _parse_individuell(getattr(p, "individuell", None)) or None}
+                       for p in positionen],
         "allocation": e["tenants"],          # per tenant: shares (allocation_ratios in anteil_text) + saldo
         "leerstand_share": e["leerstand"],
         "eigennutzung_share": e.get("eigennutzung", 0.0),

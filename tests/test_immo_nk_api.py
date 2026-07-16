@@ -125,7 +125,7 @@ def main():
     db2.close()
     import json
     snap = json.loads(snap_raw)
-    ok(snap["calculation_version"] == 2 and snap["umlagefaehige_summe"] == 1800.0, "snapshot frozen with version")
+    ok(snap["calculation_version"] == 3 and snap["umlagefaehige_summe"] == 1800.0, "snapshot frozen with version")
     ok(len(snap["tenants"]) == 3 and all("zeitanteil" in t for t in snap["tenants"]), "snapshot has each tenant's Zeitanteil")
 
     print("\n[7] THE RULE: a finalised statement refuses every write (409)")

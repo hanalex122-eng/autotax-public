@@ -75,13 +75,14 @@ class Pos:
     umlagefaehig: bool = True
     umlage_pct: int = 100
     schluessel: str = "wohnflaeche"
+    individuell: Optional[dict] = None
 
 
 UNITS = [Unit(1), Unit(2), Unit(3)]
 
 
-print("\n[0] CALCULATION_VERSION bumped (v1 fell back to Wohnfläche, v2 computes persons)")
-ok(NK.CALCULATION_VERSION == 2, f"version is 2 — {NK.CALCULATION_VERSION}")
+print("\n[0] CALCULATION_VERSION bumped (v2 computes persons, v3 computes Individuell)")
+ok(NK.CALCULATION_VERSION == 3, f"version is 3 — {NK.CALCULATION_VERSION}")
 ok("personenzahl" in NK._COMPUTED, "personenzahl is now a computed key")
 
 print("\n[1] Split by persons — the core case")
@@ -152,9 +153,9 @@ eq("Wohnfläche: B 500", sw[602], 500.0)
 ve = NK.verteile([Pos("hausmeister", 1000.0, schluessel="wohneinheiten")], [Unit(1), Unit(2)], tensR, VON, BIS)
 eq("Wohneinheiten still 1/2 each", ve["per_tenant"][601]["summe"], 500.0)
 
-print("\n[7] verbrauch/individuell STILL fall back to Wohnfläche with a note (not this sprint)")
+print("\n[7] Verbrauch STILL falls back to Wohnfläche with a note (deferred to Sprint 4 / HeizkostenV)")
 vv = NK.verteile([Pos("heizkosten", 400.0, schluessel="verbrauch")], [Unit(1), Unit(2)], tensR, VON, BIS)
-ok(any("Verbrauch" in h or "Individuell" in h for h in vv["hinweise"]),
+ok(any("Verbrauch" in h for h in vv["hinweise"]),
    f"verbrauch still announces its Wohnfläche fallback — {vv['hinweise']}")
 
 print("\n[8] Mixed statement — a person cost AND an area cost together, invariant across the whole")
@@ -196,13 +197,64 @@ ve0 = NK.verteile([Pos("wasser", 1267.0, schluessel="personenzahl")], [Unit(1), 
 r0 = {r["name"]: r["umlage"] for r in NK.ergebnis(ve0, eig_tens, VON, BIS)["tenants"]}
 ok(r0["VANELLE"] == round(1267/2, 2), f"WITHOUT Eigennutzung: tenants wrongly split 1/2 each ({r0['VANELLE']}) — the feature fixes this")
 
-print("\n[9] snapshot records the RAW schluessel (personenzahl), engine version 2")
+print("\n[9] snapshot records the RAW schluessel (personenzahl), engine version 3")
 snap = NK.build_snapshot({"id": 1, "jahr": 2026}, {"id": 10, "adresse": "x"}, [Unit(1), Unit(2)],
                          [Tenancy(901, 1, "A", VON, None, personenzahl=2), Tenancy(902, 2, "B", VON, None, personenzahl=2)],
                          [Pos("muell", 400.0, schluessel="personenzahl")], VON, BIS)
-ok(snap["calculation_version"] == 2, "snapshot stamped with version 2")
+ok(snap["calculation_version"] == 3, "snapshot stamped with version 3")
 ok(snap["cost_lines"][0]["schluessel"] == "personenzahl", "the chosen key is frozen in the snapshot")
 ok(all("personenzahl" in t for t in snap["tenants"]), "each tenant's personenzahl is frozen for re-production")
 
-print(f"\n=== PERSONENZAHL ENGINE: {PASS} passed, {FAIL} failed ===")
+# ── Individuell (Sprint 3): the landlord assigns an EXACT amount per tenant, no weighting/fallback ──
+IU = [Unit(1), Unit(2), Unit(3)]
+itens = [Tenancy(201, 1, "A", VON, None), Tenancy(202, 2, "B", VON, None), Tenancy(203, 3, "C", VON, None)]
+
+print("\n[10] Individuell — exact amounts, sum == invoice, no Wohnfläche fallback")
+vi = NK.verteile([Pos("strom", 1200.0, schluessel="individuell",
+                      individuell={201: 500, 202: 300, 203: 400})], IU, itens, VON, BIS)
+ri = {r["name"]: r["umlage"] for r in NK.ergebnis(vi, itens, VON, BIS)["tenants"]}
+eq("A pays exactly its entered amount", ri["A"], 500.0)
+eq("B pays exactly its entered amount", ri["B"], 300.0)
+eq("C pays exactly its entered amount", ri["C"], 400.0)
+eq("no landlord remainder when sum == invoice", vi["leerstand"], 0.0)
+eq("INVARIANT Σ tenants + leerstand == invoice", sum(ri.values()) + vi["leerstand"], 1200.0)
+ok(vi["per_tenant"][201]["positionen"][0]["anteil_text"] == "Individuell (fester Betrag)",
+   "the line is billed as Individuell, NOT a Wohnfläche fallback")
+ok(vi["per_tenant"][201]["positionen"][0]["schluessel"] == "individuell", "schluessel stays 'individuell'")
+
+print("\n[11] Individuell — unassigned rest stays with the landlord")
+vp = NK.verteile([Pos("strom", 1000.0, schluessel="individuell", individuell={201: 300})], IU, itens, VON, BIS)
+rp = {r["name"]: r["umlage"] for r in NK.ergebnis(vp, itens, VON, BIS)["tenants"]}
+eq("only the assigned tenant is billed", rp["A"], 300.0)
+eq("un-entered tenants pay 0", rp["B"], 0.0)
+eq("the rest is the landlord's (leerstand bucket)", vp["leerstand"], 700.0)
+eq("INVARIANT holds with a remainder", sum(rp.values()) + vp["leerstand"], 1000.0)
+
+print("\n[12] Individuell — over-assignment is scaled down (never bill more than the cost) + a note")
+vo = NK.verteile([Pos("strom", 1000.0, schluessel="individuell", individuell={201: 800, 202: 800})], IU, itens, VON, BIS)
+eo = NK.ergebnis(vo, itens, VON, BIS)
+ro = {r["name"]: r["umlage"] for r in eo["tenants"]}
+eq("entries scaled proportionally to the invoice", ro["A"], 500.0)
+eq("entries scaled proportionally to the invoice", ro["B"], 500.0)
+eq("INVARIANT holds after scaling", sum(ro.values()) + vo["leerstand"], 1000.0)
+ok(len(eo["hinweise"]) >= 1, "an over-assignment note is emitted")
+
+print("\n[13] Individuell — empty selection stays with the landlord + a note")
+vn = NK.verteile([Pos("strom", 500.0, schluessel="individuell", individuell=None)], IU, itens, VON, BIS)
+en = NK.ergebnis(vn, itens, VON, BIS)
+eq("nothing is billed to tenants", sum(r["umlage"] for r in en["tenants"]), 0.0)
+eq("the whole invoice is the landlord's", vn["leerstand"], 500.0)
+ok(len(en["hinweise"]) >= 1, "an empty-Individuell note is emitted")
+
+print("\n[14] Individuell — snapshot freezes the exact result and the entries (audit)")
+snap2 = NK.build_snapshot({"id": 2, "jahr": 2026}, {"id": 11, "adresse": "y"}, IU, itens,
+                          [Pos("strom", 1200.0, schluessel="individuell", individuell={201: 500, 202: 300, 203: 400})],
+                          VON, BIS)
+ok(snap2["calculation_version"] == 3, "individuell snapshot stamped v3")
+ok(snap2["cost_lines"][0]["schluessel"] == "individuell", "individuell key frozen")
+ok(snap2["cost_lines"][0]["individuell"] == {201: 500.0, 202: 300.0, 203: 400.0}, "per-tenant entries frozen for re-production")
+_alloc = {a["name"]: a["umlage"] for a in snap2["allocation"]}
+eq("frozen allocation matches the live result", _alloc["A"], 500.0)
+
+print(f"\n=== PERSONENZAHL + INDIVIDUELL ENGINE: {PASS} passed, {FAIL} failed ===")
 sys.exit(1 if FAIL else 0)
