@@ -55,9 +55,11 @@ HEIZKOSTENV_KATEGORIEN = ("heizkosten", "warmwasser")
 GRUND_PROZENT_DEFAULT = 30
 GRUND_PROZENT_MIN = 30
 GRUND_PROZENT_MAX = 50
-# a cost line's meter art defaults from its category when verbrauch_art is not set explicitly
+# A cost line's meter art (only for costs measured PER FLAT). Allgemeinstrom is deliberately NOT here:
+# common-area electricity is one building meter, split by Wohnfläche/Wohneinheiten — never by each flat's
+# private Stromzähler. So it keeps its area default and never auto-switches to Verbrauch.
 _ART_DEFAULT = {"heizkosten": "heizung", "warmwasser": "warmwasser", "wasser": "wasser",
-                "abwasser": "wasser", "allgemeinstrom": "strom"}
+                "abwasser": "wasser"}
 
 
 def clamp_grund(p) -> int:
@@ -106,6 +108,50 @@ def umlagefaehig_default(kategorie: str) -> bool:
 
 def default_schluessel(kategorie: str) -> str:
     return KATEGORIEN.get(kategorie, {}).get("schluessel", "wohnflaeche")
+
+
+# Which Umlageschlüssel each category MAY use (product rule: the UI offers only these; the server
+# rejects anything else). Order = display order, first = the preferred default. Heizkosten/Warmwasser
+# are locked to Verbrauch (= HeizkostenV, §7) so a landlord can't pick an invalid pure-Wohnfläche split.
+ALLOWED_SCHLUESSEL = {
+    "heizkosten":          ["verbrauch"],
+    "warmwasser":          ["verbrauch"],
+    "wasser":              ["verbrauch", "personenzahl", "wohnflaeche", "individuell"],
+    "abwasser":            ["verbrauch", "personenzahl", "wohnflaeche", "individuell"],
+    "muell":               ["personenzahl", "wohneinheiten"],
+    "grundsteuer":         ["wohnflaeche"],
+    "gebaeudeversicherung": ["wohnflaeche"],
+    "gartenpflege":        ["wohnflaeche"],
+    "winterdienst":        ["wohnflaeche"],
+    "allgemeinstrom":      ["wohnflaeche", "wohneinheiten"],
+    "hausmeister":         ["wohnflaeche", "wohneinheiten"],
+    "schornsteinfeger":    ["wohnflaeche", "wohneinheiten"],
+    "strassenreinigung":   ["wohnflaeche", "wohneinheiten"],
+    "sonstige":            ["wohnflaeche", "wohneinheiten", "personenzahl", "verbrauch", "individuell"],
+}
+
+
+def allowed_schluessel(kategorie: str) -> list:
+    """The Umlageschlüssel a category may use. Unknown categories → all keys (permissive fallback)."""
+    return ALLOWED_SCHLUESSEL.get(kategorie, list(SCHLUESSEL))
+
+
+def schluessel_erlaubt(kategorie: str, schluessel: str) -> bool:
+    return schluessel in allowed_schluessel(kategorie)
+
+
+def meter_art_of(kategorie: str) -> Optional[str]:
+    """The meter type a cost category is read from (None = not meter-capable)."""
+    return _ART_DEFAULT.get(kategorie)
+
+
+def default_schluessel_smart(kategorie: str, has_meter: bool) -> str:
+    """General SaaS default (data-driven, not building-specific): a meter-capable category defaults to
+    Verbrauch when the building actually has readings for its meter; otherwise to its legal area/person
+    default. Heating/hot water are Verbrauch by law regardless (their legal default already is)."""
+    if kategorie in _ART_DEFAULT and has_meter:
+        return "verbrauch"
+    return default_schluessel(kategorie)
 
 
 def kategorie_label(kategorie: str) -> str:

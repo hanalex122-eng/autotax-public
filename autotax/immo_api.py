@@ -2930,6 +2930,24 @@ def list_nk(property_id: Optional[int] = Query(None), user: dict = Depends(get_c
         db.close()
 
 
+@router.get("/nk-config")
+def nk_config(user: dict = Depends(get_current_user)):
+    """Per category: the allowed Umlageschlüssel (product rule — the UI offers only these), the default,
+    the HeizkostenV flag and the meter type. Lets the cost grid restrict the dropdown before a position
+    even exists. Static knowledge; no DB read."""
+    cats = {}
+    for kat in _nk.KATEGORIEN:
+        cats[kat] = {
+            "label": _nk.kategorie_label(kat),
+            "umlagefaehig": _nk.umlagefaehig_default(kat),
+            "allowed": _nk.allowed_schluessel(kat),
+            "default": _nk.default_schluessel(kat),
+            "heizkostenv": _nk.is_heizkostenv(kat),
+            "meter_art": _nk.meter_art_of(kat),
+        }
+    return {"kategorien": cats, "schluessel_label": _nk.SCHLUESSEL_LABEL}
+
+
 @router.get("/nk/{aid}")
 def get_nk(aid: int, user: dict = Depends(get_current_user)):
     uid = _uid(user)
@@ -2982,11 +3000,30 @@ def add_nk_position(aid: int, body: NkPositionIn, user: dict = Depends(get_curre
         a = _own_abrechnung(db, uid, aid)
         _nk_editable(a)
         kat = body.kategorie.strip()
-        # umlagefähig + Schlüssel default from the BetrKV knowledge unless the caller overrides
+        # umlagefähig + Schlüssel default from the BetrKV knowledge unless the caller overrides.
+        # General SaaS rule: a meter-capable category (water, heating, …) defaults to Verbrauch when the
+        # building HAS readings for its meter — otherwise its legal area/person default. Data-driven,
+        # identical for every customer; the landlord can still override.
         umlagefaehig = body.umlagefaehig if body.umlagefaehig is not None else _nk.umlagefaehig_default(kat)
-        schluessel = body.schluessel or _nk.default_schluessel(kat)
+        if body.schluessel:
+            schluessel = body.schluessel
+        else:
+            art = _nk.meter_art_of(kat)
+            has_meter = False
+            if art:
+                uids = [u.id for u in db.query(ImmoUnit).filter(
+                    ImmoUnit.property_id == a.property_id, ImmoUnit.user_id == uid, _notdel(ImmoUnit)).all()]
+                if uids:
+                    has_meter = db.query(ImmoZaehlerstand).filter(
+                        ImmoZaehlerstand.user_id == uid, ImmoZaehlerstand.unit_id.in_(uids),
+                        ImmoZaehlerstand.art == art, _notdel(ImmoZaehlerstand)).first() is not None
+            schluessel = _nk.default_schluessel_smart(kat, has_meter)
         if schluessel not in _nk.SCHLUESSEL:
             raise HTTPException(status_code=400, detail="Unbekannter Umlageschlüssel")
+        if not _nk.schluessel_erlaubt(kat, schluessel):   # product rule: category limits its keys
+            raise HTTPException(status_code=400,
+                                detail=f"'{_nk.SCHLUESSEL_LABEL.get(schluessel, schluessel)}' ist für "
+                                       f"'{_nk.kategorie_label(kat)}' nicht zulässig.")
         pct = 100 if body.umlage_pct is None else max(0, min(100, int(body.umlage_pct)))
         p = NkKostenposition(abrechnung_id=a.id, user_id=uid, kategorie=kat[:40],
                              betrag=round(float(body.betrag), 2), umlagefaehig=bool(umlagefaehig),
@@ -3024,6 +3061,10 @@ def update_nk_position(aid: int, pid: int, body: NkPositionPatch, user: dict = D
         if body.schluessel is not None:
             if body.schluessel not in _nk.SCHLUESSEL:
                 raise HTTPException(status_code=400, detail="Unbekannter Umlageschlüssel")
+            if not _nk.schluessel_erlaubt(p.kategorie, body.schluessel):
+                raise HTTPException(status_code=400,
+                                    detail=f"'{_nk.SCHLUESSEL_LABEL.get(body.schluessel, body.schluessel)}' "
+                                           f"ist für '{_nk.kategorie_label(p.kategorie)}' nicht zulässig.")
             p.schluessel = body.schluessel
         if body.verbrauch_art is not None:
             p.verbrauch_art = body.verbrauch_art or None

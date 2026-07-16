@@ -96,5 +96,32 @@ from autotax.models import ImmoZaehlerstand  # noqa: E402
 dbx = S(); cnt = dbx.query(ImmoZaehlerstand).filter(ImmoZaehlerstand.unit_id == 1, ImmoZaehlerstand.art == "heizung", ImmoZaehlerstand.datum == date(2026, 1, 1)).count(); dbx.close()
 ok(cnt == 1, f"no duplicate Anfang row after re-save — {cnt}")
 
+print("\n[6] GENERAL smart default — a water line defaults to Verbrauch ONLY if the building has water meters")
+aidb = cl.post("/immo/nk", json={"property_id": 10, "jahr": 2025}).json()["id"]
+# property 10 has heizung readings but NO wasser readings yet → wasser must default to Wohnfläche
+pw = cl.post(f"/immo/nk/{aidb}/position", json={"kategorie": "wasser", "betrag": 100}).json()
+w1 = [p for p in pw["positionen"] if p["kategorie"] == "wasser"][0]
+ok(w1["schluessel"] == "wohnflaeche", f"no water meter → Wohnfläche ({w1['schluessel']})")
+# add water meters, then a new water-based line defaults to Verbrauch — data-driven, not hardcoded
+cl.post("/immo/properties/10/zaehler-bulk", json={"jahr": 2025, "entries": [
+    {"unit_id": 1, "art": "wasser", "anfang": 0, "ende": 10},
+    {"unit_id": 2, "art": "wasser", "anfang": 0, "ende": 10}]})
+pw2 = cl.post(f"/immo/nk/{aidb}/position", json={"kategorie": "abwasser", "betrag": 100}).json()
+w2 = [p for p in pw2["positionen"] if p["kategorie"] == "abwasser"][0]
+ok(w2["schluessel"] == "verbrauch", f"water meter present → abwasser auto-Verbrauch ({w2['schluessel']})")
+
+print("\n[7] Allowed-Umlageschlüssel matrix — UI config + server rejects forbidden keys")
+cfg = cl.get("/immo/nk-config").json()
+ok(cfg["kategorien"]["heizkosten"]["allowed"] == ["verbrauch"], "Heizkosten locked to Verbrauch (HeizkostenV)")
+ok(cfg["kategorien"]["grundsteuer"]["allowed"] == ["wohnflaeche"], "Grundsteuer only Wohnfläche")
+ok(set(cfg["kategorien"]["wasser"]["allowed"]) == {"verbrauch", "personenzahl", "wohnflaeche", "individuell"}, "Wasser 4 keys")
+aidc = cl.post("/immo/nk", json={"property_id": 10, "jahr": 2024}).json()["id"]
+ok(cl.post(f"/immo/nk/{aidc}/position", json={"kategorie": "grundsteuer", "betrag": 100, "schluessel": "personenzahl"}).status_code == 400,
+   "Grundsteuer + Personenzahl → 400")
+ok(cl.post(f"/immo/nk/{aidc}/position", json={"kategorie": "heizkosten", "betrag": 100, "schluessel": "wohnflaeche"}).status_code == 400,
+   "Heizkosten + Wohnfläche → 400 (invalid heating clause blocked)")
+ok(cl.post(f"/immo/nk/{aidc}/position", json={"kategorie": "wasser", "betrag": 100, "schluessel": "personenzahl"}).status_code == 200,
+   "Wasser + Personenzahl → 200 (allowed)")
+
 print(f"\n================  {PASS} passed, {FAIL} failed  ================")
 sys.exit(1 if FAIL else 0)

@@ -308,6 +308,14 @@ NK-Vorauszahlung is finally tracked as owed.
 
 ## BACKLOG — parked, do NOT start before the active sprint closes
 
+### HeizkostenV Exceptions  (deferred 2026-07-16 — needs separate legal design)
+The ≤2-unit building where the owner occupies one flat may split heating/hot water FREELY (§2
+HeizkostenV) — i.e. Wohnfläche is allowed instead of the mandatory Grund/Verbrauch split. Deliberately
+NOT built now: Sprint 4's goal was the general, safe HeizkostenV engine; this is a legal special case.
+Standard scenarios must be flawless first. To be handled later under "HeizkostenV Exceptions" with its
+own design + legal review. Until then Heizkosten/Warmwasser are locked to Verbrauch (HeizkostenV) for
+everyone (safest default). See `.claude/nk_schluessel_matrix.md`.
+
 ### Historical Payment Backfill  (decided 2026-07-14: SKIPPED for Sprint 0)
 Fill `immo_rent.fuer_jahr` / `fuer_monat` on the 10 pre-Sprint-0 payment rows so that old
 payments are attributed to the rent month they settle.

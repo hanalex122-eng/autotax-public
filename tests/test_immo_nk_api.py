@@ -90,7 +90,7 @@ def main():
 
     print("\n[2] Add cost lines — BetrKV umlagefähig defaults apply automatically")
     cl.post(f"/immo/nk/{aid}/position", json={"kategorie": "grundsteuer", "betrag": 1200})
-    cl.post(f"/immo/nk/{aid}/position", json={"kategorie": "muell", "betrag": 600, "schluessel": "wohnflaeche"})
+    cl.post(f"/immo/nk/{aid}/position", json={"kategorie": "muell", "betrag": 600, "schluessel": "wohneinheiten"})
     r = cl.post(f"/immo/nk/{aid}/position", json={"kategorie": "reparatur", "betrag": 5000})   # NOT umlagefähig
     d = r.json()
     rep = [p for p in d["positionen"] if p["kategorie"] == "reparatur"][0]

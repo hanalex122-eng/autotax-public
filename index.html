@@ -3223,6 +3223,15 @@ function NkEditor({propertyId,showToast}){
   // sees WHAT "(Standard)" divides by, per line, before entering anything.
   const NK_DEF={heizkosten:"verbrauch",warmwasser:"verbrauch",wasser:"wohnflaeche",abwasser:"wohnflaeche",muell:"personenzahl",grundsteuer:"wohnflaeche",gebaeudeversicherung:"wohnflaeche",hausmeister:"wohnflaeche",allgemeinstrom:"wohnflaeche",gartenpflege:"wohnflaeche",schornsteinfeger:"wohnflaeche",winterdienst:"wohnflaeche",strassenreinigung:"wohnflaeche",sonstige:"wohnflaeche"};
   const schlLabel=(k)=>{const f=NK_SCHL.find(x=>x[0]===k);return f?f[1]:k;};
+  // per-category allowed Umlageschlüssel (product rule) — the dropdown offers ONLY these.
+  const [nkCfg,setNkCfg]=React.useState(null);
+  React.useEffect(()=>{api("/immo/nk-config").then(setNkCfg).catch(()=>setNkCfg(null));},[]);
+  const optLabel=(kat,v)=>{if((kat==="heizkosten"||kat==="warmwasser")&&v==="verbrauch")return _L("Verbrauch (HeizkostenV)","Verbrauch (HeizkostenV)","Consumption (HeizkostenV)");return (nkCfg&&nkCfg.schluessel_label&&nkCfg.schluessel_label[v])||schlLabel(v);};
+  const optsFor=(kat)=>{const c=nkCfg&&nkCfg.kategorien&&nkCfg.kategorien[kat];
+    const allow=c?c.allowed:["wohnflaeche","wohneinheiten","personenzahl","verbrauch","individuell"];
+    const list=allow.map(v=>[v,optLabel(kat,v)]);
+    if(allow.length>1){const def=c?c.default:allow[0];return [["",_L("Standard","Otomatik","Auto")+" → "+optLabel(kat,def)],...list];}
+    return list;};
   const [nkList,setNkList]=React.useState([]);
   const [nkOpen,setNkOpen]=React.useState(null);
   const [nkGrid,setNkGrid]=React.useState({});
@@ -3358,7 +3367,7 @@ function NkEditor({propertyId,showToast}){
               onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
               style={{width:"100%",padding:"8px 8px",background:theme.surfaceAlt,border:"1.5px solid "+(pos?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right",boxSizing:"border-box"}}/>}
           {/* col 3: ÷ how to split */}
-          {!locked?<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{width:"100%",padding:"6px 6px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer",boxSizing:"border-box"}}>{NK_SCHL.map(([v,l])=><option key={v} value={v}>{v===""?(_L("Standard","Otomatik","Auto")+" → "+schlLabel(NK_DEF[kat]||"wohnflaeche")):l}</option>)}</select>:<span/>}
+          {!locked?<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{width:"100%",padding:"6px 6px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer",boxSizing:"border-box"}}>{optsFor(kat).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>:<span/>}
           {/* col 4: = auto result (sum distributed to tenants) */}
           <span style={{textAlign:"right",fontSize:14,fontWeight:800,color:resultReady?theme.accent:theme.textDim}}>{resultReady?_e(lineTotal):(pos&&posBetrag>0?"⏳":"—")}</span>
           </div>
