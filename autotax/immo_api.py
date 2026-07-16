@@ -263,7 +263,22 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
             "monate_offen": sum(len(x["rueckstand_monate"]) for x in akt),
             "offen_gesamt": round(sum(x["offene_forderung"] or 0 for x in akt), 2),
         }
-        return {"mieter": out, "year": y, "summe": summe}
+        # Owner-occupied / rent-free occupants (Eigennutzung) — shown as their OWN cards so the
+        # landlord sees everyone living in the building. Derived from the unit (model B), NOT a
+        # tenancy: they never enter rent/debt/Mahnung. Read-only here; edited on the unit.
+        eigennutzer = []
+        for u in units.values():
+            ep = getattr(u, "eigennutzung_personen", None)
+            if ep is None or u.property_id not in props:
+                continue
+            p = props.get(u.property_id)
+            eigennutzer.append({
+                "unit_id": u.id, "unit_name": u.name,
+                "property_name": (p.name if p else None), "property_address": (p.adresse if p else None),
+                "wohnflaeche": u.wohnflaeche, "personenzahl": int(ep),
+            })
+        eigennutzer.sort(key=lambda x: (x["property_name"] or "", x["unit_name"] or ""))
+        return {"mieter": out, "eigennutzer": eigennutzer, "year": y, "summe": summe}
     finally:
         db.close()
 

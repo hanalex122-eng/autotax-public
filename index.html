@@ -2844,13 +2844,14 @@ function MieterView({onNav,showToast}){
   const _e=n=>"€"+(Number(n)||0).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
   const isMob=useIsMobile();
   const [rows,setRows]=React.useState([]);
+  const [eig,setEig]=React.useState([]);   // owner-occupied / rent-free occupants (Eigennutzung)
   const [loading,setLoading]=React.useState(true);
   const [filter,setFilter]=React.useState("alle");
   const _now=new Date(); const curY=_now.getFullYear(); const curM=_now.getMonth()+1;
   const [payFor,setPayFor]=React.useState(null);
   const [payDate,setPayDate]=React.useState(_now.toISOString().slice(0,10));
   const [payAmt,setPayAmt]=React.useState("");
-  const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setLoading(false);}).catch(()=>setLoading(false));};
+  const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setEig(d.eigennutzer||[]);setLoading(false);}).catch(()=>setLoading(false));};
   React.useEffect(()=>{load();},[]);
   // ── Tek-sayfa Erfassung: daire + adres + kiracı bir kerede ──
   const _erf0=()=>({daire:"",adresse:"",qm:"",name:"",von:new Date().toISOString().slice(0,10),kalt:"",nk:""});
@@ -3165,6 +3166,22 @@ function MieterView({onNav,showToast}){
         </div>}
       </div>);})}
     </div>
+    {/* Owner-occupied / rent-free occupants — visible as their own cards; never in rent/debt */}
+    {eig.length>0&&<div style={{marginTop:18}}>
+      <div style={{fontSize:12,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>🏠 {_L("Eigennutzung / kostenfrei bewohnt","Ev sahibi / bedava oturan","Owner-occupied / rent-free")}</div>
+      <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:12,alignItems:"start"}}>
+        {eig.map(u=>(<div key={"e"+u.unit_id} style={{...css.card,borderLeft:"3px solid "+theme.accent}}>
+          <div><span style={css.badge("rgba(16,185,129,0.15)",theme.accent)}>🏠 {_L("Eigennutzung","Kendi kullanımı","Self-use")}</span></div>
+          <div style={{fontSize:17,fontWeight:800,color:theme.text,marginTop:6}}>{_L("Vermieter / kostenfrei","Ev sahibi / bedava","Owner / rent-free")}</div>
+          <div style={{fontSize:13,color:theme.textMuted}}>{[u.property_name,u.unit_name,(u.wohnflaeche!=null?u.wohnflaeche+" m²":null)].filter(Boolean).join(" · ")}</div>
+          <div style={{display:"flex",gap:"4px 14px",flexWrap:"wrap",fontSize:13,marginTop:10,paddingTop:10,borderTop:"1px solid "+theme.border}}>
+            <span>👤 {u.personenzahl} {_L("Personen","kişi","persons")}</span>
+            <span style={{color:theme.textMuted}}>{_L("keine Miete","kira yok","no rent")}</span>
+          </div>
+          <div style={{marginTop:8,fontSize:12}}><span onClick={()=>onNav&&onNav("immobilien")} style={{color:theme.accent,cursor:"pointer"}}>✎ {_L("In „Meine Immobilien“ ändern","„Meine Immobilien“de düzenle","Edit in My properties")}</span></div>
+        </div>))}
+      </div>
+    </div>}
   </div>);
 }
 
