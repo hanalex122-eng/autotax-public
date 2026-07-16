@@ -3301,11 +3301,18 @@ function NkEditor({propertyId,showToast}){
       <span style={{fontSize:12,fontWeight:700,color:locked?theme.accent:"#f59e0b"}}>{locked?"🔒 "+_L("abgeschlossen","kapatıldı","final"):"✎ "+_L("Entwurf","Taslak","Draft")}</span>
     </div>
     {locked&&<div style={{background:"rgba(16,185,129,0.12)",border:"1px solid "+theme.accent,borderRadius:10,padding:"9px 12px",marginBottom:12,fontSize:13}}>🔒 {_L("Abgeschlossen — die Berechnung ist eingefroren und unveränderbar.","Kapatıldı — hesap donduruldu ve değiştirilemez.","Finalised — the calculation is frozen and immutable.")}</div>}
-    {/* who is in this statement — the tenants for the chosen period (+ Eigennutzung) */}
-    {(erg.tenants||[]).length>0&&<div style={{...css.card,marginBottom:12,padding:"10px 12px"}}>
-      <span style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em"}}>👥 {_L("Mieter in dieser Abrechnung","Bu hesaptaki kiracılar","Tenants in this statement")}</span>
-      <div style={{marginTop:4,fontSize:14,color:theme.text,fontWeight:700}}>{(erg.tenants||[]).map(t=>t.name).join("  ·  ")}
-        {persEigSum>0&&<span style={{color:theme.textMuted,fontWeight:400}}>  ·  🏠 {_L("Eigennutzung","Kendi kullanımın","Self-use")}</span>}</div>
+    {/* everyone living in the building — with move-in date and whether they count in THIS year */}
+    {(a.bewohner||[]).length>0&&<div style={{...css.card,marginBottom:12,padding:"10px 12px"}}>
+      <span style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em"}}>👥 {_L("Bewohner des Hauses","Binada oturanlar","Building occupants")}</span>
+      <div style={{marginTop:6,display:"flex",flexDirection:"column",gap:5}}>
+        {(a.bewohner||[]).map((b,i)=>(<div key={i} style={{fontSize:13,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",color:b.aktiv?theme.text:theme.textDim}}>
+          <b>{b.art==="eigennutzung"?"🏠":"👤"} {b.name}</b>
+          {b.personenzahl!=null&&<span style={{color:theme.textMuted}}>· {b.personenzahl} {_L("Pers.","kişi","pers.")}</span>}
+          {b.von&&<span style={{color:theme.textMuted}}>· {_L("ab","→","from")} {b.von}</span>}
+          {b.aktiv?<span style={{color:theme.accent,fontSize:11,fontWeight:700}}>✓ {a.jahr}</span>
+                 :<span style={{color:theme.danger,fontSize:11,fontWeight:700}}>✕ {_L("nicht in","burada değil:","not in")} {a.jahr}</span>}
+        </div>))}
+      </div>
     </div>}
     {/* wrong-year guard: no active tenant in the period (the common cause of "nothing splits") */}
     {!locked&&(erg.tenants||[]).length===0&&<div style={{background:"rgba(245,158,11,0.12)",border:"1.5px solid #f59e0b",borderRadius:10,padding:"11px 13px",marginBottom:12,fontSize:13,color:"#b45309"}}>

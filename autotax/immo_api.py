@@ -2759,6 +2759,21 @@ def _abr_dict(db, uid: int, a: NkAbrechnung, with_result: bool = True) -> dict:
             {"id": u.id, "name": u.name or ("Whg " + str(u.id)), "wohnflaeche": u.wohnflaeche,
              "eigennutzung_personen": getattr(u, "eigennutzung_personen", None)}
             for u in units if u.id not in ten_units]
+        # EVERYONE in the building (tenants active or not + Eigennutzung), with move-in dates and an
+        # "active in this period" flag — shown at the top so the landlord sees who lives here and why
+        # a wrong-year statement (e.g. 2025 when they moved in 2026) has nobody to split onto.
+        _uname = {u.id: (u.name or ("Whg " + str(u.id))) for u in units}
+        out["bewohner"] = [
+            {"name": t.mieter_name, "unit_name": _uname.get(t.unit_id, ""),
+             "von": str(t.von) if t.von else None, "bis": str(t.bis) if t.bis else None,
+             "personenzahl": getattr(t, "personenzahl", None),
+             "aktiv": _nk_period_active(t, von, bis), "art": "mieter"}
+            for t in tens
+        ] + [
+            {"name": (u.name or ("Whg " + str(u.id))), "unit_name": (u.name or ""),
+             "von": None, "bis": None, "personenzahl": getattr(u, "eigennutzung_personen", None),
+             "aktiv": True, "art": "eigennutzung"}
+            for u in units if getattr(u, "eigennutzung_personen", None) is not None]
     return out
 
 
