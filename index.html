@@ -3178,6 +3178,10 @@ function NkEditor({propertyId,showToast}){
   const _tk=()=>localStorage.getItem("atx_token");
   const NK_SCHL=[["","(Standard)"],["wohnflaeche","Wohnfläche (m²)"],["wohneinheiten","Wohneinheiten"],["personenzahl","Personenzahl"],["verbrauch","Verbrauch"],["individuell","Individuell"]];
   const NK_STD=[["heizkosten","Heizkosten"],["warmwasser","Warmwasser"],["wasser","Wasser (kalt)"],["abwasser","Abwasser"],["muell","Müllabfuhr"],["grundsteuer","Grundsteuer"],["gebaeudeversicherung","Gebäudeversicherung"],["hausmeister","Hausmeister"],["allgemeinstrom","Allgemeinstrom"],["gartenpflege","Gartenpflege"],["schornsteinfeger","Schornsteinfeger"],["winterdienst","Winterdienst"],["strassenreinigung","Straßenreinigung"],["sonstige","Sonstige"]];
+  // each category's legal default split method (mirrors the backend BetrKV meta) — shown so the user
+  // sees WHAT "(Standard)" divides by, per line, before entering anything.
+  const NK_DEF={heizkosten:"verbrauch",warmwasser:"verbrauch",wasser:"wohnflaeche",abwasser:"wohnflaeche",muell:"personenzahl",grundsteuer:"wohnflaeche",gebaeudeversicherung:"wohnflaeche",hausmeister:"wohnflaeche",allgemeinstrom:"wohnflaeche",gartenpflege:"wohnflaeche",schornsteinfeger:"wohnflaeche",winterdienst:"wohnflaeche",strassenreinigung:"wohnflaeche",sonstige:"wohnflaeche"};
+  const schlLabel=(k)=>{const f=NK_SCHL.find(x=>x[0]===k);return f?f[1]:k;};
   const [nkList,setNkList]=React.useState([]);
   const [nkOpen,setNkOpen]=React.useState(null);
   const [nkGrid,setNkGrid]=React.useState({});
@@ -3269,8 +3273,8 @@ function NkEditor({propertyId,showToast}){
         // per-row dynamic sub-form: Individuell → tenant table; Verbrauch → deferred note
         const indMap=(pos&&nkInd[pos.id]!==undefined)?nkInd[pos.id]:((pos&&pos.individuell)||{});
         const indSum=Object.keys(indMap).reduce((s,k)=>s+(parseFloat(indMap[k])||0),0);
-        // inline proof that the program divided THIS line: each tenant's computed share for this kat
-        const lineShares=pos?(erg.tenants||[]).map(t=>({name:t.name,b:(t.positionen||[]).filter(pp=>pp.kategorie===kat).reduce((s,pp)=>s+(Number(pp.anteil_betrag)||0),0)})).filter(x=>x.b>0):[];
+        // inline proof that the program divided THIS line: each tenant's BASIS (m²/persons) + computed €
+        const lineShares=pos?(erg.tenants||[]).map(t=>{const pps=(t.positionen||[]).filter(pp=>pp.kategorie===kat);const b=pps.reduce((s,pp)=>s+(Number(pp.anteil_betrag)||0),0);const basis=pps.length?String(pps[0].anteil_text||"").replace("-Zeitanteil","").replace("Personen","Pers.").replace("Einheiten","Einh."):"";return{name:t.name,b,basis};}).filter(x=>x.b>0):[];
         const lineMethod=pos?(pos.schluessel_label||pos.schluessel||""):"";
         const posBetrag=pos?Number(pos.betrag)||0:0;
         const showLineResult=!locked&&pos&&posBetrag>0&&sval!=="individuell"&&sval!=="verbrauch";
@@ -3278,7 +3282,7 @@ function NkEditor({propertyId,showToast}){
         return(<React.Fragment key={kat}>
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:hasSub?"none":"1px solid "+theme.border}}>
           <span style={{flex:"1 1 110px",minWidth:90,fontSize:14,color:theme.text,fontWeight:pos?700:400}}>{label}</span>
-          {!locked&&<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{flex:"0 1 132px",padding:"6px 8px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer"}}>{NK_SCHL.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>}
+          {!locked&&<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{flex:"0 1 150px",padding:"6px 8px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer"}}>{NK_SCHL.map(([v,l])=><option key={v} value={v}>{v===""?(_L("Standard","Otomatik","Auto")+" → "+schlLabel(NK_DEF[kat]||"wohnflaeche")):l}</option>)}</select>}
           {locked?<b style={{minWidth:80,textAlign:"right",color:theme.text}}>{pos?_e(pos.betrag):"—"}</b>
            :<input type="number" inputMode="decimal" placeholder={_L("Gesamt €","Toplam €","Total €")} value={bval}
               onChange={e=>setNkGrid(g=>({...g,[kat]:e.target.value}))} onBlur={()=>nkSaveRow(kat)}
@@ -3286,9 +3290,14 @@ function NkEditor({propertyId,showToast}){
               style={{flex:"0 1 100px",minWidth:80,padding:"8px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(pos?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>}
           </div>
           {/* inline result — proves the total was divided right on the line */}
-          {showLineResult&&<div style={{fontSize:12,padding:"1px 0 7px 2px",borderBottom:"1px solid "+theme.border}}>
+          {showLineResult&&<div style={{fontSize:12,padding:"2px 0 8px 2px",borderBottom:"1px solid "+theme.border}}>
             {(lineShares.length>0&&!(sval==="personenzahl"&&persTotal<=0))
-              ?<span style={{color:theme.textMuted}}>✓ {_e(posBetrag)} {_L("verteilt nach","şuna göre bölündü:","split by")} <b style={{color:theme.text}}>{lineMethod}</b> → {lineShares.map(x=>x.name+" "+_e(x.b)).join(" · ")}{(sval==="personenzahl"&&persTotal>0)?" ("+persTotal+" "+_L("Pers.","kişi","pers.")+")":""}</span>
+              ?<div>
+                 <div style={{color:theme.textMuted,marginBottom:2}}>✓ {_e(posBetrag)} {_L("verteilt nach","şuna göre bölündü:","split by")} <b style={{color:theme.text}}>{lineMethod}</b></div>
+                 {lineShares.map((x,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",paddingLeft:14,color:theme.textMuted}}>
+                   <span>{x.name}{x.basis?<span style={{color:theme.textDim}}> · {x.basis}</span>:""}</span>
+                   <b style={{color:theme.text}}>{_e(x.b)}</b></div>))}
+               </div>
               :<span style={{color:"#b45309"}}>⏳ {sval==="personenzahl"?_L("Personenzahl unten eintragen, dann wird verteilt","Aşağıya kişi sayısı gir, sonra bölünür","enter head counts below to split"):_L("noch nicht verteilbar (Fläche/Mieter fehlt)","henüz bölünemiyor (alan/kiracı eksik)","cannot split yet")}</span>}
           </div>}
           {/* Individuell: exact amount per tenant for THIS line */}
