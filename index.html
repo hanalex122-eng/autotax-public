@@ -3262,10 +3262,11 @@ function NkEditor({propertyId,showToast}){
       <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>{_L("Kostenpositionen","Gider kalemleri","Cost positions")}</div>
       <div style={{fontSize:12,color:theme.textMuted,marginBottom:8}}>{_L("Je Zeile: Gesamt­rechnung eintragen und wählen, WIE sie verteilt wird — das Programm rechnet.","Her satırda: toplam faturayı yaz ve NASIL bölüneceğini seç — hesabı program yapar.","Per line: enter the total invoice and choose HOW it splits — the program does the maths.")}</div>
       {/* column headers so the three boxes are unmistakable */}
-      <div style={{display:"flex",alignItems:"center",gap:8,padding:"0 0 5px",fontSize:10.5,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.03em"}}>
-        <span style={{flex:"1 1 110px",minWidth:90}}>{_L("Kostenart","Gider türü","Cost type")}</span>
-        {!locked&&<span style={{flex:"0 1 132px"}}>{_L("Wie verteilen?","Nasıl bölünür?","How to split?")}</span>}
-        <span style={{flex:"0 1 100px",textAlign:"right"}}>{_L("Rechnung €","Toplam fatura €","Invoice €")}</span>
+      <div style={{display:"flex",alignItems:"center",gap:6,padding:"0 0 5px",fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.02em"}}>
+        <span style={{flex:"1 1 70px",minWidth:60}}>{_L("Kostenart","Gider türü","Cost")}</span>
+        <span style={{flex:"0 1 88px",textAlign:"right"}}>{_L("Rechnung €","Fatura €","Invoice €")}</span>
+        {!locked&&<span style={{flex:"0 1 140px"}}>÷ {_L("Verteilung","Bölme yöntemi","Split")}</span>}
+        <span style={{flex:"0 1 88px",textAlign:"right",color:theme.accent}}>= {_L("Ergebnis","Sonuç","Result")}</span>
       </div>
       {NK_STD.map(([kat,label])=>{const pos=nkPosOf(kat);
         const bval=nkGrid[kat]!==undefined?nkGrid[kat]:(pos&&pos.betrag!=null?String(pos.betrag):"");
@@ -3277,17 +3278,23 @@ function NkEditor({propertyId,showToast}){
         const lineShares=pos?(erg.tenants||[]).map(t=>{const pps=(t.positionen||[]).filter(pp=>pp.kategorie===kat);const b=pps.reduce((s,pp)=>s+(Number(pp.anteil_betrag)||0),0);const basis=pps.length?String(pps[0].anteil_text||"").replace("-Zeitanteil","").replace("Personen","Pers.").replace("Einheiten","Einh."):"";return{name:t.name,b,basis};}).filter(x=>x.b>0):[];
         const lineMethod=pos?(pos.schluessel_label||pos.schluessel||""):"";
         const posBetrag=pos?Number(pos.betrag)||0:0;
+        const lineTotal=lineShares.reduce((s,x)=>s+x.b,0);                  // € that actually went to tenants
+        const resultReady=posBetrag>0&&lineShares.length>0&&!(sval==="personenzahl"&&persTotal<=0);
         const showLineResult=!locked&&pos&&posBetrag>0&&sval!=="individuell"&&sval!=="verbrauch";
         const hasSub=sval==="individuell"||sval==="verbrauch"||showLineResult;
         return(<React.Fragment key={kat}>
-          <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:hasSub?"none":"1px solid "+theme.border}}>
-          <span style={{flex:"1 1 110px",minWidth:90,fontSize:14,color:theme.text,fontWeight:pos?700:400}}>{label}</span>
-          {!locked&&<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{flex:"0 1 150px",padding:"6px 8px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer"}}>{NK_SCHL.map(([v,l])=><option key={v} value={v}>{v===""?(_L("Standard","Otomatik","Auto")+" → "+schlLabel(NK_DEF[kat]||"wohnflaeche")):l}</option>)}</select>}
-          {locked?<b style={{minWidth:80,textAlign:"right",color:theme.text}}>{pos?_e(pos.betrag):"—"}</b>
-           :<input type="number" inputMode="decimal" placeholder={_L("Gesamt €","Toplam €","Total €")} value={bval}
+          <div style={{display:"flex",alignItems:"center",gap:6,padding:"5px 0",borderBottom:hasSub?"none":"1px solid "+theme.border}}>
+          <span style={{flex:"1 1 70px",minWidth:60,fontSize:14,color:theme.text,fontWeight:pos?700:400}}>{label}</span>
+          {/* MIDDLE: enter the total invoice */}
+          {locked?<b style={{flex:"0 1 88px",textAlign:"right",color:theme.text}}>{pos?_e(pos.betrag):"—"}</b>
+           :<input type="number" inputMode="decimal" placeholder="€" value={bval}
               onChange={e=>setNkGrid(g=>({...g,[kat]:e.target.value}))} onBlur={()=>nkSaveRow(kat)}
               onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
-              style={{flex:"0 1 100px",minWidth:80,padding:"8px 10px",background:theme.surfaceAlt,border:"1.5px solid "+(pos?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>}
+              style={{flex:"0 1 88px",minWidth:70,padding:"8px 8px",background:theme.surfaceAlt,border:"1.5px solid "+(pos?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>}
+          {/* ÷ how to split */}
+          {!locked&&<select value={sval} onChange={e=>nkSaveSchl(kat,e.target.value)} style={{flex:"0 1 140px",padding:"6px 6px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:12,cursor:"pointer"}}>{NK_SCHL.map(([v,l])=><option key={v} value={v}>{v===""?(_L("Standard","Otomatik","Auto")+" → "+schlLabel(NK_DEF[kat]||"wohnflaeche")):l}</option>)}</select>}
+          {/* = auto result (sum distributed to tenants) */}
+          <span style={{flex:"0 1 88px",textAlign:"right",fontSize:14,fontWeight:800,color:resultReady?theme.accent:theme.textDim}}>{resultReady?_e(lineTotal):(pos&&posBetrag>0?"⏳":"—")}</span>
           </div>
           {/* inline result — proves the total was divided right on the line */}
           {showLineResult&&<div style={{fontSize:12,padding:"2px 0 8px 2px",borderBottom:"1px solid "+theme.border}}>
