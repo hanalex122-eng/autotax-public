@@ -332,6 +332,12 @@ NK-Vorauszahlung is finally tracked as owed.
 
 ## BACKLOG — parked, do NOT start before the active sprint closes
 
+### Allgemeinstrom single (building-level) meter field  (user feedback 2026-07-17 — parked)
+The landlord asked for an Allgemeinstrom meter field. It would NOT change the NK split (common
+electricity has no per-flat measurement → split by Wohnfläche/Wohneinheiten from the total invoice), so
+it's a tracking-only building-level reading. Parked to keep the current sprint single-goal; revisit if
+the tracking value is confirmed.
+
 ### Optional €/Einheit price on a Verbrauch line  (idea 2026-07-17 — NOT this sprint)
 Some landlords know only the unit price (e.g. 4 €/m³), not the total invoice. An optional "€/Einheit"
 field could compute total = consumption × price. Standard German NK splits the TOTAL by ratio (no price
