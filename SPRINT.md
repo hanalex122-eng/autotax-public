@@ -18,7 +18,24 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — Nebenkosten Verbrauch Wizard closed & production-verified 2026-07-17
+## NO ACTIVE SPRINT — Zählerstände-Zugang closed & production-verified 2026-07-17
+
+## ✅ SPRINT — Zählerstände-Zugang aus Nebenkosten — CLOSED (canlı `5b54654`, 2026-07-17)
+**Single goal (user feedback):** meter entry belongs where the landlord works (Nebenkosten), not as a
+property-Details tab. Done: removed the 🔢 Zählerstände tab from Immobilien → Objekt; an open Nebenkosten
+statement now has a **"🔢 Zählerstände eingeben / verwalten"** button → full-screen modal with the whole
+meter matrix for that property+year; closing refreshes the statement. The per-line State-B wizard stays
+for a single missing meter. index.html only — no backend/schema change. Suite 43/43, JSX OK.
+
+**Go/No-Go — production-verified from the live server (evidence, not just "PASS"):**
+- Commit SHA: HEAD == origin/main == `5b546548e86f516ea15d7ef17ef1b6ad124f9cf6`.
+- Health: **PASS** (status ok · db connected).
+- Button live: `/app` serves `onClick={()=>setNkZaehlerOpen(true)}>🔢 Zählerstände eingeben / verwalten`.
+- Tab gone: live TABS = Übersicht · Einheiten · Mieteingang · Ausgaben · Nebenkosten · Dokumente;
+  `tab==="zaehler"` = 0 occurrences. Proof artifact published.
+
+Backlog: Allgemeinstrom single-meter (tracking-only) · €/Einheit price. Nebenkosten stays
+feature-complete; changes only from critical bugs or user feedback; next sprint fully separate.
 
 ## ✅ SPRINT — Nebenkosten Verbrauch Wizard (in-place) — CLOSED (canlı `f57ad0a`, 2026-07-17)
 **Single goal:** the landlord bills consumption without leaving Nebenkosten. "My bill arrived" → enter
