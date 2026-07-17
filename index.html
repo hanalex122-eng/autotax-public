@@ -3815,6 +3815,14 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const [showBulkUnit,setShowBulkUnit]=React.useState(false);   // P1.1 — mehrere Wohnungen auf einmal
   const [bulk,setBulk]=React.useState({anzahl:"8",prefix:"Whg ",start:"1",qm:"",miete:""});
   const [bulkBusy,setBulkBusy]=React.useState(false);
+  // #13 Wohnung Akte (Phase 1, composition hub) — read-only single-flat view; embeds existing data, no
+  // new debt logic, no new tables. Instant parts come from loaded units/tncs; NK + meters are light reads.
+  const [akteU,setAkteU]=React.useState(null);   // unit whose Akte is open
+  const [akteNk,setAkteNk]=React.useState(null); // property NK statements
+  const [akteZ,setAkteZ]=React.useState(null);   // meter matrix (current year)
+  const openAkte=(u)=>{setAkteU(u);setAkteNk(null);setAkteZ(null);const cy=new Date().getFullYear();
+    api("/immo/nk?property_id="+sel.id).then(d=>setAkteNk(d.abrechnungen||[])).catch(()=>setAkteNk([]));
+    api("/immo/properties/"+sel.id+"/zaehler-matrix?jahr="+cy).then(setAkteZ).catch(()=>setAkteZ(false));};
   const [addTenFor,setAddTenFor]=React.useState(null);  // unit_id to add a tenancy
   const [wgbFor,setWgbFor]=React.useState(null);        // tenancy_id: Wohnungsgeberbestätigung Einzug/Auszug seçimi açık
   const [uFull,setUFull]=React.useState({});            // {unit_id: full unit incl. wohnflaeche}
@@ -4050,7 +4058,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       {units.map(u=>{const uf=uFull[u.unit_id]||{};return(<div key={u.unit_id} style={{...css.card,marginBottom:12}}>
         {editUnit===u.unit_id
           ? <ImmoUnitForm initial={{name:(uf.name!=null?uf.name:u.name),wohnflaeche:uf.wohnflaeche,soll_miete:(uf.soll_miete!=null?uf.soll_miete:u.soll_miete),eigennutzung_personen:uf.eigennutzung_personen}} onSave={b=>saveUnit(u.unit_id,b)} onCancel={()=>setEditUnit(null)}/>
-          : <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div style={{fontWeight:700,fontSize:15}}>🏠 {u.name} <span style={{fontSize:12,fontWeight:400,color:theme.textMuted}}>· {_L("Soll","Hedef","Target")} {_e(u.soll_miete)}/{_L("Mon.","ay","mo")}{uf.wohnflaeche!=null?" · "+uf.wohnflaeche+" m²":""} · {_L("Belegung","Doluluk","Occ")} {u.belegungsquote}%</span>{uf.eigennutzung_personen!=null&&<span style={{fontSize:11,fontWeight:700,color:theme.accent,marginLeft:6}}>🏠 {_L("Eigennutzung","Kendi kullanımı","Self-use")} · {uf.eigennutzung_personen} {_L("Pers.","kişi","pers.")}</span>}</div><div style={{display:"flex",gap:12}}><span style={{cursor:"pointer",color:theme.textMuted}} title={_L("Bearbeiten","Düzenle","Edit")} onClick={()=>{setEditUnit(u.unit_id);setEditTen(null);}}>✎</span><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("units",u.unit_id)}>✕</span></div></div>}
+          : <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div style={{fontWeight:700,fontSize:15}}>🏠 {u.name} <span style={{fontSize:12,fontWeight:400,color:theme.textMuted}}>· {_L("Soll","Hedef","Target")} {_e(u.soll_miete)}/{_L("Mon.","ay","mo")}{uf.wohnflaeche!=null?" · "+uf.wohnflaeche+" m²":""} · {_L("Belegung","Doluluk","Occ")} {u.belegungsquote}%</span>{uf.eigennutzung_personen!=null&&<span style={{fontSize:11,fontWeight:700,color:theme.accent,marginLeft:6}}>🏠 {_L("Eigennutzung","Kendi kullanımı","Self-use")} · {uf.eigennutzung_personen} {_L("Pers.","kişi","pers.")}</span>}</div><div style={{display:"flex",gap:12,alignItems:"center"}}><span style={{cursor:"pointer",color:theme.accent,fontWeight:700}} title={_L("Wohnung-Akte öffnen","Daire dosyasını aç","Open flat file")} onClick={()=>openAkte(u)}>📂 {_L("Akte","Dosya","File")}</span><span style={{cursor:"pointer",color:theme.textMuted}} title={_L("Bearbeiten","Düzenle","Edit")} onClick={()=>{setEditUnit(u.unit_id);setEditTen(null);}}>✎</span><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("units",u.unit_id)}>✕</span></div></div>}
         <div style={{marginTop:8}}>{tncs.filter(t=>t.unit_id===u.unit_id).map(t=>{const tf=tFull[t.tenancy_id]||{};return editTen===t.tenancy_id
           ? <ImmoTenancyForm key={t.tenancy_id} initial={{mieter_name:t.mieter_name,von:t.von,bis:t.bis,kaltmiete:t.kaltmiete,kaution:tf.kaution,nk_voraus:tf.nk_voraus}} onSave={b=>saveTen(t.tenancy_id,b)} onCancel={()=>setEditTen(null)}/>
           : <React.Fragment key={t.tenancy_id}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:13,padding:"6px 8px",background:theme.surfaceAlt,borderRadius:8,marginBottom:4,flexWrap:"wrap"}}><span>👤 <b>{t.mieter_name}</b> <span style={{color:theme.textMuted,fontSize:12}}>{t.von}→{t.bis||_L("läuft","devam","ongoing")} · {_e(t.kaltmiete)}{tf.nk_voraus!=null?" + NK "+_e(tf.nk_voraus):""}</span></span><span style={{display:"flex",gap:12}}><span style={{cursor:"pointer",color:theme.blue}} title={_L("Wohnungsgeberbestätigung","Konut sağlayıcı belgesi","Landlord confirmation")} onClick={()=>setWgbFor(wgbFor===t.tenancy_id?null:t.tenancy_id)}>📄</span><span style={{cursor:"pointer",color:theme.textMuted}} title={_L("Bearbeiten","Düzenle","Edit")} onClick={()=>{setEditTen(t.tenancy_id);setEditUnit(null);}}>✎</span><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("tenancies",t.tenancy_id)}>✕</span></span></div>
@@ -4088,6 +4096,48 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       {exps.map(x=><div key={x.id} style={{...css.card,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div><b style={{color:theme.danger}}>{_e(x.betrag)}</b> <span style={css.badge(theme.blueSoft,theme.blue)}>{katLbl(x.kategorie)}</span><div style={{fontSize:12,color:theme.textMuted}}>{x.datum} · {x.beschreibung}</div></div><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("expenses",x.id)}>✕</span></div>)}
     </div>)}
     {tab==="nebenkosten"&&<div><NkEditor propertyId={sel.id} showToast={showToast}/></div>}
+    {/* #13 Wohnung Akte — Phase 1: composition hub, read-only, embeds existing data (no new debt logic/tables) */}
+    {akteU&&(()=>{
+      const auf=uFull[akteU.unit_id]||{};
+      const uts=tncs.filter(t=>t.unit_id===akteU.unit_id);
+      const at=uts.filter(t=>!t.bis).sort((a,b)=>String(b.von||"").localeCompare(String(a.von||"")))[0]||uts.slice().sort((a,b)=>String(b.von||"").localeCompare(String(a.von||"")))[0]||null;
+      const atf=at?(tFull[at.tenancy_id]||{}):{};
+      const nkLatest=(akteNk&&akteNk.length)?akteNk.slice().sort((a,b)=>(b.jahr||0)-(a.jahr||0))[0]:null;
+      const zrow=(akteZ&&akteZ.units)?akteZ.units.find(x=>x.unit_id===akteU.unit_id):null;
+      const zarts=zrow?Object.keys(zrow.arts||{}).map(k=>({k,...(zrow.arts[k]||{})})).filter(x=>x.anfang!=null||x.ende!=null):[];
+      const _sec={...css.card,marginBottom:10,padding:"12px 14px"};
+      const _h={fontSize:13,fontWeight:800,marginBottom:6,color:theme.text};
+      const _lnk=(lbl,fn)=><button style={{...css.btnOutline,padding:"5px 11px",fontSize:12,borderColor:theme.accent,color:theme.accent}} onClick={fn}>{lbl} →</button>;
+      const goTab=(t)=>{setAkteU(null);setTab(t);};
+      return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,padding:"3vh 2vw",overflowY:"auto"}} onClick={e=>{if(e.target===e.currentTarget)setAkteU(null);}}>
+        <div style={{background:theme.surface,borderRadius:14,maxWidth:640,width:"100%",margin:"0 auto",padding:"16px 18px",boxShadow:"0 20px 60px rgba(0,0,0,0.4)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+            <div><div style={{fontSize:18,fontWeight:800}}>📂 {akteU.name}</div>
+              <div style={{fontSize:12,color:theme.textMuted}}>{sel.name}{sel.adresse?" · "+sel.adresse:""}</div></div>
+            <button style={{...css.btnOutline,padding:"7px 14px",fontSize:13,fontWeight:700}} onClick={()=>setAkteU(null)}>✕ {_L("Schließen","Kapat","Close")}</button>
+          </div>
+          {at&&<div style={{marginBottom:10,padding:"10px 14px",borderRadius:12,background:at.rueckstand>0?"rgba(239,68,68,0.08)":"rgba(16,185,129,0.08)",border:"1px solid "+(at.rueckstand>0?"rgba(239,68,68,0.3)":"rgba(16,185,129,0.3)")}}>
+            <span style={{fontSize:13}}>{at.rueckstand>0?<b style={{color:theme.danger}}>● {at.monate} {_L("Monate offen","ay açık","months open")} · {_L("Rückstand","Borç","Arrears")} {_e(at.rueckstand)}</b>:<b style={{color:theme.accent}}>✓ {_L("Keine Rückstände","Borç yok","No arrears")}</b>}</span></div>}
+          <div style={_sec}><div style={_h}>🏠 {_L("Stammdaten","Daire bilgisi","Flat data")}</div>
+            <div style={{fontSize:13,color:theme.textMuted}}>{_L("Soll-Miete","Hedef kira","Target rent")}: <b style={{color:theme.text}}>{_e(akteU.soll_miete)}</b>{auf.wohnflaeche!=null?<span> · {auf.wohnflaeche} m²</span>:""}{auf.eigennutzung_personen!=null?<span> · 🏠 {_L("Eigennutzung","Kendi kullanımı","Self-use")} {auf.eigennutzung_personen}</span>:""}</div></div>
+          <div style={_sec}><div style={_h}>👤 {_L("Aktueller Mieter","Mevcut kiracı","Current tenant")}</div>
+            {at?<div style={{fontSize:13}}><b>{at.mieter_name}</b> <span style={{color:theme.textMuted}}>· {at.von}→{at.bis||_L("läuft","devam","ongoing")} · {_e(at.kaltmiete)}{atf.nk_voraus!=null?" + NK "+_e(atf.nk_voraus):""}</span></div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Kein Mieter","Kiracı yok","No tenant")}</div>}</div>
+          {at&&<div style={_sec}><div style={_h}>💰 {_L("Mietkonto","Kira hesabı","Rent account")}</div>
+            <div style={{fontSize:13,color:theme.textMuted}}>Soll <b style={{color:theme.text}}>{_e(at.soll)}</b> · Ist <b style={{color:theme.accent}}>{_e(at.ist)}</b> · {_L("Rückstand","Borç","Arrears")} <b style={{color:at.rueckstand>0?theme.danger:theme.textMuted}}>{_e(at.rueckstand)}</b></div>
+            <div style={{marginTop:8}}>{_lnk(_L("Mietkonto & Mahnung","Kira hesabı & ihtar","Account & dunning"),()=>onNav&&onNav("mieter"))}</div></div>}
+          <div style={_sec}><div style={_h}>📑 {_L("Nebenkosten","Yan giderler","Utility costs")}</div>
+            <div style={{fontSize:13,color:theme.textMuted}}>{akteNk===null?_L("lädt…","yükleniyor…","loading…"):nkLatest?<span>{nkLatest.jahr}: <b style={{color:theme.text}}>{nkLatest.final?_L("Abgeschlossen","Kapatıldı","Finalised"):_L("Entwurf","Taslak","Draft")}</b></span>:_L("Noch keine Abrechnung","Henüz hesap yok","No statement yet")}</div>
+            <div style={{marginTop:8}}>{_lnk(_L("Zur Nebenkosten","Yan giderlere","To utilities"),()=>goTab("nebenkosten"))}</div></div>
+          <div style={_sec}><div style={_h}>⚡ {_L("Letzte Zählerstände","Son sayaç değerleri","Latest meters")}</div>
+            {akteZ===null?<div style={{fontSize:13,color:theme.textMuted}}>{_L("lädt…","yükleniyor…","loading…")}</div>:zarts.length?<div style={{fontSize:13,color:theme.textMuted}}>{zarts.map((z,i)=><div key={i}>{z.label||z.k}: <b style={{color:theme.text}}>{z.anfang==null?"—":z.anfang} → {z.ende==null?"—":z.ende}</b>{z.einheit?" "+z.einheit:""}</div>)}</div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Keine Zählerstände","Sayaç yok","No readings")}</div>}
+            <div style={{marginTop:8}}>{_lnk(_L("Zu Zählerständen","Sayaçlara","To meters"),()=>goTab("nebenkosten"))}</div></div>
+          <div style={_sec}><div style={_h}>📎 {_L("Belege","Belgeler","Documents")}</div>
+            <div style={{fontSize:13,color:theme.textMuted}}>{(docs||[]).length} {_L("Dokument(e) im Gebäude","binada belge","building document(s)")}</div>
+            <div style={{marginTop:8}}>{_lnk(_L("Zu Dokumenten","Belgelere","To documents"),()=>goTab("dokumente"))}</div></div>
+          <div style={{fontSize:11,color:theme.textDim,marginTop:6}}>ℹ️ {_L("Alle Werte aus den bestehenden Modulen — nur Ansicht.","Tüm değerler mevcut modüllerden — sadece görünüm.","All values from the existing modules — view only.")}</div>
+        </div>
+      </div>;
+    })()}
     {tab==="dokumente"&&<div>
       <div style={{...css.card,marginBottom:12}}><div style={{fontWeight:600,marginBottom:6}}>➕ {_L("Dokument hochladen","Belge yükle","Upload document")}</div>
         <label style={{..._btn("#6366f1"),display:"inline-block"}}>📎 {_L("Datei wählen","Dosya seç","Choose file")}<input type="file" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)upDoc(f,"other");e.target.value="";}}/></label></div>
