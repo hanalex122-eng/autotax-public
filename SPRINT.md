@@ -308,6 +308,11 @@ NK-Vorauszahlung is finally tracked as owed.
 
 ## BACKLOG — parked, do NOT start before the active sprint closes
 
+### Optional €/Einheit price on a Verbrauch line  (idea 2026-07-17 — NOT this sprint)
+Some landlords know only the unit price (e.g. 4 €/m³), not the total invoice. An optional "€/Einheit"
+field could compute total = consumption × price. Standard German NK splits the TOTAL by ratio (no price
+needed), which is what we ship. Park as a power-user extra; do not add to the daily flow.
+
 ### HeizkostenV Exceptions  (deferred 2026-07-16 — needs separate legal design)
 The ≤2-unit building where the owner occupies one flat may split heating/hot water FREELY (§2
 HeizkostenV) — i.e. Wohnfläche is allowed instead of the mandatory Grund/Verbrauch split. Deliberately

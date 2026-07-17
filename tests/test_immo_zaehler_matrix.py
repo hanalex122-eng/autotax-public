@@ -123,5 +123,18 @@ ok(cl.post(f"/immo/nk/{aidc}/position", json={"kategorie": "heizkosten", "betrag
 ok(cl.post(f"/immo/nk/{aidc}/position", json={"kategorie": "wasser", "betrag": 100, "schluessel": "personenzahl"}).status_code == 200,
    "Wasser + Personenzahl → 200 (allowed)")
 
+print("\n[8] Verbrauch wizard flow — no readings → fallback+note (State B); enter via bulk → recomputes (State A)")
+aidw = cl.post("/immo/nk", json={"property_id": 10, "jahr": 2027}).json()["id"]
+resw = cl.post(f"/immo/nk/{aidw}/position", json={"kategorie": "heizkosten", "betrag": 1000,
+               "schluessel": "verbrauch", "verbrauch_art": "heizung", "grund_prozent": 30}).json()
+ok(any("Verbrauch" in h for h in resw["ergebnis"]["hinweise"]), "no readings → fallback note (State B trigger)")
+cl.post("/immo/properties/10/zaehler-bulk", json={"jahr": 2027, "entries": [
+    {"unit_id": 1, "art": "heizung", "anfang": 0, "ende": 70},
+    {"unit_id": 2, "art": "heizung", "anfang": 0, "ende": 30}]})
+resw2 = cl.get(f"/immo/nk/{aidw}").json()
+shw = {t["name"]: t["umlage"] for t in resw2["ergebnis"]["tenants"]}
+eq("after entering meters in-place → A 640", shw.get("A"), 640.0)
+ok(not resw2["ergebnis"]["hinweise"], "no fallback note anymore (State A — auto-distributed)")
+
 print(f"\n================  {PASS} passed, {FAIL} failed  ================")
 sys.exit(1 if FAIL else 0)
