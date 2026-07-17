@@ -18,7 +18,31 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — Sprint 4 (Verbrauch/HeizkostenV) closed & production-verified 2026-07-16
+## NO ACTIVE SPRINT — Nebenkosten Verbrauch Wizard closed & production-verified 2026-07-17
+
+## ✅ SPRINT — Nebenkosten Verbrauch Wizard (in-place) — CLOSED (canlı `f57ad0a`, 2026-07-17)
+**Single goal:** the landlord bills consumption without leaving Nebenkosten. "My bill arrived" → enter
+the total → Verbrauch → if a meter is missing, an inline panel opens ON THE LINE (missing flats +
+"show all") → Anfang/Ende → "Speichern & verteilen" → recomputes in place. No menu trip. Supporting
+pieces: allowed-Umlageschlüssel matrix per category (server-validated, Heizkosten locked to
+HeizkostenV), data-driven smart default (metered → Verbrauch), Allgemeinstrom fixed to area, standalone
+🔢 Zählerstände tab kept as bulk/annual maintenance. Design: `.claude/nk_verbrauch_wizard_ux.md`,
+`.claude/nk_schluessel_matrix.md`.
+
+**Go/No-Go (production-verified with a throwaway test building, then HARD-deleted):**
+- Migration: **N/A** (no schema change — reuses ImmoZaehlerstand + existing columns).
+- Production Health: **PASS** (status ok · db connected).
+- Smoke: **PASS** (nk-config allowed-map · State B fallback note when no meters · forbidden key → 400 ·
+  enter meters in place → NK recomputes M1 640 / M2 360, no fallback).
+- Regression: **PASS** — 7 core tables byte-identical to the pre-deploy baseline; the only delta is one
+  owner-created NK draft (nk_abrechnung id 29, property 10) made in the browser during the deploy window
+  — real usage, not test residue (test data fully hard-deleted) and not deploy corruption.
+
+> **Bu sprint feature-complete olarak kapatılmıştır. Sonraki değişiklikler yalnızca kritik hata
+> düzeltmeleri veya kullanıcı geri bildirimleri sonucunda yapılacaktır.**
+
+Nebenkosten module is now feature-complete. No new features; new ideas → BACKLOG only. This sprint is
+not reopened (critical bugs excepted).
 
 ## ✅ SPRINT 4 — Verbrauch / Zählerstand engine + HeizkostenV (canlı `15ddc5b`, 2026-07-16)
 Metered costs split by ACTUAL consumption (Zählerstände); heating/hot-water obey HeizkostenV (§7):
