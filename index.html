@@ -2858,21 +2858,35 @@ function MieterView({onNav,showToast}){
   const saveEigCard=async(uid)=>{const b={wohnflaeche:eigF.wohnflaeche===""?null:parseFloat(eigF.wohnflaeche),eigennutzung_personen:eigF.personen===""?-1:parseInt(eigF.personen)};if(eigF.name.trim())b.name=eigF.name.trim();try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify(b)});setEigEdit(null);load();if(showToast)showToast(_L("Gespeichert ✓","Kaydedildi ✓","Saved ✓"),"success");}catch(e){alert(e.message);}};
   const delEigCard=async(uid)=>{if(!confirm(_L("Eigennutzung entfernen? Die Wohnung bleibt bestehen.","Ev sahibi (Eigennutzung) kaydı kaldırılsın mı? Daire silinmez.","Remove owner-occupancy? The unit stays.")))return;try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify({eigennutzung_personen:-1})});load();if(showToast)showToast(_L("Entfernt","Kaldırıldı","Removed"),"info");}catch(e){alert(e.message);}};
   React.useEffect(()=>{load();},[]);
-  // ── Tek-sayfa Erfassung: daire + adres + kiracı bir kerede ──
-  const _erf0=()=>({daire:"",adresse:"",qm:"",name:"",von:new Date().toISOString().slice(0,10),kalt:"",nk:""});
+  // ── Tek-sayfa Erfassung: kiracı → DOĞRU bina + DOĞRU daire (çok-daireli binada ayrı property yaratmaz) ──
+  const _erf0=()=>({gmode:"existing",property_id:"",adresse:"",umode:"new",unit_id:"",daire:"",qm:"",name:"",von:new Date().toISOString().slice(0,10),kalt:"",nk:""});
   const [showErf,setShowErf]=React.useState(false);
   const [erf,setErf]=React.useState(_erf0());
   const [erfBusy,setErfBusy]=React.useState(false);
+  const [erfProps,setErfProps]=React.useState([]);
+  const [erfUnits,setErfUnits]=React.useState([]);
   const erfGesamt=(parseFloat(erf.kalt)||0)+(parseFloat(erf.nk)||0);
+  const loadErfUnits=(pid)=>{if(!pid){setErfUnits([]);return;}api("/immo/properties/"+pid+"/units").then(d=>setErfUnits(d.units||[])).catch(()=>setErfUnits([]));};
+  const openErf=async()=>{let ps=erfProps;try{ps=(await api("/immo/properties")).properties||[];setErfProps(ps);}catch(e){}
+    const first=ps[0];setErf({..._erf0(),gmode:ps.length?"existing":"new",property_id:first?first.id:""});
+    if(first)loadErfUnits(first.id);setShowErf(true);};
+  const erfDup=(erf.gmode==="new"&&erf.adresse.trim())?erfProps.find(p=>((p.adresse||p.name||"").trim().toLowerCase())===erf.adresse.trim().toLowerCase()):null;
+  const useDupProp=()=>{setErf({...erf,gmode:"existing",property_id:erfDup.id,umode:"new",unit_id:""});loadErfUnits(erfDup.id);};
   const saveErf=async()=>{
-    if(!erf.adresse.trim()||!erf.name.trim()){alert(_L("Adresse und Mieter-Name sind nötig.","Adres ve kiracı adı gerekli.","Address and tenant name required."));return;}
-    const kalt=parseFloat(erf.kalt)||0;
-    setErfBusy(true);
+    if(!erf.name.trim()){alert(_L("Mieter-Name ist nötig.","Kiracı adı gerekli.","Tenant name required."));return;}
+    if(erf.gmode==="new"&&!erf.adresse.trim()){alert(_L("Adresse des Gebäudes eingeben.","Bina adresini gir.","Enter the building address."));return;}
+    if(erf.gmode==="existing"&&!erf.property_id){alert(_L("Gebäude wählen.","Bina seç.","Pick a building."));return;}
+    if(erf.gmode==="existing"&&erf.umode==="existing"&&!erf.unit_id){alert(_L("Wohnung wählen.","Daire seç.","Pick a flat."));return;}
+    const kalt=parseFloat(erf.kalt)||0;setErfBusy(true);
     try{
-      const p=await api("/immo/properties",{method:"POST",body:JSON.stringify({name:erf.adresse.trim(),adresse:erf.adresse.trim()})});
-      const u=await api("/immo/units",{method:"POST",body:JSON.stringify({property_id:p.id,name:erf.daire.trim()||"Wohnung",wohnflaeche:parseFloat(erf.qm)||null,soll_miete:kalt})});
-      await api("/immo/tenancies",{method:"POST",body:JSON.stringify({unit_id:u.id,mieter_name:erf.name.trim(),von:erf.von||null,kaltmiete:kalt,nk_voraus:parseFloat(erf.nk)||null})});
+      let pid=erf.property_id;
+      if(erf.gmode==="new"){const p=await api("/immo/properties",{method:"POST",body:JSON.stringify({name:erf.adresse.trim(),adresse:erf.adresse.trim()})});pid=p.id;}
+      let uid=erf.unit_id;
+      if(!(erf.gmode==="existing"&&erf.umode==="existing"&&uid)){
+        const u=await api("/immo/units",{method:"POST",body:JSON.stringify({property_id:pid,name:erf.daire.trim()||"Wohnung",wohnflaeche:parseFloat(erf.qm)||null,soll_miete:kalt})});uid=u.id;}
+      await api("/immo/tenancies",{method:"POST",body:JSON.stringify({unit_id:uid,mieter_name:erf.name.trim(),von:erf.von||null,kaltmiete:kalt,nk_voraus:parseFloat(erf.nk)||null})});
       setErf(_erf0());setShowErf(false);load();
+      try{setErfProps((await api("/immo/properties")).properties||[]);}catch(e){}
       if(showToast)showToast(_L("Mieter angelegt ✓","Kiracı eklendi ✓","Tenant added ✓"),"success");
     }catch(e){alert(e.message||"Fehler");}finally{setErfBusy(false);}
   };
@@ -3065,14 +3079,46 @@ function MieterView({onNav,showToast}){
         <div style={{fontSize:22,fontWeight:800,color:theme.text}}>👥 {_L("Mieter","Kiracılar","Tenants")}</div>
         <div style={{fontSize:13,color:theme.textMuted}}>{rows.length} {_L("Mieter","kiracı","tenants")} · {rows.filter(m=>m.debtor).length} {_L("im Rückstand","borçlu","in arrears")}</div>
       </div>
-      <button onClick={()=>setShowErf(!showErf)} style={{padding:"10px 16px",background:theme.accent,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}}>➕ {_L("Neuer Mieter","Yeni kiracı","New tenant")}</button>
+      <button onClick={()=>showErf?setShowErf(false):openErf()} style={{padding:"10px 16px",background:theme.accent,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}}>➕ {_L("Neuer Mieter","Yeni kiracı","New tenant")}</button>
     </div>
     {showErf&&<div style={{...css.card,marginBottom:14,maxWidth:560}}>
       <div style={{fontSize:16,fontWeight:800,marginBottom:2}}>➕ {_L("Neuer Mieter erfassen","Yeni kiracı kaydet","Add tenant")}</div>
       <div style={{fontSize:12,color:theme.textDim,marginBottom:14}}>{_L("Einmal eingeben, fertig. Keine monatliche Eingabe.","Bir kez gir, bitti. Aylık tekrar yok.","Enter once, done.")}</div>
-      {_efR(1,_L("Wohnung / Daire ID","Daire ID","Unit ID"),"daire",{placeholder:"WHG-01 · EG links"},_L("Ihr eigener Name für die Wohnung — z.B. „EG links“. Nur zur Wiedererkennung.","Daireye kendi verdiğiniz ad — ör. „Zemin sol“. Sadece tanımak için.","Your own label for the flat — e.g. „Ground floor left“. Just so you recognise it."))}
-      {_efR(2,_L("Immobilie · Adresse","Adres","Address"),"adresse",{placeholder:"Wiesenstr. 10, 66115 Saarbrücken"},_L("Adresse des Hauses. Erscheint später auf Mahnung und Wohnungsgeberbestätigung.","Binanın adresi. Sonradan ihtar ve WGB belgesinde görünür.","Address of the building. It appears later on the Mahnung and the WGB."))}
-      {_efR(3,_L("Wohnfläche (m²)","m²","m²"),"qm",{type:"number",placeholder:"57"},_L("Wird für die Nebenkosten-Verteilung gebraucht. Optional.","Yan gider dağıtımı için gerekir. Zorunlu değil.","Used to split the running costs. Optional."))}
+      {/* 1. Gebäude — bestehendes wählen (kein neues pro Mieter!) oder neu anlegen */}
+      <div style={{marginBottom:12}}>
+        <label style={_efl}><b style={{color:theme.textDim}}>1. </b>{_L("Gebäude","Bina","Building")}</label>
+        {erfProps.length>0&&<div style={{display:"flex",gap:6,marginBottom:6}}>
+          {[["existing",_L("Bestehendes Gebäude","Mevcut bina","Existing building")],["new","➕ "+_L("Neues Gebäude","Yeni bina","New building")]].map(([m,l])=>(
+            <button key={m} onClick={()=>{setErf({...erf,gmode:m,unit_id:"",umode:"new"});if(m==="existing"&&erf.property_id)loadErfUnits(erf.property_id);}} style={{flex:1,padding:"8px",borderRadius:8,fontSize:12.5,fontWeight:700,cursor:"pointer",border:"1.5px solid "+(erf.gmode===m?theme.accent:theme.border),background:erf.gmode===m?theme.accent:"transparent",color:erf.gmode===m?"#fff":theme.text}}>{l}</button>))}
+        </div>}
+        {(erf.gmode==="existing"&&erfProps.length>0)
+          ? <select style={{..._ef,cursor:"pointer"}} value={erf.property_id} onChange={e=>{const v=e.target.value;setErf({...erf,property_id:v,unit_id:"",umode:"new"});loadErfUnits(v);}}>
+              <option value="">{_L("— Gebäude wählen —","— bina seç —","— pick a building —")}</option>
+              {erfProps.map(p=><option key={p.id} value={p.id}>{p.name||p.adresse||("Haus "+p.id)}</option>)}</select>
+          : <div>
+              <input style={_ef} value={erf.adresse} onChange={e=>setErf({...erf,adresse:e.target.value})} placeholder="Wiesenstr. 10, 66115 Saarbrücken"/>
+              {erfDup&&<div style={{marginTop:6,background:"rgba(245,158,11,0.12)",border:"1px solid #f59e0b",borderRadius:8,padding:"8px 11px",fontSize:12.5,color:"#b45309",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span>⚠ {_L("Du hast bereits ein Gebäude an dieser Adresse.","Bu adreste zaten binan var.","You already have a building at this address.")}</span>
+                <button onClick={useDupProp} style={{...css.btnOutline,padding:"5px 10px",fontSize:12,borderColor:theme.accent,color:theme.accent}}>{_L("Dort hinzufügen","Oraya ekle","Add there")}</button></div>}
+            </div>}
+        <div style={_efh}>{_L("Mehrere Wohnungen? Dasselbe Gebäude wählen — nicht jedes Mal neu anlegen.","Birden çok daire mi? Aynı binayı seç — her seferinde yeni açma.","Several flats? Pick the same building — don't create a new one each time.")}</div>
+      </div>
+      {/* 2. Wohnung — neue Wohnung (Standard) oder bestehende (Mieterwechsel) */}
+      {(erf.gmode==="new"||erf.property_id)&&<div style={{marginBottom:12}}>
+        <label style={_efl}><b style={{color:theme.textDim}}>2. </b>{_L("Wohnung","Daire","Flat")}</label>
+        {erf.gmode==="existing"&&erf.property_id&&<div style={{display:"flex",gap:6,marginBottom:6}}>
+          {[["new","➕ "+_L("Neue Wohnung","Yeni daire","New flat")],["existing",_L("Bestehende Wohnung","Mevcut daire","Existing flat")]].map(([m,l])=>(
+            <button key={m} onClick={()=>setErf({...erf,umode:m,unit_id:""})} style={{flex:1,padding:"8px",borderRadius:8,fontSize:12.5,fontWeight:700,cursor:"pointer",border:"1.5px solid "+(erf.umode===m?theme.accent:theme.border),background:erf.umode===m?theme.accent:"transparent",color:erf.umode===m?"#fff":theme.text}}>{l}</button>))}
+        </div>}
+        {(erf.gmode==="existing"&&erf.umode==="existing")
+          ? <select style={{..._ef,cursor:"pointer"}} value={erf.unit_id} onChange={e=>setErf({...erf,unit_id:e.target.value})}>
+              <option value="">{_L("— Wohnung wählen —","— daire seç —","— pick a flat —")}</option>
+              {erfUnits.map(u=><option key={u.id} value={u.id}>{u.name||("Whg "+u.id)}{u.wohnflaeche?" · "+u.wohnflaeche+" m²":""}</option>)}</select>
+          : <div style={{display:"flex",gap:8}}>
+              <input style={{..._ef,flex:2}} value={erf.daire} onChange={e=>setErf({...erf,daire:e.target.value})} placeholder={_L("Name z.B. Whg 3 / EG links","ör. Whg 3 / Zemin sol","e.g. Flat 3 / GF left")}/>
+              <input style={{..._ef,flex:1}} type="number" value={erf.qm} onChange={e=>setErf({...erf,qm:e.target.value})} placeholder="m²"/>
+            </div>}
+      </div>}
       {_efR(4,_L("Mieter Name","Kiracı adı","Tenant name"),"name",{placeholder:"Ahmet Yılmaz"},_L("Vor- und Nachname wie im Mietvertrag.","Kira sözleşmesindeki ad ve soyad.","First and last name as in the rental contract."))}
       {_efR(null,_L("Einzug","Giriş tarihi","Move-in"),"von",{type:"date"},_L("Ab diesem Tag zählt die Miete. Mitte des Monats = anteilig.","Kira bu günden itibaren işler. Ay ortası = gün oranlı.","Rent counts from this day. Mid-month = pro-rata."))}
       <div style={{borderTop:"1px solid "+theme.border,margin:"6px 0 12px"}}></div>
