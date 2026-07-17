@@ -3457,6 +3457,21 @@ function NkEditor({propertyId,showToast}){
   const persEigSum=(nkOpen.eigennutzung_units||[]).reduce((s,u)=>s+(Number(u.eigennutzung_personen)||0),0);
   const persTotal=persTenantSum+persEigSum;
   const eigShareOf=(u)=>persTotal>0?Math.round(persInvoice*(Number(u.eigennutzung_personen)||0)/persTotal*100)/100:0;
+  // P1.5 — live head counts from local edits + batch save + Excel-keyboard focus (like ZaehlerMatrix)
+  const persLiveT=(t)=>{const v=nkPers[t.tenancy_id];return v!==undefined?(v===""?0:(parseInt(v)||0)):(Number(t.personenzahl)||0);};
+  const persLiveU=(u)=>{const v=nkEig[u.id];return v!==undefined?(v===""?0:(parseInt(v)||0)):(Number(u.eigennutzung_personen)||0);};
+  const persTotalLive=(erg.tenants||[]).reduce((s,t)=>s+persLiveT(t),0)+(nkOpen.eigennutzung_units||[]).reduce((s,u)=>s+persLiveU(u),0);
+  const persShareLive=(pc)=>persTotalLive>0?Math.round(persInvoice*pc/persTotalLive*100)/100:0;
+  const persDirty=Object.keys(nkPers).length+Object.keys(nkEig).length;
+  const persIds=[...(erg.tenants||[]).map(t=>"pz-t-"+t.tenancy_id),...(nkOpen.eigennutzung_units||[]).map(u=>"pz-u-"+u.id)];
+  const persFocus=(i)=>{const id=persIds[i];if(!id)return;const el=document.getElementById(id);if(el){el.focus();if(el.select)el.select();}};
+  const persKey=(e,i)=>{if(e.key==="Enter"||e.key==="ArrowDown"){e.preventDefault();persFocus(i+1);}else if(e.key==="ArrowUp"){e.preventDefault();persFocus(i-1);}};
+  const saveAllPers=async()=>{try{
+    for(const tid of Object.keys(nkPers)){const raw=nkPers[tid];await api("/immo/tenancies/"+tid,{method:"PATCH",body:JSON.stringify({personenzahl:raw===""?-1:parseInt(raw)})});}
+    for(const uid of Object.keys(nkEig)){const raw=nkEig[uid];await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify({eigennutzung_personen:raw===""?-1:parseInt(raw)})});}
+    setNkPers({});setNkEig({});setNkOpen(await api("/immo/nk/"+nkOpen.id));
+    if(showToast)showToast(_L("Gespeichert & verteilt","Kaydedildi & dağıtıldı","Saved & distributed")+" ✓","success");
+  }catch(e){alert(e.message);}};
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
       <button style={{...css.btnOutline,padding:"7px 12px",fontSize:13}} onClick={()=>{setNkOpen(null);loadNk(propertyId);}}>← {_L("Zurück","Geri","Back")}</button>
@@ -3613,30 +3628,32 @@ function NkEditor({propertyId,showToast}){
           <div style={{fontSize:17,fontWeight:800,color:theme.text}}>{_e(persInvoice)}</div></div>
         <div style={{flex:"1 1 140px",background:theme.surfaceAlt,borderRadius:10,padding:"8px 12px"}}>
           <div style={{fontSize:11,color:theme.textMuted}}>{_L("Personen gesamt (autom.)","Toplam kişi (otomatik)","Total persons (auto)")}</div>
-          <div style={{fontSize:17,fontWeight:800,color:persTotal>0?theme.accent:theme.danger}}>{persTotal} {_L("Pers.","kişi","pers.")}</div></div>
+          <div style={{fontSize:17,fontWeight:800,color:persTotalLive>0?theme.accent:theme.danger}}>{persTotalLive} {_L("Pers.","kişi","pers.")}</div></div>
       </div>
       <div style={{fontSize:12,color:theme.textMuted,marginBottom:6}}>{_L("Nur die Personenzahl eintragen — die Anteile rechnet das System.","Sadece kişi sayısını girin — payları sistem hesaplar.","Enter only the head count — the system computes the shares.")}</div>
-      {(erg.tenants||[]).map(t=>{const pv=nkPers[t.tenancy_id]!==undefined?nkPers[t.tenancy_id]:(t.personenzahl!=null?String(t.personenzahl):"");const share=persShareOf(t);const pc=Number(t.personenzahl)||0;return(
+      {(erg.tenants||[]).map((t,ti)=>{const pv=nkPers[t.tenancy_id]!==undefined?nkPers[t.tenancy_id]:(t.personenzahl!=null?String(t.personenzahl):"");const pc=persLiveT(t);const set=nkPers[t.tenancy_id]!==undefined||t.personenzahl!=null;return(
         <div key={t.tenancy_id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid "+theme.border}}>
           <span style={{flex:"1 1 90px",fontSize:14,color:theme.text}}>{t.name}</span>
-          <input type="number" min="0" inputMode="numeric" placeholder={_L("Pers.","Kişi","Pers.")} value={pv}
-            onChange={e=>setNkPers(p=>({...p,[t.tenancy_id]:e.target.value}))} onBlur={()=>nkSavePers(t.tenancy_id)}
-            onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
-            style={{width:76,padding:"7px 8px",background:theme.surfaceAlt,border:"1.5px solid "+(t.personenzahl!=null?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
+          <input id={"pz-t-"+t.tenancy_id} type="number" min="0" inputMode="numeric" placeholder={_L("Pers.","Kişi","Pers.")} value={pv}
+            onChange={e=>setNkPers(p=>({...p,[t.tenancy_id]:e.target.value}))} onKeyDown={e=>persKey(e,ti)}
+            style={{width:76,padding:"7px 8px",background:theme.surfaceAlt,border:"1.5px solid "+(set?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
           <span style={{flex:"0 0 130px",textAlign:"right",fontSize:13,color:theme.textMuted}}>
-            {persTotal>0&&pc>0?<span>{pc}/{persTotal} → <b style={{color:theme.text}}>{_e(share)}</b></span>:<span style={{color:theme.danger}}>{_L("Personen fehlt","Kişi eksik","persons missing")}</span>}</span>
+            {persTotalLive>0&&pc>0?<span>{pc}/{persTotalLive} → <b style={{color:theme.text}}>{_e(persShareLive(pc))}</b></span>:<span style={{color:theme.danger}}>{_L("Personen fehlt","Kişi eksik","persons missing")}</span>}</span>
         </div>);})}
       {/* owner-occupied / vacant units — enter the OWNER's persons (Eigennutzung); counts in the split */}
-      {(nkOpen.eigennutzung_units||[]).map(u=>{const pv=nkEig[u.id]!==undefined?nkEig[u.id]:(u.eigennutzung_personen!=null?String(u.eigennutzung_personen):"");const pc=Number(u.eigennutzung_personen)||0;const eshare=eigShareOf(u);return(
+      {(nkOpen.eigennutzung_units||[]).map((u,ui)=>{const pv=nkEig[u.id]!==undefined?nkEig[u.id]:(u.eigennutzung_personen!=null?String(u.eigennutzung_personen):"");const pc=persLiveU(u);const set=nkEig[u.id]!==undefined||u.eigennutzung_personen!=null;return(
         <div key={"u"+u.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderTop:"1px dashed "+theme.border}}>
           <span style={{flex:"1 1 90px",fontSize:14,color:theme.text}}>🏠 {u.name} <span style={{fontSize:11,color:theme.textMuted}}>· {_L("Eigennutzung","Kendi oturuyor","Self-use")}</span></span>
-          <input type="number" min="0" inputMode="numeric" placeholder={_L("Pers.","Kişi","Pers.")} value={pv}
-            onChange={e=>setNkEig(p=>({...p,[u.id]:e.target.value}))} onBlur={()=>nkSaveEig(u.id)}
-            onKeyDown={e=>{if(e.key==="Enter")e.target.blur();}}
-            style={{width:76,padding:"7px 8px",background:theme.surfaceAlt,border:"1.5px solid "+(u.eigennutzung_personen!=null?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
+          <input id={"pz-u-"+u.id} type="number" min="0" inputMode="numeric" placeholder={_L("Pers.","Kişi","Pers.")} value={pv}
+            onChange={e=>setNkEig(p=>({...p,[u.id]:e.target.value}))} onKeyDown={e=>persKey(e,(erg.tenants||[]).length+ui)}
+            style={{width:76,padding:"7px 8px",background:theme.surfaceAlt,border:"1.5px solid "+(set?theme.accent:theme.border),borderRadius:8,color:theme.text,fontSize:14,textAlign:"right"}}/>
           <span style={{flex:"0 0 130px",textAlign:"right",fontSize:13,color:theme.textMuted}}>
-            {persTotal>0&&pc>0?<span>{pc}/{persTotal} → <b style={{color:theme.text}}>{_e(eshare)}</b></span>:<span>—</span>}</span>
+            {persTotalLive>0&&pc>0?<span>{pc}/{persTotalLive} → <b style={{color:theme.text}}>{_e(persShareLive(pc))}</b></span>:<span>—</span>}</span>
         </div>);})}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginTop:12,flexWrap:"wrap"}}>
+        <button onClick={saveAllPers} disabled={persDirty===0} style={{padding:"9px 16px",background:persDirty>0?theme.accent:theme.surfaceAlt,color:persDirty>0?"#fff":theme.textDim,border:"none",borderRadius:9,fontSize:13,fontWeight:800,cursor:persDirty>0?"pointer":"default"}}>✓ {persDirty>0?(persDirty+" "+_L("Änderungen speichern & verteilen","değişikliği kaydet & dağıt","changes — save & distribute")):_L("Gespeichert","Kaydedildi","Saved")}</button>
+        {persDirty>0&&<span style={{fontSize:12,color:"#b45309"}}>⚠ {_L("ungespeicherte Änderungen","kaydedilmemiş değişiklik","unsaved changes")}</span>}
+      </div>
     </div>}
     <div style={{...css.card,marginBottom:12}}>
       <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>{_L("Ergebnis je Mieter","Kiracı başına sonuç","Result per tenant")}</div>
