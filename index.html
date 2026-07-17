@@ -3782,6 +3782,9 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const [editUnit,setEditUnit]=React.useState(null);    // unit_id under edit
   const [editTen,setEditTen]=React.useState(null);      // tenancy_id under edit
   const [showAddUnit,setShowAddUnit]=React.useState(false);
+  const [showBulkUnit,setShowBulkUnit]=React.useState(false);   // P1.1 — mehrere Wohnungen auf einmal
+  const [bulk,setBulk]=React.useState({anzahl:"8",prefix:"Whg ",start:"1",qm:"",miete:""});
+  const [bulkBusy,setBulkBusy]=React.useState(false);
   const [addTenFor,setAddTenFor]=React.useState(null);  // unit_id to add a tenancy
   const [wgbFor,setWgbFor]=React.useState(null);        // tenancy_id: Wohnungsgeberbestätigung Einzug/Auszug seçimi açık
   const [uFull,setUFull]=React.useState({});            // {unit_id: full unit incl. wohnflaeche}
@@ -3862,6 +3865,21 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const createProp=async(b)=>{try{await api("/immo/properties",{method:"POST",body:JSON.stringify(b)});setShowNewProp(false);loadProps();_toast(_L("Gespeichert","Kaydedildi","Saved"));}catch(e){alert(e.message);}};
   const saveProp=async(b)=>{try{await api("/immo/properties/"+sel.id,{method:"PATCH",body:JSON.stringify(b)});setSel({...sel,...b});setEditProp(false);loadProps();_toast(_L("Aktualisiert","Güncellendi","Updated"));}catch(e){alert(e.message);}};
   const createUnit=async(b)=>{try{await api("/immo/units",{method:"POST",body:JSON.stringify({...b,property_id:sel.id})});setShowAddUnit(false);refreshDetail(sel.id,year);_toast(_L("Gespeichert","Kaydedildi","Saved"));}catch(e){alert(e.message);}};
+  // P1.1 — create N units in one go (reuses POST /immo/units; no backend change). Honest partial-failure report.
+  const createUnitsBulk=async()=>{
+    const n=parseInt(bulk.anzahl)||0, start=parseInt(bulk.start)||1;
+    if(n<1){alert(_L("Anzahl eingeben.","Adet gir.","Enter a count."));return;}
+    if(n>100){alert(_L("Maximal 100 auf einmal.","Tek seferde en fazla 100.","Max 100 at once."));return;}
+    if(n>50&&!confirm(_L(n+" Wohnungen anlegen?",n+" daire oluşturulsun mu?","Create "+n+" flats?")))return;
+    const qm=bulk.qm===""?null:parseFloat(bulk.qm), miete=bulk.miete===""?null:parseFloat(bulk.miete), pre=bulk.prefix||"Whg ";
+    setBulkBusy(true); let done=0;
+    try{
+      for(let i=0;i<n;i++){await api("/immo/units",{method:"POST",body:JSON.stringify({property_id:sel.id,name:pre+(start+i),wohnflaeche:qm,soll_miete:miete})});done++;}
+      setShowBulkUnit(false);setBulk({anzahl:"8",prefix:"Whg ",start:"1",qm:"",miete:""});refreshDetail(sel.id,year);
+      _toast(done+" "+_L("Wohnungen angelegt","daire eklendi","flats created")+" ✓");
+    }catch(e){refreshDetail(sel.id,year);alert(_L(done+" von "+n+" angelegt, dann Fehler: ",done+"/"+n+" eklendi, sonra hata: ",done+" of "+n+" created, then error: ")+(e.message||""));}
+    finally{setBulkBusy(false);}
+  };
   const saveUnit=async(uid,b)=>{try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify(b)});setEditUnit(null);refreshDetail(sel.id,year);_toast(_L("Aktualisiert","Güncellendi","Updated"));}catch(e){alert(e.message);}};
   const createTen=async(unit_id,b)=>{try{await api("/immo/tenancies",{method:"POST",body:JSON.stringify({...b,unit_id})});setAddTenFor(null);refreshDetail(sel.id,year);_toast(_L("Gespeichert","Kaydedildi","Saved"));}catch(e){alert(e.message);}};
   const saveTen=async(tid,b)=>{try{await api("/immo/tenancies/"+tid,{method:"PATCH",body:JSON.stringify(b)});setEditTen(null);refreshDetail(sel.id,year);_toast(_L("Aktualisiert","Güncellendi","Updated"));}catch(e){alert(e.message);}};
@@ -3975,7 +3993,30 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
     {tab==="einheiten"&&<div>
       {showAddUnit
         ? <ImmoUnitForm onSave={createUnit} onCancel={()=>setShowAddUnit(false)}/>
-        : <button style={{...css.btn(theme.accent),marginBottom:12}} onClick={()=>setShowAddUnit(true)}>➕ {_L("Einheit anlegen","Daire ekle","Add unit")}</button>}
+        : showBulkUnit
+        ? (()=>{const n=parseInt(bulk.anzahl)||0,s=parseInt(bulk.start)||1,pre=bulk.prefix||"Whg ";
+            const names=n>0?(n<=4?Array.from({length:n},(_,i)=>pre+(s+i)):[pre+s,pre+(s+1),"…",pre+(s+n-1)]):[];
+            const _bl={display:"block",fontSize:11,color:theme.textMuted,fontWeight:600,marginBottom:4};
+            const _bi={padding:"9px 10px",background:theme.surfaceAlt,border:"1.5px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"};
+            return <div style={{...css.card,marginBottom:12}}>
+              <div style={{fontWeight:700,marginBottom:10}}>➕➕ {_L("Mehrere Wohnungen anlegen","Toplu daire ekle","Add several flats")}</div>
+              <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+                <div><label style={_bl}>{_L("Anzahl","Adet","Count")}</label><input style={{..._bi,width:70}} type="number" min="1" max="100" value={bulk.anzahl} onChange={e=>setBulk({...bulk,anzahl:e.target.value})}/></div>
+                <div><label style={_bl}>{_L("Namensschema","İsim öneki","Name prefix")}</label><input style={{..._bi,width:90}} value={bulk.prefix} onChange={e=>setBulk({...bulk,prefix:e.target.value})}/></div>
+                <div><label style={_bl}>{_L("ab Nr.","başl. no","from no.")}</label><input style={{..._bi,width:64}} type="number" value={bulk.start} onChange={e=>setBulk({...bulk,start:e.target.value})}/></div>
+                <div><label style={_bl}>{_L("m² (optional)","m² (ops.)","m² (opt.)")}</label><input style={{..._bi,width:84}} type="number" value={bulk.qm} onChange={e=>setBulk({...bulk,qm:e.target.value})}/></div>
+                <div><label style={_bl}>{_L("Soll-Miete € (opt.)","Kira € (ops.)","Rent € (opt.)")}</label><input style={{..._bi,width:100}} type="number" value={bulk.miete} onChange={e=>setBulk({...bulk,miete:e.target.value})}/></div>
+              </div>
+              <div style={{fontSize:12,color:theme.textMuted,marginTop:8}}>{n>0?"→ "+names.join(", ")+"  ("+n+" "+_L("Wohnungen","daire","flats")+")":_L("Anzahl eingeben.","Adet gir.","Enter a count.")}</div>
+              <div style={{display:"flex",gap:8,marginTop:12}}>
+                <button style={css.btn(theme.accent)} disabled={bulkBusy} onClick={createUnitsBulk}>{bulkBusy?"…":(n+" "+_L("Wohnungen anlegen","daire ekle","flats — create"))}</button>
+                <button style={css.btnOutline} onClick={()=>setShowBulkUnit(false)}>{_L("Abbrechen","İptal","Cancel")}</button>
+              </div>
+            </div>;})()
+        : <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+            <button style={css.btn(theme.accent)} onClick={()=>setShowAddUnit(true)}>➕ {_L("Einheit anlegen","Daire ekle","Add unit")}</button>
+            <button style={css.btnOutline} onClick={()=>setShowBulkUnit(true)}>➕➕ {_L("Mehrere anlegen","Toplu ekle","Add several")}</button>
+          </div>}
       {units.map(u=>{const uf=uFull[u.unit_id]||{};return(<div key={u.unit_id} style={{...css.card,marginBottom:12}}>
         {editUnit===u.unit_id
           ? <ImmoUnitForm initial={{name:(uf.name!=null?uf.name:u.name),wohnflaeche:uf.wohnflaeche,soll_miete:(uf.soll_miete!=null?uf.soll_miete:u.soll_miete),eigennutzung_personen:uf.eigennutzung_personen}} onSave={b=>saveUnit(u.unit_id,b)} onCancel={()=>setEditUnit(null)}/>
