@@ -3552,6 +3552,11 @@ function NkEditor({propertyId,showToast}){
           </div>}
           {/* Verbrauch: split by Zählerstände. Heizung/Warmwasser → HeizkostenV Grund/Verbrauch. */}
           {!locked&&sval==="verbrauch"&&<div style={{padding:"8px 10px 10px 10px",marginBottom:6,background:theme.surfaceAlt,borderRadius:10,border:"1px solid "+theme.border,borderTop:"none"}}>
+            {/* P1.4 — erklärt: die Rechnung oben ist die GESAMT-Rechnung, kein Preis pro Einheit */}
+            <div style={{fontSize:12,color:theme.textMuted,lineHeight:1.5,marginBottom:8,padding:"7px 9px",background:theme.surface,borderRadius:8,border:"1px solid "+theme.border}}>
+              ⓘ {_L("Oben die GESAMT-Rechnung eintragen (die ganze Jahresrechnung, z. B. 1.200 € Wasser). AutoTax verteilt sie nach dem Verbrauch je Wohnung (Ende − Anfang) — einen Preis pro Einheit gibst du NICHT ein.","Yukarıya TOPLAM faturayı gir (tüm yıllık fatura, ör. 1.200 € su). AutoTax daireye göre tüketimle (Bitiş − Başlangıç) böler — birim fiyatını GİRMEZSİN.","Enter the WHOLE invoice above (the full yearly bill, e.g. €1,200 water). AutoTax splits it by each flat’s consumption (End − Start) — you do NOT enter a price per unit.")}
+              <div style={{marginTop:4,color:theme.textDim}}>{_L("Beispiel: 1.200 € ÷ 200 m³ Gesamtverbrauch → eine Wohnung mit 40 m³ zahlt 240 €.","Örnek: 1.200 € ÷ 200 m³ toplam tüketim → 40 m³ kullanan daire 240 € öder.","Example: €1,200 ÷ 200 m³ total → a flat using 40 m³ pays €240.")}</div>
+            </div>
             {NK_HEIZ.indexOf(kat)>=0?<div>
               <div style={{fontSize:11,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>🔥 {_L("HeizkostenV — Aufteilung","HeizkostenV — bölüşüm","HeizkostenV split")}</div>
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
