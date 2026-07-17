@@ -3284,15 +3284,31 @@ function NkEditor({propertyId,showToast}){
   const [nkSchl,setNkSchl]=React.useState({});
   const loadNk=(pid)=>api("/immo/nk?property_id="+pid).then(d=>setNkList(d.abrechnungen||[])).catch(()=>setNkList([]));
   React.useEffect(()=>{setNkOpen(null);if(propertyId)loadNk(propertyId);},[propertyId]);
-  const openNk=async(aid)=>{try{setNkGrid({});setNkSchl({});setNkOpen(await api("/immo/nk/"+aid));}catch(e){alert(e.message);}};
+  // P1.3 — grid shows only added cost types (+ picker) instead of all 14 rows. nkShown = extra categories
+  // the landlord added but hasn't priced yet; a fresh statement seeds the 6 common ones. nkRemindOff
+  // dismisses the "typical, not yet added" hint.
+  const [nkShown,setNkShown]=React.useState([]);
+  const [nkRemindOff,setNkRemindOff]=React.useState(false);
+  const openNk=async(aid)=>{try{setNkGrid({});setNkSchl({});setNkRemindOff(false);const d=await api("/immo/nk/"+aid);setNkOpen(d);setNkShown((d.positionen||[]).length?[]:NK_DEFAULT6.slice());}catch(e){alert(e.message);}};
   // one-click create for a specific year (used by the wrong-year banner + the year picker)
-  const createNkYear=async(jahr)=>{try{const a=await api("/immo/nk",{method:"POST",body:JSON.stringify({property_id:propertyId,jahr:jahr})});setNkGrid({});setNkSchl({});setNkOpen(a);loadNk(propertyId);}catch(e){alert(e.message);}};
+  const createNkYear=async(jahr)=>{try{const a=await api("/immo/nk",{method:"POST",body:JSON.stringify({property_id:propertyId,jahr:jahr})});setNkGrid({});setNkSchl({});setNkRemindOff(false);setNkShown(NK_DEFAULT6.slice());setNkOpen(a);loadNk(propertyId);}catch(e){alert(e.message);}};
   // P0 — guided year picker (replaces the bare prompt): shows which years had tenants + existing drafts,
   // so the landlord never lands on an empty wrong-year statement.
   const [nkNewOpen,setNkNewOpen]=React.useState(false);
   const [nkJahre,setNkJahre]=React.useState(null);
   const [nkManual,setNkManual]=React.useState("");
   const openNewPicker=()=>{setNkNewOpen(true);setNkManual("");setNkJahre(null);api("/immo/properties/"+propertyId+"/nk-jahre").then(d=>setNkJahre(d.jahre||[])).catch(()=>setNkJahre([]));};
+  // P1.3 — cost-type visibility. A fresh statement seeds these 6 common BetrKV costs; the rest live in
+  // the "hinzufügen" picker. "Häufig" group keeps the common ones one obvious click away.
+  const NK_DEFAULT6=["heizkosten","wasser","muell","grundsteuer","gebaeudeversicherung","allgemeinstrom"];
+  const NK_HAEUFIG=["heizkosten","warmwasser","wasser","muell","grundsteuer","gebaeudeversicherung","allgemeinstrom"];
+  const nkLabelOf=(k)=>{const e=NK_STD.find(x=>x[0]===k);return e?e[1]:k;};
+  const nkIsShown=(kat)=>!!nkPosOf(kat)||nkShown.indexOf(kat)>=0;
+  const nkAddCat=(kat)=>{if(kat)setNkShown(s=>s.indexOf(kat)>=0?s:[...s,kat]);};
+  const nkRemoveCat=async(kat)=>{const ex=nkPosOf(kat);
+    if(ex){if(!confirm(_L("Kostenart „"+nkLabelOf(kat)+"“ entfernen?","„"+nkLabelOf(kat)+"“ gider türü kaldırılsın mı?","Remove cost type „"+nkLabelOf(kat)+"“?")))return;
+      try{setNkOpen(await api("/immo/nk/"+nkOpen.id+"/position/"+ex.id,{method:"DELETE"}));}catch(e){alert(e.message);return;}}
+    setNkShown(s=>s.filter(k=>k!==kat));setNkGrid(g=>{const n={...g};delete n[kat];return n;});};
   const pickYear=async(jahr,entwurfId,mieterAktiv)=>{
     if(entwurfId){setNkNewOpen(false);openNk(entwurfId);return;}
     if(mieterAktiv===0&&!confirm(_L("In "+jahr+" wohnt kein Mieter im Haus. Trotzdem eine Abrechnung anlegen?","Bu binada "+jahr+" yılında kiracı yok. Yine de hesap açılsın mı?","No tenant lived in the building in "+jahr+". Create a statement anyway?")))return;
@@ -3475,7 +3491,7 @@ function NkEditor({propertyId,showToast}){
         <span>{!locked?"÷ "+_L("Verteilung","Bölme yöntemi","Split"):""}</span>
         <span style={{textAlign:"right",color:theme.accent}}>= {_L("Ergebnis","Sonuç","Result")}</span>
       </div>
-      {NK_STD.map(([kat,label])=>{const pos=nkPosOf(kat);
+      {NK_STD.filter(([kat])=>nkIsShown(kat)).map(([kat,label])=>{const pos=nkPosOf(kat);
         const bval=nkGrid[kat]!==undefined?nkGrid[kat]:(pos&&pos.betrag!=null?String(pos.betrag):"");
         const sval=nkSchl[kat]!==undefined?nkSchl[kat]:(pos?pos.schluessel:"");
         // per-row dynamic sub-form: Individuell → tenant table; Verbrauch → deferred note
@@ -3491,7 +3507,7 @@ function NkEditor({propertyId,showToast}){
         const hasSub=sval==="individuell"||sval==="verbrauch"||showLineResult;
         return(<React.Fragment key={kat}>
           <div style={{display:"grid",gridTemplateColumns:"minmax(72px,1fr) 84px 150px 78px",alignItems:"center",gap:8,padding:"5px 0",borderBottom:hasSub?"none":"1px solid "+theme.border}}>
-          <span style={{fontSize:14,color:theme.text,fontWeight:pos?700:400}}>{label}</span>
+          <span style={{fontSize:14,color:theme.text,fontWeight:pos?700:400,display:"flex",alignItems:"center",gap:5}}>{label}{!locked&&<button onClick={()=>nkRemoveCat(kat)} title={_L("Entfernen","Kaldır","Remove")} style={{border:"none",background:"none",color:theme.textDim,cursor:"pointer",fontSize:12,lineHeight:1,padding:"2px 3px"}}>✕</button>}</span>
           {/* col 2: enter the total invoice */}
           {locked?<b style={{textAlign:"right",color:theme.text}}>{pos?_e(pos.betrag):"—"}</b>
            :<input type="number" inputMode="decimal" placeholder="€" value={bval}
@@ -3550,6 +3566,22 @@ function NkEditor({propertyId,showToast}){
             <div style={{marginTop:NK_HEIZ.indexOf(kat)>=0?10:0}}>{renderMeterState(kat)}</div>
           </div>}
         </React.Fragment>);})}
+      {!locked&&<div style={{marginTop:10}}>
+        {NK_STD.filter(([kat])=>!nkIsShown(kat)).length>0&&<div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          <select value="" onChange={e=>{nkAddCat(e.target.value);e.target.value="";}}
+            style={{padding:"8px 10px",background:theme.surfaceAlt,border:"1.5px solid "+theme.accent,borderRadius:8,color:theme.text,fontSize:13,fontWeight:600,cursor:"pointer",maxWidth:"100%"}}>
+            <option value="">➕ {_L("Kostenart hinzufügen","Gider türü ekle","Add cost type")}</option>
+            {NK_HAEUFIG.filter(k=>!nkIsShown(k)).length>0&&<optgroup label={_L("Häufig","Yaygın","Common")}>{NK_HAEUFIG.filter(k=>!nkIsShown(k)).map(k=><option key={k} value={k}>{nkLabelOf(k)}</option>)}</optgroup>}
+            {NK_STD.filter(([k])=>NK_HAEUFIG.indexOf(k)<0&&!nkIsShown(k)).length>0&&<optgroup label={_L("Weitere","Diğer","More")}>{NK_STD.filter(([k])=>NK_HAEUFIG.indexOf(k)<0&&!nkIsShown(k)).map(([k,l])=><option key={k} value={k}>{l}</option>)}</optgroup>}
+          </select>
+        </div>}
+        {(()=>{const miss=NK_DEFAULT6.filter(k=>!nkIsShown(k));return(!nkRemindOff&&miss.length>0)?
+          <div style={{marginTop:6,fontSize:12,color:theme.textDim,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span>{_L("Typisch, noch nicht erfasst","Tipik ama henüz eklenmedi","Typical, not yet added")}: {miss.map(k=>nkLabelOf(k)).join(" · ")}</span>
+            <button onClick={()=>setNkRemindOff(true)} style={{border:"none",background:"none",color:theme.textDim,cursor:"pointer",fontSize:13,padding:0}}>✕</button>
+          </div>:null;})()}
+        <div style={{marginTop:6,fontSize:11.5,color:theme.textDim}}>ⓘ {_L("Nur die Kosten eintragen, die es wirklich gibt — was nicht in der Liste steht, wird mit 0 gerechnet.","Sadece gerçekten olan giderleri ekle — listede olmayan 0 sayılır.","Only add the costs that actually exist — anything not listed counts as 0.")}</div>
+      </div>}
       <div style={{marginTop:12,fontSize:14,fontWeight:700,display:"flex",justifyContent:"space-between"}}><span>{_L("Summe umlagefähig","Toplam dağıtılabilir","Umlagefähig total")}</span><b style={{color:theme.accent}}>{_e(erg.umlagefaehige_summe)}</b></div>
     </div>
     {/* Personenzahl ALLOCATION panel — opens when a position is split by Personenzahl. The landlord
