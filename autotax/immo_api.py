@@ -2948,6 +2948,40 @@ def nk_config(user: dict = Depends(get_current_user)):
     return {"kategorien": cats, "schluessel_label": _nk.SCHLUESSEL_LABEL}
 
 
+@router.get("/properties/{pid}/nk-jahre")
+def nk_jahre(pid: int, user: dict = Depends(get_current_user)):
+    """Year picker data (P0): for the last 3 years + this year, how many tenants were active and whether
+    a draft already exists — so the landlord picks the RIGHT year and never lands on an empty wrong-year
+    statement. Read-only; newest year first."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        _own_property(db, uid, pid)
+        units = db.query(ImmoUnit).filter(ImmoUnit.property_id == pid, ImmoUnit.user_id == uid,
+                                          _notdel(ImmoUnit)).all()
+        uids = [u.id for u in units]
+        tens = (db.query(ImmoTenancy).filter(ImmoTenancy.user_id == uid, ImmoTenancy.unit_id.in_(uids),
+                                             _notdel(ImmoTenancy)).all()) if uids else []
+        drafts = (db.query(NkAbrechnung).filter(NkAbrechnung.property_id == pid, NkAbrechnung.user_id == uid,
+                                                _notdel(NkAbrechnung)).all())
+
+        def _active_year(t, von, bis):
+            tv = t.von or von
+            tb = t.bis or bis
+            return tv <= bis and tb >= von
+
+        cur = date.today().year
+        out = []
+        for jahr in range(cur, cur - 4, -1):        # this year down to 3 years back, newest first
+            von, bis = date(jahr, 1, 1), date(jahr, 12, 31)
+            aktiv = sum(1 for t in tens if _active_year(t, von, bis))
+            draft = next((a for a in drafts if a.jahr == jahr and not _nk.is_final(a.status)), None)
+            out.append({"jahr": jahr, "mieter_aktiv": aktiv, "entwurf_id": (draft.id if draft else None)})
+        return {"jahre": out}
+    finally:
+        db.close()
+
+
 @router.get("/nk/{aid}")
 def get_nk(aid: int, user: dict = Depends(get_current_user)):
     uid = _uid(user)

@@ -136,5 +136,25 @@ shw = {t["name"]: t["umlage"] for t in resw2["ergebnis"]["tenants"]}
 eq("after entering meters in-place → A 640", shw.get("A"), 640.0)
 ok(not resw2["ergebnis"]["hinweise"], "no fallback note anymore (State A — auto-distributed)")
 
+print("\n[9] Year picker data (P0) — mieter_aktiv per year + existing draft, so no empty wrong-year statement")
+db2 = S()
+db2.add(ImmoProperty(id=20, user_id=1, name="P2", adresse="x"))
+db2.add(ImmoUnit(id=50, property_id=20, user_id=1, name="W", wohnflaeche=50))
+db2.add(ImmoTenancy(id=500, unit_id=50, user_id=1, mieter_name="X",
+                    von=date(2025, 1, 1), bis=date(2026, 6, 30), kaltmiete=400, nk_voraus=70))
+db2.commit(); db2.close()
+jr = cl.get("/immo/properties/20/nk-jahre").json()["jahre"]
+by = {x["jahr"]: x for x in jr}
+ok(jr[0]["jahr"] == 2027 and jr[-1]["jahr"] == 2024, "years newest-first, this year + 3 back")
+ok(by[2027]["mieter_aktiv"] == 0, "2027 → no tenant (moved out 2026-06)")
+ok(by[2026]["mieter_aktiv"] == 1, "2026 → tenant active")
+ok(by[2025]["mieter_aktiv"] == 1, "2025 → tenant active")
+ok(by[2024]["mieter_aktiv"] == 0, "2024 → no tenant (moved in 2025)")
+ok(all(x["entwurf_id"] is None for x in jr), "no drafts yet → all entwurf_id null")
+aidj = cl.post("/immo/nk", json={"property_id": 20, "jahr": 2026}).json()["id"]
+by2 = {x["jahr"]: x for x in cl.get("/immo/properties/20/nk-jahre").json()["jahre"]}
+ok(by2[2026]["entwurf_id"] == aidj, "after creating a 2026 draft → it shows as 'continue editing'")
+ok(by2[2025]["entwurf_id"] is None, "other years still have no draft")
+
 print(f"\n================  {PASS} passed, {FAIL} failed  ================")
 sys.exit(1 if FAIL else 0)
