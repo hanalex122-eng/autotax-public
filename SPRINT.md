@@ -18,7 +18,28 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — Zählerstände-Zugang closed & production-verified 2026-07-17
+## NO ACTIVE SPRINT — P0 Abrechnungsjahr-Auswahl closed & production-verified 2026-07-17
+
+## ✅ SPRINT — P0 Guided year picker (no empty wrong-year statement) — CLOSED (canlı `0955961`, 2026-07-17)
+**Single goal (the one approved P0 from the QA sprint):** the bare `prompt()` for the settlement year let
+a landlord open an empty statement for a year with no tenants → "the app is broken". Replaced with an
+in-app year picker: the most recent year WITH tenants is "★ empfohlen"; a year with an existing draft
+shows "✎ Bearbeitung fortsetzen" and opens it (no silent duplicate); a no-tenant year is dimmed
+"⚠ kein Mieter" and, if clicked, warns "trotzdem anlegen?" (not blocked — owner's choice); manual year
+kept. Backend `GET /immo/properties/{pid}/nk-jahre` (mieter_aktiv per year + entwurf_id). No schema
+change. P1/P2 untouched. Design: `.claude/nk_jahr_picker_ux.md`. Tests: +8. Suite 43/43.
+
+**Go/No-Go — production-verified (5 evidences, not just "PASS"):**
+1. Commit: HEAD == origin/main == `0955961c534ced6d7d956eb6bad3da1c12f8f591`.
+2. Health: **PASS** (status ok · db connected).
+3. No browser prompt() in the year flow: live `/app` button = `onClick={openNewPicker}` (1×),
+   `onClick={newNk}` = 0× (removed). Remaining prompt() lives only in dead ImmobilienView inline-NK.
+4. Picker in prod HTML: `/immo/properties/{pid}/nk-jahre` fetch + "★ empfohlen" / "kein Mieter" markers.
+5. nk-jahre smoke on prod (throwaway building, tenant active 2024-08…2025-12): returned 2026=0, 2025=1,
+   2024=1, no drafts — correct; then HARD-deleted, all tables SHA256 == baseline.
+
+Nebenkosten stays feature-complete. Changes only from critical bugs or user feedback; next sprint fully
+separate; this sprint not reopened.
 
 ## ✅ SPRINT — Zählerstände-Zugang aus Nebenkosten — CLOSED (canlı `5b54654`, 2026-07-17)
 **Single goal (user feedback):** meter entry belongs where the landlord works (Nebenkosten), not as a
