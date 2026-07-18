@@ -3824,8 +3824,13 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const [akteMkOpen,setAkteMkOpen]=React.useState(false);
   const [akteMk,setAkteMk]=React.useState(null); // /tenancies/{tid}/mietkonto
   const [akteMh,setAkteMh]=React.useState(null); // /tenancies/{tid}/mahnungen
+  // Sprint 7 (Faz 3) — NK-Anteil + Zählerstände Akkordeons (read-only, bestehende Endpunkte, lazy). Keine Berechnung.
+  const [akteNkO,setAkteNkO]=React.useState(false);
+  const [akteNkD,setAkteNkD]=React.useState(null); // /immo/nk/{id} Detail (ergebnis)
+  const [akteZO,setAkteZO]=React.useState(false);
   const akteActiveTen=(uid)=>{const u=tncs.filter(t=>t.unit_id===uid);return u.filter(t=>!t.bis).sort((a,b)=>String(b.von||"").localeCompare(String(a.von||"")))[0]||u.slice().sort((a,b)=>String(b.von||"").localeCompare(String(a.von||"")))[0]||null;};
-  const openAkte=(u)=>{setAkteU(u);setAkteNk(null);setAkteZ(null);setAkteMkOpen(false);setAkteMk(null);setAkteMh(null);const cy=new Date().getFullYear();
+  const toggleAkteNk=(aid)=>{if(akteNkO){setAkteNkO(false);return;}setAkteNkO(true);if(aid&&akteNkD===null)api("/immo/nk/"+aid).then(setAkteNkD).catch(()=>setAkteNkD(false));};
+  const openAkte=(u)=>{setAkteU(u);setAkteNk(null);setAkteZ(null);setAkteMkOpen(false);setAkteMk(null);setAkteMh(null);setAkteNkO(false);setAkteNkD(null);setAkteZO(false);const cy=new Date().getFullYear();
     api("/immo/nk?property_id="+sel.id).then(d=>setAkteNk(d.abrechnungen||[])).catch(()=>setAkteNk([]));
     api("/immo/properties/"+sel.id+"/zaehler-matrix?jahr="+cy).then(setAkteZ).catch(()=>setAkteZ(false));
     const at=akteActiveTen(u.unit_id); // Status-Summary braucht Mietkonto+Mahnung sofort → eager (bestehende Endpunkte, read-only)
@@ -4114,6 +4119,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       const nkLatest=(akteNk&&akteNk.length)?akteNk.slice().sort((a,b)=>(b.jahr||0)-(a.jahr||0))[0]:null;
       const zrow=(akteZ&&akteZ.units)?akteZ.units.find(x=>x.unit_id===akteU.unit_id):null;
       const zarts=zrow?Object.keys(zrow.arts||{}).map(k=>({k,...(zrow.arts[k]||{})})).filter(x=>x.anfang!=null||x.ende!=null):[];
+      const nkTen=(akteNkD&&akteNkD.ergebnis&&at)?(akteNkD.ergebnis.tenants||[]).find(t=>t.tenancy_id===at.tenancy_id):null; // bu dairenin NK-payı (ergebnis alanı, hesaplama yok)
       // Mietkonto/Mahnung türetilmiş değerler — Status-Summary + Accordion PAYLAŞIR (duplicate yok). Hesaplama yok: mevcut API alanları.
       const rows=(akteMk&&akteMk.rows)?akteMk.rows:[];
       const paidR=rows.filter(r=>r.status==="paid"||r.status==="partial");
@@ -4181,12 +4187,36 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
                 </div>}
               </div>}
             </div>}
-          <div style={_sec}><div style={_h}>📑 {_L("Nebenkosten","Yan giderler","Utility costs")}</div>
-            <div style={{fontSize:13,color:theme.textMuted}}>{akteNk===null?_L("lädt…","yükleniyor…","loading…"):nkLatest?<span>{nkLatest.jahr}: <b style={{color:theme.text}}>{nkLatest.final?_L("Abgeschlossen","Kapatıldı","Finalised"):_L("Entwurf","Taslak","Draft")}</b></span>:_L("Noch keine Abrechnung","Henüz hesap yok","No statement yet")}</div>
-            <div style={{marginTop:8}}>{_lnk(_L("Zur Nebenkosten","Yan giderlere","To utilities"),()=>goTab("nebenkosten"))}</div></div>
-          <div style={_sec}><div style={_h}>⚡ {_L("Letzte Zählerstände","Son sayaç değerleri","Latest meters")}</div>
-            {akteZ===null?<div style={{fontSize:13,color:theme.textMuted}}>{_L("lädt…","yükleniyor…","loading…")}</div>:zarts.length?<div style={{fontSize:13,color:theme.textMuted}}>{zarts.map((z,i)=><div key={i}>{z.label||z.k}: <b style={{color:theme.text}}>{z.anfang==null?"—":z.anfang} → {z.ende==null?"—":z.ende}</b>{z.einheit?" "+z.einheit:""}</div>)}</div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Keine Zählerstände","Sayaç yok","No readings")}</div>}
-            <div style={{marginTop:8}}>{_lnk(_L("Zu Zählerständen","Sayaçlara","To meters"),()=>goTab("nebenkosten"))}</div></div>
+          <div style={_sec}>
+            <div onClick={()=>toggleAkteNk(nkLatest&&nkLatest.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
+              <div style={{..._h,marginBottom:0}}>📑 {_L("Nebenkosten","Yan giderler","Utility costs")}</div>
+              <span style={{fontSize:13,color:theme.textMuted}}>{akteNk===null?"…":nkLatest?nkLatest.jahr+" "+(nkLatest.final?_L("Abgeschlossen","Kapatıldı","Finalised"):_L("Entwurf","Taslak","Draft")):_L("keine","yok","none")} <span style={{color:theme.textDim}}>{akteNkO?"▾":"▸"}</span></span>
+            </div>
+            {akteNkO&&<div style={{marginTop:10,fontSize:13,color:theme.textMuted}}>
+              {!nkLatest?<div>{_L("Noch keine Abrechnung","Henüz hesap yok","No statement yet")}</div>
+               :akteNkD===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>
+               :!at?<div>{_L("Kein Mieter","Kiracı yok","No tenant")}</div>
+               :nkTen?<div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"5px 12px"}}>
+                    <span>{_L("Kostenanteil","Gider payı","Cost share")}: <b style={{color:theme.text}}>{_e(nkTen.umlage)}</b></span>
+                    <span>{_L("Vorauszahlung","Avans","Advance")}: <b style={{color:theme.text}}>{_e(nkTen.vorauszahlung)}</b></span>
+                  </div>
+                  <div style={{marginTop:6}}>{_L("Ergebnis","Sonuç","Result")}: <b style={{color:nkTen.typ==="guthaben"?theme.accent:(nkTen.typ==="nachzahlung"?theme.danger:theme.textMuted)}}>{nkTen.typ==="guthaben"?_L("Guthaben","Alacak","Credit"):nkTen.typ==="nachzahlung"?_L("Nachzahlung","Ek ödeme","Back-payment"):"±0"} {_e(Math.abs(nkTen.saldo||0))}</b></div>
+                </div>
+               :<div>{_L("Dieser Mieter ist nicht in der Abrechnung","Bu kiracı hesapta yok","This tenant is not in the statement")}</div>}
+              <div style={{marginTop:10}}>{_lnk(_L("Zur Nebenkosten","Yan giderlere","To utilities"),()=>goTab("nebenkosten"))}</div>
+            </div>}
+          </div>
+          <div style={_sec}>
+            <div onClick={()=>setAkteZO(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
+              <div style={{..._h,marginBottom:0}}>⚡ {_L("Zählerstände","Sayaçlar","Meter readings")}</div>
+              <span style={{fontSize:13,color:theme.textMuted}}>{akteZ===null?"…":zarts.length+" "+_L("Zähler","sayaç","meters")} <span style={{color:theme.textDim}}>{akteZO?"▾":"▸"}</span></span>
+            </div>
+            {akteZO&&<div style={{marginTop:10,fontSize:13,color:theme.textMuted}}>
+              {akteZ===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>:zarts.length?<div>{zarts.map((z,i)=><div key={i} style={{padding:"2px 0"}}>{z.label||z.k}: <b style={{color:theme.text}}>{z.anfang==null?"—":z.anfang} → {z.ende==null?"—":z.ende}</b>{z.einheit?" "+z.einheit:""}</div>)}</div>:<div>{_L("Keine Zählerstände","Sayaç yok","No readings")}</div>}
+              <div style={{marginTop:10}}>{_lnk(_L("Zu Zählerständen","Sayaçlara","To meters"),()=>goTab("nebenkosten"))}</div>
+            </div>}
+          </div>
           <div style={_sec}><div style={_h}>📎 {_L("Belege","Belgeler","Documents")}</div>
             <div style={{fontSize:13,color:theme.textMuted}}>{(docs||[]).length} {_L("Dokument(e) im Gebäude","binada belge","building document(s)")}</div>
             <div style={{marginTop:8}}>{_lnk(_L("Zu Dokumenten","Belgelere","To documents"),()=>goTab("dokumente"))}</div></div>
