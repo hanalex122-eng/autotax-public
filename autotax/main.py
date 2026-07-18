@@ -120,7 +120,7 @@ import time as _time
 _BOOT_TIME = _time.time()
 
 app = FastAPI(
-    title="AutoTax-HUB",
+    title="AutoTax Cloud",
     version=__version__,
 )
 app.state.limiter = limiter
@@ -1390,7 +1390,7 @@ def health():
 @app.get("/manifest.json")
 def pwa_manifest():
     return {
-        "name": "AutoTax-HUB",
+        "name": "AutoTax Cloud",
         "short_name": "AutoTax",
         "start_url": "/",
         "display": "standalone",
@@ -1576,7 +1576,7 @@ def generate_invoice_pdf(invoice_id: int, user: dict = Depends(get_acting_contex
 
         c.setFillColor(HexColor("#7a8ba8"))
         c.setFont("Helvetica", 7)
-        c.drawString(2*cm, 1.5*cm, f"Erstellt mit AutoTax-HUB | {company_name} | {u.email if u else ''}")
+        c.drawString(2*cm, 1.5*cm, f"Erstellt mit AutoTax Cloud | {company_name} | {u.email if u else ''}")
         c.drawString(2*cm, 1*cm, "Automatisch erstellt. Alle Angaben ohne Gewähr. Keine Steuerberatung.")
 
         c.save()
@@ -1769,7 +1769,7 @@ from autotax.legal import (
 @app.get("/datenschutz", response_class=HTMLResponse)
 def datenschutz_page():
     return _privacy_page("de", "Datenschutzerklärung", [
-        {"h":"1. Verantwortlicher (Art. 4 Nr. 7 DSGVO)","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Deutschland<br>E-Mail: datenschutz@autotaxhub.de</p>"},
+        {"h":"1. Verantwortlicher (Art. 4 Nr. 7 DSGVO)","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Deutschland<br>E-Mail: datenschutz@autotax.cloud</p>"},
         {"h":"2. Erhobene Daten und Zweck","c":"<ul><li><strong>Registrierungsdaten:</strong> E-Mail, Name, Passwort (gehashed)</li><li><strong>Rechnungsdaten:</strong> Belege, OCR-Text, Beträge, MwSt</li><li><strong>Firmendaten:</strong> IBAN, Steuernummer, Adresse</li><li><strong>Kassenbuch:</strong> Einnahmen/Ausgaben</li><li><strong>Technisch:</strong> IP-Adresse (anonymisiert), User-Agent</li></ul>"},
         {"h":"3. Rechtsgrundlage (Art. 6 DSGVO)","c":"<ul><li>Art. 6(1)(a): Einwilligung</li><li>Art. 6(1)(b): Vertragserfüllung</li><li>Art. 6(1)(f): Berechtigte Interessen</li></ul>"},
         {"h":"4. Empfänger und Drittanbieter","c":_PRIVACY_THIRD_PARTIES.format(ocr_desc="— Belegbilder können IBAN, Adresse enthalten", ai_desc="— OCR-Texte zur Verarbeitung") + '<p><strong>Drittlandtransfer:</strong> USA — Standardvertragsklauseln (Art. 46 DSGVO) / EU-US Data Privacy Framework.</p>'},
@@ -1783,13 +1783,13 @@ def datenschutz_page():
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy_page_en():
     return _privacy_page("en", "Privacy Policy", [
-        {"h":"1. Data Controller","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Germany<br>Email: datenschutz@autotaxhub.de</p>"},
+        {"h":"1. Data Controller","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Germany<br>Email: datenschutz@autotax.cloud</p>"},
         {"h":"2. Data Collected","c":"<ul><li><strong>Registration:</strong> Email, name, password (hashed)</li><li><strong>Invoice data:</strong> Uploaded receipts, OCR text, amounts, VAT</li><li><strong>Company data:</strong> IBAN, tax ID, address</li><li><strong>Cash book:</strong> Income/expenses</li><li><strong>Technical:</strong> IP address (anonymized), user agent</li></ul>"},
         {"h":"3. Legal Basis (GDPR Art. 6)","c":"<ul><li>Art. 6(1)(a): Consent</li><li>Art. 6(1)(b): Contract performance</li><li>Art. 6(1)(f): Legitimate interests</li></ul>"},
         {"h":"4. Third-Party Processors","c":_PRIVACY_THIRD_PARTIES.format(ocr_desc="— receipt images may contain IBAN, address", ai_desc="— OCR texts for processing") + '<p><strong>International transfers:</strong> USA — Standard Contractual Clauses (Art. 46 GDPR) / EU-US Data Privacy Framework.</p>'},
         {"h":"5. Data Retention","c":"<ul><li>Account data: until deletion</li><li>Accounting records: 10 years (German tax law)</li><li>Trash: 30 days</li><li>Logs: max 30 days</li></ul>"},
         {"h":"6. Your Rights","c":"<ul><li>Access (Art. 15) — Account → Export data</li><li>Rectification (Art. 16)</li><li>Erasure (Art. 17) — Account → Delete account</li><li>Portability (Art. 20) — JSON export</li><li>Object (Art. 21)</li><li>Complaint to supervisory authority (Art. 77)</li></ul>"},
-        {"h":"7. CCPA Rights (California)","c":"<p>If you are a California resident, you have the right to: know what personal data is collected, request deletion, opt-out of data sales. <strong>We do not sell your personal data.</strong> To exercise your rights, use Account → Export/Delete or email datenschutz@autotaxhub.de.</p>"},
+        {"h":"7. CCPA Rights (California)","c":"<p>If you are a California resident, you have the right to: know what personal data is collected, request deletion, opt-out of data sales. <strong>We do not sell your personal data.</strong> To exercise your rights, use Account → Export/Delete or email datenschutz@autotax.cloud.</p>"},
         {"h":"8. Cookies","c":"<p>No tracking cookies. Only essential local storage entries (auth token, cookie consent).</p>"},
         {"h":"9. Security","c":"<p>TLS/SSL, bcrypt passwords, JWT auth, rate limiting, HSTS, CSP headers.</p>"},
     ])
@@ -1798,7 +1798,7 @@ def privacy_page_en():
 @app.get("/confidentialite", response_class=HTMLResponse)
 def privacy_page_fr():
     return _privacy_page("fr", "Politique de Confidentialité", [
-        {"h":"1. Responsable du traitement","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Allemagne<br>E-mail : datenschutz@autotaxhub.de</p>"},
+        {"h":"1. Responsable du traitement","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Allemagne<br>E-mail : datenschutz@autotax.cloud</p>"},
         {"h":"2. Données collectées","c":"<ul><li><strong>Inscription :</strong> e-mail, nom, mot de passe (haché)</li><li><strong>Factures :</strong> reçus, texte OCR, montants, TVA</li><li><strong>Entreprise :</strong> IBAN, numéro fiscal, adresse</li><li><strong>Livre de caisse :</strong> recettes/dépenses</li><li><strong>Technique :</strong> adresse IP (anonymisée)</li></ul>"},
         {"h":"3. Base juridique (Art. 6 RGPD)","c":"<ul><li>Art. 6(1)(a) : Consentement</li><li>Art. 6(1)(b) : Exécution du contrat</li><li>Art. 6(1)(f) : Intérêts légitimes</li></ul>"},
         {"h":"4. Sous-traitants","c":_PRIVACY_THIRD_PARTIES.format(ocr_desc="— images pouvant contenir IBAN, adresse", ai_desc="— textes OCR pour traitement") + '<p><strong>Transfert international :</strong> USA — Clauses contractuelles types (Art. 46 RGPD).</p>'},
@@ -1811,7 +1811,7 @@ def privacy_page_fr():
 @app.get("/privacidad", response_class=HTMLResponse)
 def privacy_page_es():
     return _privacy_page("es", "Política de Privacidad", [
-        {"h":"1. Responsable del tratamiento","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Alemania<br>Email: datenschutz@autotaxhub.de</p>"},
+        {"h":"1. Responsable del tratamiento","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Alemania<br>Email: datenschutz@autotax.cloud</p>"},
         {"h":"2. Datos recopilados","c":"<ul><li><strong>Registro:</strong> email, nombre, contraseña (hash)</li><li><strong>Facturas:</strong> recibos, texto OCR, importes, IVA</li><li><strong>Empresa:</strong> IBAN, NIF, dirección</li><li><strong>Libro de caja:</strong> ingresos/gastos</li><li><strong>Técnico:</strong> IP (anonimizada)</li></ul>"},
         {"h":"3. Base legal (Art. 6 RGPD)","c":"<ul><li>Consentimiento, ejecución contractual, interés legítimo</li></ul>"},
         {"h":"4. Encargados del tratamiento","c":_PRIVACY_THIRD_PARTIES.format(ocr_desc="— imágenes con IBAN, dirección", ai_desc="— textos OCR") + '<p><strong>Transferencia internacional:</strong> USA — Cláusulas contractuales tipo (Art. 46 RGPD).</p>'},
@@ -1824,7 +1824,7 @@ def privacy_page_es():
 @app.get("/gizlilik", response_class=HTMLResponse)
 def privacy_page_tr():
     return _privacy_page("tr", "Gizlilik Politikası (KVKK)", [
-        {"h":"1. Veri Sorumlusu","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Almanya<br>E-posta: datenschutz@autotaxhub.de</p>"},
+        {"h":"1. Veri Sorumlusu","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, Almanya<br>E-posta: datenschutz@autotax.cloud</p>"},
         {"h":"2. Toplanan Veriler","c":"<ul><li><strong>Kayıt:</strong> e-posta, ad, şifre (hashlenmiş)</li><li><strong>Fatura verileri:</strong> yüklenen belgeler, OCR metni, tutarlar, KDV</li><li><strong>Firma bilgileri:</strong> IBAN, vergi no, adres</li><li><strong>Kasa defteri:</strong> gelir/gider</li><li><strong>Teknik:</strong> IP adresi (anonimleştirilmiş)</li></ul>"},
         {"h":"3. Hukuki Dayanak (KVKK m.5)","c":"<ul><li>Açık rıza (m.5/1)</li><li>Sözleşmenin ifası (m.5/2-c)</li><li>Meşru menfaat (m.5/2-f)</li></ul>"},
         {"h":"4. Veri Aktarımı","c":_PRIVACY_THIRD_PARTIES.format(ocr_desc="— belgeler IBAN, adres içerebilir", ai_desc="— OCR metinleri işleme") + '<p><strong>Yurt dışı aktarım:</strong> ABD — KVKK m.9 kapsamında açık rıza ile.</p>'},
@@ -1837,7 +1837,7 @@ def privacy_page_tr():
 @app.get("/khususiyya", response_class=HTMLResponse)
 def privacy_page_ar():
     return _privacy_page("ar", "سياسة الخصوصية", [
-        {"h":"1. المسؤول عن البيانات","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, ألمانيا<br>البريد: datenschutz@autotaxhub.de</p>"},
+        {"h":"1. المسؤول عن البيانات","c":"<p>Hüseyin Hancer<br>Wiesenstr. 10, 66115 Saarbrücken, ألمانيا<br>البريد: datenschutz@autotax.cloud</p>"},
         {"h":"2. البيانات المجمعة","c":"<ul><li><strong>التسجيل:</strong> البريد الإلكتروني، الاسم، كلمة المرور (مشفرة)</li><li><strong>الفواتير:</strong> الإيصالات، نص OCR، المبالغ، ضريبة القيمة المضافة</li><li><strong>بيانات الشركة:</strong> IBAN، الرقم الضريبي، العنوان</li><li><strong>دفتر النقد:</strong> الإيرادات/المصروفات</li></ul>"},
         {"h":"3. الأساس القانوني","c":"<ul><li>الموافقة</li><li>تنفيذ العقد</li><li>المصلحة المشروعة</li></ul>"},
         {"h":"4. مشاركة البيانات","c":_PRIVACY_THIRD_PARTIES.format(ocr_desc="— قد تحتوي الصور على IBAN وعنوان", ai_desc="— نصوص OCR للمعالجة")},
@@ -1861,7 +1861,7 @@ def admin_page():
     ADMIN_EMAILS koruma altinda /admin/* middleware'iyle. Bu HTML
     public ama icindeki API cagrilari yetkisiz erisimi block eder."""
     return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head>
-<meta charset="UTF-8"><title>Admin Panel — AutoTax-HUB</title>
+<meta charset="UTF-8"><title>Admin Panel — AutoTax Cloud</title>
 <style>
   *{box-sizing:border-box}
   body{font-family:-apple-system,'DM Sans',sans-serif;background:#050a12;color:#e8edf5;margin:0;padding:24px;line-height:1.5}
@@ -2364,7 +2364,7 @@ document.getElementById("searchInput").addEventListener("keydown", e => {
 @app.get("/impressum", response_class=HTMLResponse)
 def impressum_page():
     """Impressum nach § 5 DDG (Almanya yasal zorunluluk)."""
-    return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Impressum — AutoTax-HUB</title>
+    return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Impressum — AutoTax Cloud</title>
 <style>body{font-family:'DM Sans',sans-serif;max-width:820px;margin:40px auto;padding:20px;background:#050a12;color:#e8edf5;line-height:1.75}
 h1{color:#10b981;font-size:28px}h2{color:#00a8cc;margin-top:28px;font-size:17px}
 a{color:#10b981}p{margin:10px 0}strong{color:#f59e0b}
@@ -2380,8 +2380,8 @@ Wiesenstr. 10<br>
 Deutschland</p>
 
 <h2>Kontakt</h2>
-<p>E-Mail: <a href="mailto:info@autotaxhub.de">info@autotaxhub.de</a><br>
-Datenschutz: <a href="mailto:datenschutz@autotaxhub.de">datenschutz@autotaxhub.de</a></p>
+<p>E-Mail: <a href="mailto:info@autotax.cloud">info@autotax.cloud</a><br>
+Datenschutz: <a href="mailto:datenschutz@autotax.cloud">datenschutz@autotax.cloud</a></p>
 
 <h2>Umsatzsteuer-ID</h2>
 <p>Umsatzsteuer-Identifikationsnummer gemäß § 27 a Umsatzsteuergesetz: <em>wird nachgereicht / Kleinunternehmer gemäß § 19 UStG</em></p>
@@ -2403,25 +2403,25 @@ Wir sind nicht bereit oder verpflichtet, an Streitbeilegungsverfahren vor einer 
 <h2>Urheberrecht</h2>
 <p>Die durch die Seitenbetreiber erstellten Inhalte und Werke auf diesen Seiten unterliegen dem deutschen Urheberrecht. Die Vervielfältigung, Bearbeitung, Verbreitung und jede Art der Verwertung außerhalb der Grenzen des Urheberrechtes bedürfen der schriftlichen Zustimmung des jeweiligen Autors bzw. Erstellers.</p>
 
-<div class="note"><strong>Hinweis zur Steuerberatung:</strong> AutoTax-HUB ist <em>keine</em> Steuerberatungssoftware im Sinne des Steuerberatungsgesetzes (StBerG). Der Dienst stellt lediglich technische Werkzeuge zur Belegerfassung und -archivierung bereit. Für steuerliche Beratung wenden Sie sich bitte an einen zugelassenen Steuerberater.</div>
+<div class="note"><strong>Hinweis zur Steuerberatung:</strong> AutoTax Cloud ist <em>keine</em> Steuerberatungssoftware im Sinne des Steuerberatungsgesetzes (StBerG). Der Dienst stellt lediglich technische Werkzeuge zur Belegerfassung und -archivierung bereit. Für steuerliche Beratung wenden Sie sich bitte an einen zugelassenen Steuerberater.</div>
 
-<p style="margin-top:40px;color:#64748b;font-size:13px">© 2026 AutoTax-HUB · Stand: Mai 2026</p>
+<p style="margin-top:40px;color:#64748b;font-size:13px">© 2026 AutoTax Cloud · Stand: Mai 2026</p>
 </body></html>""")
 
 
 @app.get("/agb", response_class=HTMLResponse)
 def agb_page():
-    return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>AGB — AutoTax-HUB</title>
+    return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>AGB — AutoTax Cloud</title>
 <style>body{font-family:'DM Sans',sans-serif;max-width:820px;margin:40px auto;padding:20px;background:#050a12;color:#e8edf5;line-height:1.75}
 h1{color:#10b981;font-size:28px}h2{color:#00a8cc;margin-top:28px;font-size:17px}strong{color:#f59e0b}
 a{color:#10b981}p{margin:10px 0}ul{padding-left:22px;margin:8px 0}li{margin:4px 0}
 .note{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);padding:12px 16px;border-radius:10px;font-size:13px;color:#f59e0b;margin:16px 0}
 </style></head><body>
 <h1>Allgemeine Geschäftsbedingungen (AGB)</h1>
-<p><em>AutoTax-HUB — Stand: Juli 2026</em></p>
+<p><em>AutoTax Cloud — Stand: Juli 2026</em></p>
 
 <h2>§ 1 Geltungsbereich und Anbieter</h2>
-<p>Diese Allgemeinen Geschäftsbedingungen gelten für sämtliche Verträge zwischen <strong>Hüseyin Hancer, Wiesenstr. 10, 66115 Saarbrücken, Deutschland</strong> (nachfolgend "Anbieter") und den Nutzern der Software-as-a-Service-Plattform "AutoTax-HUB" (nachfolgend "Dienst"), erreichbar unter autotaxhub.de und zugehörigen Subdomains.</p>
+<p>Diese Allgemeinen Geschäftsbedingungen gelten für sämtliche Verträge zwischen <strong>Hüseyin Hancer, Wiesenstr. 10, 66115 Saarbrücken, Deutschland</strong> (nachfolgend "Anbieter") und den Nutzern der Software-as-a-Service-Plattform "AutoTax Cloud" (nachfolgend "Dienst"), erreichbar unter autotax.cloud und zugehörigen Subdomains.</p>
 
 <h2>§ 2 Leistungsbeschreibung</h2>
 <p>Der Dienst stellt Werkzeuge zur halbautomatischen Erfassung und Verwaltung von Belegen und Kassenbüchern bereit, unter anderem OCR-Texterkennung, Kategorisierung, Kassenbuchführung, Exportfunktionen (CSV, Excel, DATEV, JSON) sowie eine Einnahmen-Überschuss-Übersicht. Der konkrete Funktionsumfang richtet sich nach dem gewählten Plan.</p>
@@ -2429,7 +2429,7 @@ a{color:#10b981}p{margin:10px 0}ul{padding-left:22px;margin:8px 0}li{margin:4px 
 <p>Der Dienst befindet sich in der <strong>BETA-Phase</strong>. Einzelne Funktionen können jederzeit hinzugefügt, geändert, eingeschränkt oder entfernt werden.</p>
 
 <h2>§ 3 Keine Steuer- oder Rechtsberatung</h2>
-<p>AutoTax-HUB ist ein Software-Werkzeug. Der Dienst stellt <strong>keine Steuerberatung, Rechtsberatung oder buchhalterische Beratung</strong> dar. Automatisch erkannte und berechnete Werte können fehlerhaft sein. Der Nutzer ist <strong>allein verantwortlich</strong> für die Überprüfung, Korrektur, Aufbewahrung und ordnungsgemäße steuerliche Verwendung sämtlicher Daten. Für die Steuererklärung und Buchführung ist die Konsultation eines Steuerberaters dringend empfohlen. Die GoBD-konforme Aufbewahrung der Originalbelege obliegt dem Nutzer.</p>
+<p>AutoTax Cloud ist ein Software-Werkzeug. Der Dienst stellt <strong>keine Steuerberatung, Rechtsberatung oder buchhalterische Beratung</strong> dar. Automatisch erkannte und berechnete Werte können fehlerhaft sein. Der Nutzer ist <strong>allein verantwortlich</strong> für die Überprüfung, Korrektur, Aufbewahrung und ordnungsgemäße steuerliche Verwendung sämtlicher Daten. Für die Steuererklärung und Buchführung ist die Konsultation eines Steuerberaters dringend empfohlen. Die GoBD-konforme Aufbewahrung der Originalbelege obliegt dem Nutzer.</p>
 
 <h2>§ 4 Prüfungspflicht des Nutzers</h2>
 <p>Der Nutzer ist verpflichtet, alle automatisch erkannten Daten (insbesondere Beträge, MwSt-Sätze, Lieferanten, Kategorien, Datumsangaben, Rechnungsnummern) vor jeglicher weiteren Verwendung auf Richtigkeit und Vollständigkeit zu prüfen und bei Bedarf zu korrigieren.</p>
@@ -2458,7 +2458,7 @@ a{color:#10b981}p{margin:10px 0}ul{padding-left:22px;margin:8px 0}li{margin:4px 
 <p>Der Anbieter kann den Dienst mit einer Ankündigungsfrist von <strong>60 Tagen</strong> vollständig einstellen. Nutzer erhalten vor Einstellung die Möglichkeit, ihre Daten zu exportieren. Bereits im Voraus gezahlte Beträge für kostenpflichtige Pläne werden anteilig für den nicht genutzten Zeitraum erstattet.</p>
 
 <h2>§ 9 Vertragslaufzeit und Kündigung</h2>
-<p>Kostenpflichtige Abonnements werden monatlich abgerechnet und verlängern sich automatisch um den jeweils gewählten Zeitraum, sofern nicht bis zum Ende der laufenden Periode gekündigt wird. Die Kündigung erfolgt jederzeit in den Konto-Einstellungen oder per E-Mail an info@autotaxhub.de.</p>
+<p>Kostenpflichtige Abonnements werden monatlich abgerechnet und verlängern sich automatisch um den jeweils gewählten Zeitraum, sofern nicht bis zum Ende der laufenden Periode gekündigt wird. Die Kündigung erfolgt jederzeit in den Konto-Einstellungen oder per E-Mail an info@autotax.cloud.</p>
 <p>Der Nutzer kann sein Konto jederzeit unwiderruflich löschen. Mit der Löschung werden alle personenbezogenen Daten gemäß Art. 17 DSGVO entfernt; steuerlich aufbewahrungspflichtige Daten können in anonymisierter Form für die gesetzliche Dauer verbleiben.</p>
 
 <h2>§ 10 Widerrufsrecht für Verbraucher</h2>
@@ -2479,7 +2479,7 @@ a{color:#10b981}p{margin:10px 0}ul{padding-left:22px;margin:8px 0}li{margin:4px 
 <strong>Hinweis:</strong> Diese AGB sind ein Grundgerüst. Vor Aktivierung kostenpflichtiger Pläne oder bei Aufnahme gewerblicher Nutzer im großen Stil wird dringend empfohlen, die AGB von einem deutschen Rechtsanwalt (Fachgebiet IT-/SaaS-Recht) prüfen und gegebenenfalls ergänzen zu lassen.
 </div>
 
-<p style="margin-top:40px;color:#64748b;font-size:13px">© 2026 AutoTax-HUB — Alle Rechte vorbehalten.</p>
+<p style="margin-top:40px;color:#64748b;font-size:13px">© 2026 AutoTax Cloud — Alle Rechte vorbehalten.</p>
 </body></html>""")
 
 
@@ -4794,7 +4794,7 @@ async def email_invoices_bulk(
             }
 
         if not subject:
-            subject = f"{len(attachments)} Belege — AutoTax-Cloud"
+            subject = f"{len(attachments)} Belege — AutoTax Cloud"
 
         sender_user = db.query(User).filter(User.id == user["sub"]).first()
         sender_email = sender_user.email if sender_user else ""
@@ -4822,7 +4822,7 @@ async def email_invoices_bulk(
         body_html = f"""
 <div style="font-family:Arial,sans-serif;color:#0a0e17;max-width:680px;">
   <p>Hallo,</p>
-  <p>im Anhang finden Sie <strong>{len(attachments)} Belege</strong>, automatisch versendet aus <strong>AutoTax-Cloud</strong>.</p>
+  <p>im Anhang finden Sie <strong>{len(attachments)} Belege</strong>, automatisch versendet aus <strong>AutoTax Cloud</strong>.</p>
   {note_html}
   <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px;">
     <thead>
@@ -5016,7 +5016,7 @@ async def email_invoice_attachment(
 <div style="font-family:Arial,sans-serif;color:#0a0e17;max-width:600px;">
   <p>Hallo,</p>
   <p>im Anhang finden Sie einen Beleg, automatisch versendet aus
-     <strong>AutoTax-Cloud</strong>.</p>
+     <strong>AutoTax Cloud</strong>.</p>
   {amt_line}
   <p><strong>Lieferant:</strong> {inv.vendor or 'Unbekannt'}<br>
      <strong>Datum:</strong> {inv.date or 'k.A.'}<br>
@@ -5024,7 +5024,7 @@ async def email_invoice_attachment(
   {note_html}
   <p style="color:#64748b;font-size:12px;margin-top:24px;">
      Absender: {sender_email}<br>
-     Diese Mail wurde aus AutoTax-Cloud generiert. Original-Datei im Anhang
+     Diese Mail wurde aus AutoTax Cloud generiert. Original-Datei im Anhang
      ist unverändert wie ursprünglich hochgeladen.
   </p>
 </div>
@@ -5172,14 +5172,14 @@ def admin_subscription_invoice(
         plan_label = {"free": "Free", "early": "Early Adopter", "starter": "Starter", "pro": "Pro", "ai_steuer": "AI Steuer", "premium": "Premium"}.get(plan, plan)
         period = f"{months} Monat" if months == 1 else f"{months} Monate"
         y -= 0.7*cm
-        c.drawString(2*cm, y, f"AutoTax-HUB {plan_label} ({period})")
+        c.drawString(2*cm, y, f"AutoTax Cloud {plan_label} ({period})")
         c.drawRightString(13*cm, y, str(months))
         c.drawRightString(16*cm, y, f"{PLAN_PRICES[plan]:.2f} EUR")
         c.drawRightString(19*cm, y, f"{plan_price:.2f} EUR")
 
         if cloud_price > 0:
             y -= 0.6*cm
-            c.drawString(2*cm, y, f"AutoTax-Cloud Add-on ({period})")
+            c.drawString(2*cm, y, f"AutoTax Cloud Add-on ({period})")
             c.drawRightString(13*cm, y, str(months))
             c.drawRightString(16*cm, y, f"{CLOUD_PRICE:.2f} EUR")
             c.drawRightString(19*cm, y, f"{cloud_price:.2f} EUR")
@@ -5676,17 +5676,17 @@ def advisor_invite(request: Request, body: AdvisorInviteRequest, user: dict = De
         try:
             from autotax.reminders import send_email
             client_label = user.get("email", "Ein AutoTax-Nutzer")
-            subject = "Einladung zum Steuerberater-Zugang — AutoTax-Cloud"
+            subject = "Einladung zum Steuerberater-Zugang — AutoTax Cloud"
             body_html = (
                 f"<p>Hallo,</p>"
-                f"<p>{client_label} hat Sie als Steuerberater zu seinem AutoTax-Cloud-"
+                f"<p>{client_label} hat Sie als Steuerberater zu seinem AutoTax Cloud-"
                 f"Konto eingeladen. Sie erhalten dadurch <b>Lese-Zugriff</b> auf die "
                 f"Belege und Auswertungen des Mandanten"
                 f"{' (inkl. DATEV-Export)' if scope=='read_export' else ''}.</p>"
                 f"<p><a href='{link}' style='background:#10b981;color:#fff;padding:10px 18px;"
                 f"text-decoration:none;border-radius:8px;font-weight:600'>Einladung annehmen</a></p>"
                 f"<p style='color:#64748b;font-size:12px'>Link gültig 14 Tage. Falls Sie noch "
-                f"kein AutoTax-Cloud-Konto haben, können Sie eines mit dieser E-Mail-Adresse "
+                f"kein AutoTax Cloud-Konto haben, können Sie eines mit dieser E-Mail-Adresse "
                 f"anlegen und die Einladung danach annehmen.</p>"
             )
             _mail_ok = send_email(email, subject, body_html,
@@ -6110,7 +6110,7 @@ async def telegram_webhook(request: Request):
     if text == "/help" or text == "/start":
         await _send_telegram_raw(
             chat_id,
-            "🧾 <b>AutoTax-Cloud Notification Bot</b>\n\n"
+            "🧾 <b>AutoTax Cloud Notification Bot</b>\n\n"
             "Befehle:\n"
             "• /start &lt;token&gt; — Konto verbinden\n"
             "• /stop — Verbindung trennen\n"
@@ -7021,7 +7021,7 @@ def reset_password(request: Request, body: dict = Body(...)):
 <p style="font-size:12px;word-break:break-all;background:#f3f4f6;padding:10px;border-radius:6px;color:#374151">{reset_url}</p>
 <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
 <p style="font-size:12px;color:#666">Hast du diese Anfrage <strong>nicht</strong> gestellt? Dann ignoriere diese E-Mail — dein Passwort bleibt unverändert.</p>
-<p style="font-size:11px;color:#9ca3af;margin-top:24px">AutoTax-Cloud · Hüseyin Hancer · Saarbrücken<br>Diese E-Mail wurde automatisch generiert.</p>
+<p style="font-size:11px;color:#9ca3af;margin-top:24px">AutoTax Cloud · Hüseyin Hancer · Saarbrücken<br>Diese E-Mail wurde automatisch generiert.</p>
 </body></html>"""
         try:
             import httpx as _httpx
@@ -7942,7 +7942,7 @@ def mails_page():
     (atx_token localStorage). Listet alle vom Backend versendeten Mails
     (Rechnungs-Versand, Steuerberater-Einladung, Mahnung, Reminder, ...)."""
     return HTMLResponse(content="""<!DOCTYPE html><html lang="de"><head>
-<meta charset="UTF-8"><title>Gesendete E-Mails — AutoTax-Cloud</title>
+<meta charset="UTF-8"><title>Gesendete E-Mails — AutoTax Cloud</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   *{box-sizing:border-box}
@@ -13051,7 +13051,7 @@ def chat_endpoint(body: dict = Body(...), user: dict = Depends(get_current_user)
 
         # PDF / Drucken (before generic "download")
         elif any(w in msg for w in ["drucken", "pdf", "ausdrucken", "yazdır", "print"]):
-            reply = "🖨️ PDF Drucken:\n\nWo findest du den PDF Button?\n• Rechnungen → 🖨️ PDF Button neben jeder Rechnung\n• Kassenbuch → 🖨️ PDF Button (wenn Rechnung verknüpft)\n• Belege → 🖨️ PDF Button unter jedem Beleg\n• Rechnung erstellen → Nach Speichern: 'PDF herunterladen?' Dialog\n\nPDF enthält:\n• Firmenname und E-Mail (aus deinem Profil)\n• Kunde/Lieferant, Rechnungs-Nr., Datum\n• Beschreibung, Kategorie, MwSt-Satz\n• Netto, MwSt-Betrag, Gesamtbetrag (Brutto)\n• §19-Hinweis (wenn Kleinunternehmer aktiviert)\n• Footer: 'Erstellt mit AutoTax-HUB'"
+            reply = "🖨️ PDF Drucken:\n\nWo findest du den PDF Button?\n• Rechnungen → 🖨️ PDF Button neben jeder Rechnung\n• Kassenbuch → 🖨️ PDF Button (wenn Rechnung verknüpft)\n• Belege → 🖨️ PDF Button unter jedem Beleg\n• Rechnung erstellen → Nach Speichern: 'PDF herunterladen?' Dialog\n\nPDF enthält:\n• Firmenname und E-Mail (aus deinem Profil)\n• Kunde/Lieferant, Rechnungs-Nr., Datum\n• Beschreibung, Kategorie, MwSt-Satz\n• Netto, MwSt-Betrag, Gesamtbetrag (Brutto)\n• §19-Hinweis (wenn Kleinunternehmer aktiviert)\n• Footer: 'Erstellt mit AutoTax Cloud'"
 
         # Preise / Pricing (before generic "kosten" catches it)
         elif any(w in msg for w in ["pricing", "abo", "plan ", "upgrade", "tarif", "paket", "ücret"]) or (any(w in msg for w in ["preis", "fiyat", "kosten"]) and any(w in msg for w in ["monat", "plan", "abo", "wie viel kostet", "was kostet autotax"])):
@@ -13157,7 +13157,7 @@ def chat_endpoint(body: dict = Body(...), user: dict = Depends(get_current_user)
 
         # Firmen (generic)
         elif any(w in msg for w in ["firma", "firmen", "unternehmen", "company", "şirket"]):
-            reply = "🏢 Firmen verwalten:\n• Sidebar → 'Firmen' Seite\n• Max. 2 Firmen registrieren (Free Plan)\n• Firmenname wird für Einnahme-Erkennung verwendet\n• Upload: Wenn Vendor = deine Firma → automatisch als Einnahme erkannt\n• Firmenname erscheint auf generierten PDFs\n• Firma kann nicht geändert werden (Kontakt: info@autotaxhub.de)"
+            reply = "🏢 Firmen verwalten:\n• Sidebar → 'Firmen' Seite\n• Max. 2 Firmen registrieren (Free Plan)\n• Firmenname wird für Einnahme-Erkennung verwendet\n• Upload: Wenn Vendor = deine Firma → automatisch als Einnahme erkannt\n• Firmenname erscheint auf generierten PDFs\n• Firma kann nicht geändert werden (Kontakt: info@autotax.cloud)"
 
         # Preise (generic fallback)
         elif any(w in msg for w in ["preis", "fiyat", "was kostet"]):
@@ -13165,7 +13165,7 @@ def chat_endpoint(body: dict = Body(...), user: dict = Depends(get_current_user)
 
         # PWA / Mobil
         elif any(w in msg for w in ["app", "mobil", "handy", "telefon", "pwa", "installieren", "uygulama"]):
-            reply = "📱 Mobile App (PWA):\n• Open AutoTax-HUB in your mobile browser\n• iPhone: Safari → Share → 'Add to Home Screen'\n• Android: Chrome → Menu → 'Install App'\n• Works like native app — no App Store needed\n• Upload receipts directly with camera\n• Sidebar: hamburger menu opens/closes navigation\n• Tip: bookmark on home screen for quick access"
+            reply = "📱 Mobile App (PWA):\n• Open AutoTax Cloud in your mobile browser\n• iPhone: Safari → Share → 'Add to Home Screen'\n• Android: Chrome → Menu → 'Install App'\n• Works like native app — no App Store needed\n• Upload receipts directly with camera\n• Sidebar: hamburger menu opens/closes navigation\n• Tip: bookmark on home screen for quick access"
 
         # ── TIER 5: Action helpers ──
 
@@ -13291,7 +13291,7 @@ def export_pdf_report(year: int = Query(None), user: dict = Depends(get_acting_c
     def draw_footer(c, page_num):
         c.setFillColor(HexColor("#7a8ba8"))
         c.setFont("Helvetica", 7)
-        c.drawString(2*cm, 1*cm, f"AutoTax-HUB | {company_name} | Automatisch erstellt. Alle Angaben ohne Gewähr. Keine Steuerberatung. | Seite {page_num}")
+        c.drawString(2*cm, 1*cm, f"AutoTax Cloud | {company_name} | Automatisch erstellt. Alle Angaben ohne Gewähr. Keine Steuerberatung. | Seite {page_num}")
 
     def new_page(c, page_num):
         draw_footer(c, page_num)
@@ -13468,7 +13468,7 @@ def export_csv(year: int = Query(None), user: dict = Depends(get_acting_context)
     buf = io.StringIO()
     buf.write("\ufeff")  # UTF-8 BOM for Excel
     # Summary rows at top
-    buf.write(f"# AutoTax-HUB Finanzbericht {m['year'] or 'Gesamt'}\n")
+    buf.write(f"# AutoTax Cloud Finanzbericht {m['year'] or 'Gesamt'}\n")
     buf.write(f"# Einnahmen;{m['total_income']:.2f}\n")
     buf.write(f"# Ausgaben;{m['total_expenses']:.2f}\n")
     buf.write(f"# Gewinn;{m['profit']:.2f}\n")
@@ -13496,7 +13496,7 @@ def export_datev(year: int = Query(None), user: dict = Depends(get_acting_contex
     m = calculate_dashboard_metrics(user["sub"], year)
     txns = m["transactions"]
     buf = io.StringIO()
-    buf.write("# HINWEIS: AutoTax-HUB - Alle Daten pruefen. Keine Steuerberatung.\n")
+    buf.write("# HINWEIS: AutoTax Cloud - Alle Daten pruefen. Keine Steuerberatung.\n")
     buf.write(f"# Einnahmen: {m['total_income']:.2f} | Ausgaben: {m['total_expenses']:.2f} | Gewinn: {m['profit']:.2f}\n")
     buf.write("Umsatz;Soll/Haben;Konto;Gegenkonto;BU;Belegdatum;Belegfeld1;Buchungstext;USt\n")
     for t in txns:
@@ -13574,7 +13574,7 @@ def export_excel(year: int = Query(None), user: dict = Depends(get_acting_contex
     thin_border = Border(bottom=Side(style="thin", color="E2E8F0"))
 
     # Disclaimer
-    disc = ws.cell(row=1, column=1, value=f"AutoTax-HUB Export — {m['year'] or 'Alle Jahre'} — Alle Daten vor Verwendung prüfen. Keine Steuerberatung.")
+    disc = ws.cell(row=1, column=1, value=f"AutoTax Cloud Export — {m['year'] or 'Alle Jahre'} — Alle Daten vor Verwendung prüfen. Keine Steuerberatung.")
     disc.font = Font(italic=True, color="F59E0B", size=9)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
 
@@ -14439,7 +14439,7 @@ def _generate_eur_pdf(data: dict) -> bytes:
     c.drawString(2 * cm, y, f"Anlage EÜR {data['year']}")
     c.setFont("Helvetica", 9)
     c.setFillColor(HexColor("#64748b"))
-    c.drawRightString(w - 2 * cm, y, f"AutoTax-Cloud · {datetime.now().strftime('%d.%m.%Y')}")
+    c.drawRightString(w - 2 * cm, y, f"AutoTax Cloud · {datetime.now().strftime('%d.%m.%Y')}")
     y -= 0.8 * cm
     c.setFont("Helvetica", 10)
     c.setFillColor(HexColor("#0f172a"))
@@ -14510,7 +14510,7 @@ def _generate_eur_pdf(data: dict) -> bytes:
     # Disclaimer
     c.setFont("Helvetica-Oblique", 8)
     c.drawString(2 * cm, 1.5 * cm,
-                  "Diese Aufstellung wurde von AutoTax-Cloud KI generiert und ist KEINE rechtsverbindliche Steuererklärung.")
+                  "Diese Aufstellung wurde von AutoTax Cloud KI generiert und ist KEINE rechtsverbindliche Steuererklärung.")
     c.drawString(2 * cm, 1.1 * cm,
                   "Bitte mit Ihrem Steuerberater prüfen. Quelle: Anlage EÜR §13a EStG.")
 

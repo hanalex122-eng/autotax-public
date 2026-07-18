@@ -1,5 +1,5 @@
 """
-AutoTax-HUB QR Code Reader
+AutoTax Cloud QR Code Reader
 ───────────────────────────
 Reads QR codes from invoice images and extracts structured data:
   - Company/firm name

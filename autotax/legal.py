@@ -72,14 +72,14 @@ def privacy_page(lang: str, title: str, sections: list) -> HTMLResponse:
         f'<!DOCTYPE html><html lang="{lang}"{direction}><head><meta charset="UTF-8">'
         f'<title>{title}</title>\n'
         f'<style>{PRIVACY_CSS}</style></head><body>{bar}<h1>{title}</h1>\n'
-        f'<p><em>AutoTax-HUB — '
+        f'<p><em>AutoTax Cloud — '
         f'{"Stand" if lang == "de" else "Last updated"}: April 2026</em></p>'
     )
     for s in sections:
         body += f'\n<h2>{s["h"]}</h2>\n{s["c"]}'
     body += (
         '\n<p style="margin-top:40px;color:#64748b;font-size:13px">'
-        '© 2026 AutoTax-HUB</p></body></html>'
+        '© 2026 AutoTax Cloud</p></body></html>'
     )
     return HTMLResponse(content=body)
 

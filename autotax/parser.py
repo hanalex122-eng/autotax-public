@@ -1,5 +1,5 @@
 """
-AutoTax-HUB Invoice Parser v2.0
+AutoTax Cloud Invoice Parser v2.0
 ───────────────────────────────
 Extracts structured data from OCR raw text:
   - vendor name

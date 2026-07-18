@@ -103,7 +103,7 @@ def generate_mahnung_pdf(inv: Invoice, level: int, sender_user: User) -> bytes:
         raise RuntimeError("PDF generation not available (reportlab missing)")
 
     cfg = _MAHNUNG_TEXTS[level]
-    SENDER_NAME = sender_user.full_name or os.getenv("BILLING_NAME", "AutoTax-HUB")
+    SENDER_NAME = sender_user.full_name or os.getenv("BILLING_NAME", "AutoTax Cloud")
     SENDER_ADDR = os.getenv("BILLING_ADDRESS", "Wiesenstr. 10")
     SENDER_CITY = os.getenv("BILLING_CITY", "66115 Saarbrücken")
     SENDER_EMAIL = sender_user.email or os.getenv("BILLING_EMAIL", "")

@@ -280,7 +280,7 @@ def send_email(to_addr: str, subject: str, body_html: str,
             import httpx as _httpx
             import base64 as _b64
             sender = (os.getenv("RESEND_FROM") or os.getenv("SMTP_FROM")
-                       or "AutoTax-Cloud <noreply@autotax.cloud>").strip()
+                       or "AutoTax Cloud <noreply@autotax.cloud>").strip()
             payload = {
                 "from": sender,
                 "to": [to_addr],
@@ -430,7 +430,7 @@ def _format_email_body(inv: Invoice, code: str) -> str:
   <p style="margin:4px 0"><strong>Fällig am:</strong> {due}</p>
   <p style="margin:4px 0"><strong>Rechnungs-Nr.:</strong> {inv.invoice_number or '—'}</p>
 </div>
-<p style="color:#64748b;font-size:13px;margin-top:24px">AutoTax-HUB · Automatische Erinnerung</p>
+<p style="color:#64748b;font-size:13px;margin-top:24px">AutoTax Cloud · Automatische Erinnerung</p>
 </body></html>"""
 
 
@@ -508,7 +508,7 @@ async def process_monthly_summary(force: bool = False) -> dict:
                     <tr><td>USt-Betrag (geschuldet)</td><td style="text-align:right">€{vat:.2f}</td></tr>
                     <tr><td>Belege erfasst</td><td style="text-align:right">{len(rows)}</td></tr>
                     </table>
-                    <p style="color:#64748b;font-size:13px;margin-top:24px">AutoTax-HUB · Automatische Monatsübersicht</p>
+                    <p style="color:#64748b;font-size:13px;margin-top:24px">AutoTax Cloud · Automatische Monatsübersicht</p>
                     </body></html>"""
                     if send_email(u.email, f"📊 {label} {py} — Monatsübersicht", body,
                                    user_id=u.id, kind="monthly_summary"):

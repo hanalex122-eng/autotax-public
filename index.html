@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AutoTax-HUB Dashboard</title>
+<title>AutoTax Cloud Dashboard</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#050a12">
 <meta name="mobile-web-app-capable" content="yes">
@@ -622,7 +622,7 @@ function AuthScreen({onLogin}){
       {mode==="register"&&<div style={{marginBottom:16}}><label style={{fontSize:12,color:theme.textMuted,marginBottom:6,display:"block",fontWeight:500}}>Company name (optional)</label><input style={css.input} value={regCompany} onChange={e=>setRegCompany(e.target.value)} placeholder="z.B. Alex Media GmbH"/><div style={{fontSize:11,color:theme.textDim,marginTop:4}}>Für automatische Einnahme-Erkennung. Ohne Angabe wird dein Name verwendet.</div></div>}
       {mode==="register"&&<div style={{marginBottom:20,display:"flex",alignItems:"flex-start",gap:10}}>
         <input type="checkbox" checked={gdpr} onChange={e=>setGdpr(e.target.checked)} style={{marginTop:3,width:18,height:18,accentColor:theme.accent,cursor:"pointer",flexShrink:0}}/>
-        <span style={{fontSize:12,color:theme.textMuted,lineHeight:1.5}}>I have read the <span style={{color:theme.accent,cursor:"pointer",textDecoration:"underline"}} onClick={()=>window.open("/agb","_blank")}>Terms</span> and <span style={{color:theme.accent,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setShowDS(true)}>Privacy Policy</span> and accept them. I understand that AutoTax-HUB <strong style={{color:"#f59e0b"}}>is not tax advice</strong> and I am <strong style={{color:"#f59e0b"}}>solely responsible for my data</strong> .</span>
+        <span style={{fontSize:12,color:theme.textMuted,lineHeight:1.5}}>I have read the <span style={{color:theme.accent,cursor:"pointer",textDecoration:"underline"}} onClick={()=>window.open("/agb","_blank")}>Terms</span> and <span style={{color:theme.accent,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setShowDS(true)}>Privacy Policy</span> and accept them. I understand that AutoTax Cloud <strong style={{color:"#f59e0b"}}>is not tax advice</strong> and I am <strong style={{color:"#f59e0b"}}>solely responsible for my data</strong> .</span>
       </div>}
       {mode==="register"&&((window.FEATURES&&window.FEATURES.turnstile_site_key)||"")&&<div ref={turnstileRef} style={{marginBottom:16,display:"flex",justifyContent:"center"}}/>}
       {info&&<div style={{background:theme.accentSoft,color:theme.accent,marginBottom:16,padding:"10px 14px",borderRadius:10,fontSize:13}}>{info}</div>}
@@ -640,13 +640,13 @@ function AuthScreen({onLogin}){
         <span style={{fontSize:11,color:theme.textDim,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setShowImp(true)}>Legal Notice</span>
         <span style={{fontSize:11,color:theme.textDim,cursor:"pointer",textDecoration:"underline"}} onClick={()=>window.open("/agb","_blank")}>Terms</span>
       </div>
-      <div style={{fontSize:10,color:"#4a5e7a",marginTop:8,textAlign:"center"}}>AutoTax-HUB is an accounting tool, not tax advice.</div>
+      <div style={{fontSize:10,color:"#4a5e7a",marginTop:8,textAlign:"center"}}>AutoTax Cloud is an accounting tool, not tax advice.</div>
     </div>
     {showDS&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowDS(false)}>
       <div style={{...css.card,maxWidth:640,maxHeight:"80vh",overflowY:"auto",padding:32}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:20,fontWeight:700,color:theme.text,margin:0}}>Privacy Policy</h2><div style={{cursor:"pointer"}} onClick={()=>setShowDS(false)}><Icon d={I.x} size={20} color={theme.textMuted}/></div></div>
         <div style={{fontSize:13,color:theme.textMuted,lineHeight:1.8}}>
-          <h3 style={{color:theme.text,fontSize:15,margin:"16px 0 8px"}}>1. Data Controller</h3><p>AutoTax-HUB — autotaxhub.de / datenschutz@autotaxhub.de</p>
+          <h3 style={{color:theme.text,fontSize:15,margin:"16px 0 8px"}}>1. Data Controller</h3><p>AutoTax Cloud — autotax.cloud / datenschutz@autotax.cloud</p>
           <h3 style={{color:theme.text,fontSize:15,margin:"16px 0 8px"}}>2. Data Collected</h3><p>Name, email, invoice data, uploaded documents, IP address.</p>
           <h3 style={{color:theme.text,fontSize:15,margin:"16px 0 8px"}}>3. Legal Basis</h3><p>Art. 6(1)(a) consent, (b) contract, (f) legitimate interests GDPR.</p>
           <h3 style={{color:theme.text,fontSize:15,margin:"16px 0 8px"}}>4. Zweck</h3><p>Rechnungsverwaltung, Steuerberechnung, DATEV-Export, AI-Kategorisierung.</p>
@@ -662,8 +662,8 @@ function AuthScreen({onLogin}){
       <div style={{...css.card,maxWidth:500,padding:32}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:20,fontWeight:700,color:theme.text,margin:0}}>Legal Notice</h2><div style={{cursor:"pointer"}} onClick={()=>setShowImp(false)}><Icon d={I.x} size={20} color={theme.textMuted}/></div></div>
         <div style={{fontSize:13,color:theme.textMuted,lineHeight:1.8}}>
-          <p><strong style={{color:theme.text}}>AutoTax-HUB</strong> — Legal notice per § 5 TMG</p>
-          <p>Betreiber: Hüseyin Hancer<br/>Wiesenstr. 10, 66115 Saarbrücken, Deutschland<br/>E-Mail: info@autotaxhub.de</p>
+          <p><strong style={{color:theme.text}}>AutoTax Cloud</strong> — Legal notice per § 5 TMG</p>
+          <p>Betreiber: Hüseyin Hancer<br/>Wiesenstr. 10, 66115 Saarbrücken, Deutschland<br/>E-Mail: info@autotax.cloud</p>
           <p><strong style={{color:theme.text}}>Disclaimer:</strong> Tax calculations are estimates only.</p>
         </div>
       </div>
@@ -674,7 +674,7 @@ function AuthScreen({onLogin}){
 function Sidebar({active,onNav,onLogout,collapsed}){
   const _t=typeof t==="function"?t:k=>k;
   const F=(window.FEATURES||{});
-  // AutoTax-Cloud add-on durumu — /account/me'den has_cloud_addon
+  // AutoTax Cloud add-on durumu — /account/me'den has_cloud_addon
   const[hasCloudAddon,setHasCloudAddon]=useState(false);
   const[showCloudModal,setShowCloudModal]=useState(false);
   const[overdueCount,setOverdueCount]=useState(0);
@@ -772,7 +772,7 @@ function Sidebar({active,onNav,onLogout,collapsed}){
             <Icon d={I.gift} size={24} color="#fff"/>
           </div>
           <div>
-            <h2 style={{margin:0,fontSize:20,fontWeight:700,color:theme.text}}>AutoTax-Cloud</h2>
+            <h2 style={{margin:0,fontSize:20,fontWeight:700,color:theme.text}}>AutoTax Cloud</h2>
             <span style={{fontSize:11,fontWeight:800,color:"#f59e0b",letterSpacing:1}}>ADD-ON</span>
           </div>
         </div>
@@ -1167,7 +1167,7 @@ function DashboardView({refreshKey,triggerRefresh,onNav}){
         <button style={{...css.btnOutline,fontSize:11,padding:"6px 12px"}} onClick={()=>onNav&&onNav("upload")}>{_t("upload")}</button>
       </div>
     </div>
-    <div style={{padding:"12px 16px",margin:"12px 0 0",borderRadius:8,background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.15)",fontSize:11,color:"#f59e0b",lineHeight:1.5}}>{getLang()==="de"?"Alle Daten wurden automatisch erkannt und können Fehler enthalten. AutoTax-HUB ersetzt keine Steuerberatung.":"All data was auto-detected and may contain errors. AutoTax-HUB does not replace tax advice."}</div>
+    <div style={{padding:"12px 16px",margin:"12px 0 0",borderRadius:8,background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.15)",fontSize:11,color:"#f59e0b",lineHeight:1.5}}>{getLang()==="de"?"Alle Daten wurden automatisch erkannt und können Fehler enthalten. AutoTax Cloud ersetzt keine Steuerberatung.":"All data was auto-detected and may contain errors. AutoTax Cloud does not replace tax advice."}</div>
   </div>);
 }
 
@@ -1256,7 +1256,7 @@ function InvoicesView({refreshKey,triggerRefresh,showToast,sendOnly}){
   const openBulkEmail=()=>{
     if(selected.size===0)return;
     const _l=getLang();
-    const defaultSub=_l==="de"?selected.size+" Belege — AutoTax-Cloud":_l==="tr"?selected.size+" Belge — AutoTax-Cloud":selected.size+" Receipts — AutoTax-Cloud";
+    const defaultSub=_l==="de"?selected.size+" Belege — AutoTax Cloud":_l==="tr"?selected.size+" Belge — AutoTax Cloud":selected.size+" Receipts — AutoTax Cloud";
     setBulkEmail({open:true,to:"",subject:defaultSub,note:"",toAdvisor:false,sending:false});
   };
   const sendBulkEmail=async()=>{
@@ -2159,7 +2159,7 @@ function UploadView({triggerRefresh,onNav,showToast}){
     <details style={{background:"rgba(0,194,255,0.06)",border:"1px solid rgba(0,194,255,0.3)",borderRadius:12,padding:"10px 14px",cursor:"pointer"}}>
       <summary style={{fontSize:13,fontWeight:600,color:"#00c2ff",userSelect:"none"}}>📖 Kurulum talimatları + Token kopyala</summary>
       <div style={{marginTop:10,fontSize:12,color:theme.text,lineHeight:1.6}}>
-        <p style={{margin:"0 0 8px"}}>Scanner'ın <b>çıktı klasörünü</b> izleyen küçük bir Windows agent. Tarama biter bitmez fatura otomatik AutoTax-Cloud'a yüklenir — manuel upload'a gerek yok.</p>
+        <p style={{margin:"0 0 8px"}}>Scanner'ın <b>çıktı klasörünü</b> izleyen küçük bir Windows agent. Tarama biter bitmez fatura otomatik AutoTax Cloud'a yüklenir — manuel upload'a gerek yok.</p>
         <ul style={{margin:"0 0 10px",paddingLeft:20,color:theme.textMuted,fontSize:11.5}}>
           <li><b>AutoTaxWatcher.exe</b>'yi indir (Python kurulumu gerekmez)</li>
           <li>"🔑 Token kopyala" butonuna bas</li>
@@ -5274,7 +5274,7 @@ function FeedbackView(){
   const[msg,setMsg]=useState("");const[sent,setSent]=useState(false);
   const send=async()=>{if(!msg.trim())return;try{await fetch(API+"/feedback",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+localStorage.getItem("atx_token")},body:JSON.stringify({message:msg})});setSent(true);setMsg("");}catch(e){alert("Error: "+e.message);}};
   if(sent)return(<div style={{textAlign:"center",padding:60}}><div style={{fontSize:48,marginBottom:16}}>✅</div><h2 style={{color:theme.text,margin:"0 0 8px"}}>Thank you for your feedback!</h2><p style={{color:theme.textMuted,fontSize:14}}>We will review it as soon as possible.</p><button style={css.btn()} onClick={()=>setSent(false)}>New Feedback</button></div>);
-  return(<div style={{maxWidth:600}}><h2 style={{color:theme.text,margin:"0 0 8px",fontSize:22,fontWeight:700}}>Feedback & Report Issues</h2><p style={{color:theme.textMuted,fontSize:14,margin:"0 0 20px"}}>Help us improve AutoTax-HUB!</p>
+  return(<div style={{maxWidth:600}}><h2 style={{color:theme.text,margin:"0 0 8px",fontSize:22,fontWeight:700}}>Feedback & Report Issues</h2><p style={{color:theme.textMuted,fontSize:14,margin:"0 0 20px"}}>Help us improve AutoTax Cloud!</p>
     <textarea maxLength={5000} style={{...css.input,width:"100%",minHeight:150,resize:"vertical",fontFamily:"inherit"}} placeholder="Describe your feedback, a bug, or a suggestion..." value={msg} onChange={e=>setMsg(e.target.value)}/>
     <button style={{...css.btn(),marginTop:12}} onClick={send}>Feedback senden</button>
   </div>);
@@ -7010,9 +7010,9 @@ function HelpView(){
         "Limit: €25,000 prior year / €100,000 current year",
         "Receiving e-invoices still mandatory",
       ]},
-    {icon:"📱",title:getLang()==="de"?"Mobile App (PWA)":"Mobile App (PWA)",desc:getLang()==="de"?"AutoTax-HUB als App installieren. Belege direkt mit Kamera hochladen.":"Install AutoTax-HUB as app on your phone. Upload receipts directly with camera.",
+    {icon:"📱",title:getLang()==="de"?"Mobile App (PWA)":"Mobile App (PWA)",desc:getLang()==="de"?"AutoTax Cloud als App installieren. Belege direkt mit Kamera hochladen.":"Install AutoTax Cloud as app on your phone. Upload receipts directly with camera.",
       details:[
-        getLang()==="de"?"Öffne AutoTax-HUB im Browser auf deinem Handy":"Open AutoTax-HUB in browser on your phone",
+        getLang()==="de"?"Öffne AutoTax Cloud im Browser auf deinem Handy":"Open AutoTax Cloud in browser on your phone",
         getLang()==="de"?"iPhone: Safari → Teilen → Zum Home-Bildschirm":"iPhone: Safari → Share → Add to Home Screen",
         "Android: Chrome → Menu → 'Install App'",
         getLang()==="de"?"Funktioniert wie eine native App":"Works like a native app",
@@ -7052,12 +7052,12 @@ function HelpView(){
     {q:"How do I record income?",a:"When uploading: click green 'Income' button → upload receipt. In Cash Book: '+ Entry' → select 'Income'. Income shows as green in Dashboard."},
     {q:"What CSV format is required?",a:"Columns: Date (DD.MM.YYYY), Description, Expenses, Income. Delimiter: comma or semicolon (auto-detected). Tip: export a CSV first as template."},
     {q:"How do I export the Cash Book?",a:"Cash Book → 'CSV Export' button. Contains: date, vendor, invoice no., type, amount, VAT, category, payment. Can be opened in Excel or re-imported."},
-    {q:"What is an E-Invoice?",a:"An E-Invoice is an electronic invoice in XML format (XRechnung or ZUGFeRD). Since 2025, all German businesses must accept e-invoices. AutoTax-HUB reads and processes them automatically."},
+    {q:"What is an E-Invoice?",a:"An E-Invoice is an electronic invoice in XML format (XRechnung or ZUGFeRD). Since 2025, all German businesses must accept e-invoices. AutoTax Cloud reads and processes them automatically."},
     {q:"How do I create an invoice?",a:"Invoices → '+ Create Invoice' → enter customer, amount, VAT, date → Save → download PDF."},
     {q:"What is the small business regulation?",a:"§19 UStG: no VAT on invoices if revenue under €25,000 (prior year). Activate toggle in profile. Notice appears automatically on your invoices."},
     {q:"How do I print an invoice as PDF?",a:"Next to each invoice there's a 🖨️ PDF button. Click → PDF generated and downloaded."},
-    {q:"Can I use AutoTax-HUB on mobile?",a:"Yes! Open in browser → 'Add to Home Screen'. Works like a native app."},
-    {q:"What do the DATEV account numbers mean?",a:"DATEV uses standard accounts: 6800=purchases, 6640=hospitality, 6670=vehicle, 6815=office, 8400=revenue. AutoTax-HUB assigns these automatically."},
+    {q:"Can I use AutoTax Cloud on mobile?",a:"Yes! Open in browser → 'Add to Home Screen'. Works like a native app."},
+    {q:"What do the DATEV account numbers mean?",a:"DATEV uses standard accounts: 6800=purchases, 6640=hospitality, 6670=vehicle, 6815=office, 8400=revenue. AutoTax Cloud assigns these automatically."},
   ];
   return(<div style={{display:"flex",flexDirection:"column",gap:24,maxWidth:800}}>
     <div>
@@ -7136,7 +7136,7 @@ function HelpView(){
     <div style={{...css.card,background:theme.surfaceAlt}}>
       <h3 style={{fontSize:14,fontWeight:600,color:theme.text,margin:"0 0 8px"}}>📧 Support & Kontakt</h3>
       <p style={{fontSize:13,color:theme.textMuted,lineHeight:1.6,margin:0}}>
-        More questions? Contact info@autotaxhub.de or use AI Chat for quick help.
+        More questions? Contact info@autotax.cloud or use AI Chat for quick help.
       </p>
     </div>
     <div style={{...css.card,border:"1px solid rgba(59,130,246,0.2)",background:"rgba(59,130,246,0.05)"}}>
@@ -7158,7 +7158,7 @@ function HelpView(){
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         <div style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",borderRadius:8,background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.2)"}}>
           <span style={{fontSize:14}}>⚠️</span>
-          <div style={{fontSize:12,color:theme.text,lineHeight:1.5}}><strong style={{color:"#f59e0b"}}>{h3("Keine Steuerberatung","No tax advice","Vergi danışmanlığı değildir")}</strong> — {h3("AutoTax-HUB ist ein Buchhaltungs-Werkzeug, keine Steuerberatung im Sinne des StBerG. Für steuerliche Beratung wenden Sie sich an einen Steuerberater.","AutoTax-HUB is an accounting tool, not tax advice under StBerG. For tax advice consult a tax advisor.","AutoTax-HUB bir muhasebe aracıdır, StBerG anlamında vergi danışmanlığı değildir. Vergi konularında mali müşavirinize danışın.")}</div>
+          <div style={{fontSize:12,color:theme.text,lineHeight:1.5}}><strong style={{color:"#f59e0b"}}>{h3("Keine Steuerberatung","No tax advice","Vergi danışmanlığı değildir")}</strong> — {h3("AutoTax Cloud ist ein Buchhaltungs-Werkzeug, keine Steuerberatung im Sinne des StBerG. Für steuerliche Beratung wenden Sie sich an einen Steuerberater.","AutoTax Cloud is an accounting tool, not tax advice under StBerG. For tax advice consult a tax advisor.","AutoTax Cloud bir muhasebe aracıdır, StBerG anlamında vergi danışmanlığı değildir. Vergi konularında mali müşavirinize danışın.")}</div>
         </div>
         <div style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",borderRadius:8,background:"rgba(148,163,184,0.08)",border:"1px solid "+theme.border}}>
           <span style={{fontSize:14}}>ℹ️</span>
@@ -8685,7 +8685,7 @@ function App(){
         {!inviteAccept.info&&<div style={{color:theme.textDim,fontSize:13}}>⏳ {_tr("Wird geladen","Loading")}…</div>}
         {inviteAccept.info?.status==="pending"&&<Fragment>
           <p style={{color:theme.textMuted,fontSize:13,lineHeight:1.5,margin:"0 0 12px"}}>
-            <b style={{color:theme.text}}>{inviteAccept.info.inviter_email}</b> {_tr("hat Sie eingeladen, als Steuerberater Zugriff auf sein/ihr AutoTax-Cloud-Konto zu bekommen.","invited you to become a tax advisor with access to their AutoTax-Cloud account.")}
+            <b style={{color:theme.text}}>{inviteAccept.info.inviter_email}</b> {_tr("hat Sie eingeladen, als Steuerberater Zugriff auf sein/ihr AutoTax Cloud-Konto zu bekommen.","invited you to become a tax advisor with access to their AutoTax Cloud account.")}
           </p>
           <div style={{padding:12,background:theme.surfaceAlt,borderRadius:8,fontSize:13,marginBottom:16}}>
             <div style={{color:theme.textMuted}}>{_tr("Berechtigung","Permission")}: <b style={{color:theme.text}}>
@@ -8816,7 +8816,7 @@ function App(){
           {profileOpen&&<div style={{position:"absolute",right:0,top:44,background:theme.card,border:"1px solid "+theme.border,borderRadius:12,padding:8,minWidth:200,zIndex:500,boxShadow:"0 8px 30px rgba(0,0,0,0.4)",animation:"fadeIn 0.15s ease"}}>
             <div style={{padding:"10px 14px",borderBottom:"1px solid "+theme.border,marginBottom:4}}>
               <div style={{fontSize:13,fontWeight:600,color:theme.text}}>{_t("my_account")}</div>
-              <div style={{fontSize:11,color:theme.textDim,marginTop:2}}>AutoTax-HUB <span style={{background:"#f59e0b",color:"#000",fontSize:8,fontWeight:700,padding:"1px 4px",borderRadius:3}}>BETA</span></div>
+              <div style={{fontSize:11,color:theme.textDim,marginTop:2}}>AutoTax Cloud <span style={{background:"#f59e0b",color:"#000",fontSize:8,fontWeight:700,padding:"1px 4px",borderRadius:3}}>BETA</span></div>
             </div>
             <div onClick={()=>{setPage("dashboard");setProfileOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,cursor:"pointer",color:theme.textMuted,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=theme.surfaceAlt} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <Icon d={I.dashboard} size={16}/><span style={{fontSize:13}}>Dashboard</span>

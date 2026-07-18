@@ -96,11 +96,11 @@ def features_js_literal() -> str:
 # --------------------------- landing copy ------------------------------
 
 _LANDING_GENERIC = {
-    "SEO_TITLE":     "AutoTax-HUB — Rechnungen automatisch verbuchen",
-    "SEO_DESC":      "Rechnungen fotografieren oder per E-Mail empfangen — AutoTax-HUB erkennt, kategorisiert und exportiert für DATEV. Für Freelancer und kleine Unternehmen in Deutschland.",
+    "SEO_TITLE":     "AutoTax Cloud — Rechnungen automatisch verbuchen",
+    "SEO_DESC":      "Rechnungen fotografieren oder per E-Mail empfangen — AutoTax Cloud erkennt, kategorisiert und exportiert für DATEV. Für Freelancer und kleine Unternehmen in Deutschland.",
     "HERO_BADGE":    "Beta — Jetzt kostenlos testen",
     "HERO_H1":       "Rechnungen <span>automatisch</span>,<br>Buchhaltung <span>einfach</span>",
-    "HERO_DESC":     "Fotografieren, hochladen oder per E-Mail empfangen. AutoTax-HUB erkennt Ihre Belege, kategorisiert sie und führt Ihr Kassenbuch DATEV-konform.",
+    "HERO_DESC":     "Fotografieren, hochladen oder per E-Mail empfangen. AutoTax Cloud erkennt Ihre Belege, kategorisiert sie und führt Ihr Kassenbuch DATEV-konform.",
     "CTA_PRIMARY":   "Kostenlos starten",
     "CTA_SECONDARY": "Wie es funktioniert",
     "STAT1_NUM":     "64+",  "STAT1_LABEL": "Länder unterstützt",
@@ -111,11 +111,11 @@ _LANDING_GENERIC = {
 }
 
 _LANDING_NICHE_IT_FREELANCER = {
-    "SEO_TITLE":     "AutoTax-HUB — Buchhaltung für IT-Freelancer & Berater",
+    "SEO_TITLE":     "AutoTax Cloud — Buchhaltung für IT-Freelancer & Berater",
     "SEO_DESC":      "AWS, Stripe, Adobe, GitHub — deine SaaS-Rechnungen per E-Mail automatisch erfasst, sortiert und monatlich als DATEV-Paket an deinen Steuerberater versendet.",
     "HERO_BADGE":    "Für IT-Freelancer & Berater",
     "HERO_H1":       "Dein Rechnungseingang,<br><span>automatisch</span> bereit für den <span>Steuerberater</span>",
-    "HERO_DESC":     "AWS, Stripe, Adobe, GitHub und 350+ weitere — deine SaaS-Rechnungen landen per E-Mail, AutoTax-HUB sortiert sie und liefert monatlich ein fertiges DATEV-Paket.",
+    "HERO_DESC":     "AWS, Stripe, Adobe, GitHub und 350+ weitere — deine SaaS-Rechnungen landen per E-Mail, AutoTax Cloud sortiert sie und liefert monatlich ein fertiges DATEV-Paket.",
     "CTA_PRIMARY":   "Jetzt kostenlos testen",
     "CTA_SECONDARY": "Wie es funktioniert",
     "STAT1_NUM":     "350+", "STAT1_LABEL": "SaaS-Lieferanten erkannt",

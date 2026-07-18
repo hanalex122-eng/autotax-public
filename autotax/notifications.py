@@ -71,7 +71,7 @@ def _send_verification_email(email: str, token: str) -> bool:
 <p style="font-size:12px;word-break:break-all;background:#f3f4f6;padding:10px;border-radius:6px;color:#374151">{verify_url}</p>
 <p style="font-size:12px;color:#666;margin-top:24px">Dieser Link ist 24 Stunden gültig. Falls du dich nicht registriert hast, kannst du diese E-Mail einfach ignorieren.</p>
 <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
-<p style="font-size:11px;color:#9ca3af">AutoTax-Cloud · Hüseyin Hancer · Saarbrücken</p>
+<p style="font-size:11px;color:#9ca3af">AutoTax Cloud · Hüseyin Hancer · Saarbrücken</p>
 </body></html>"""
     ok = _send_resend_email(email, subject, html)
     if ok:
@@ -100,7 +100,7 @@ def _send_password_reset_email(email: str, token: str) -> bool:
 <p style="font-size:12px;word-break:break-all;background:#f3f4f6;padding:10px;border-radius:6px;color:#374151">{reset_url}</p>
 <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
 <p style="font-size:12px;color:#666">Hast du diese Anfrage <strong>nicht</strong> gestellt? Dann ignoriere diese E-Mail — dein Passwort bleibt unverändert.</p>
-<p style="font-size:11px;color:#9ca3af;margin-top:24px">AutoTax-Cloud · Hüseyin Hancer · Saarbrücken<br>Diese E-Mail wurde automatisch generiert.</p>
+<p style="font-size:11px;color:#9ca3af;margin-top:24px">AutoTax Cloud · Hüseyin Hancer · Saarbrücken<br>Diese E-Mail wurde automatisch generiert.</p>
 </body></html>"""
     return _send_resend_email(email, subject, html)
 
