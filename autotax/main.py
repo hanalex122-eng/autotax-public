@@ -120,7 +120,7 @@ _BOOT_TIME = _time.time()
 
 app = FastAPI(
     title="AutoTax-HUB",
-    version="5.5.0",
+    version="5.5.5",
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
