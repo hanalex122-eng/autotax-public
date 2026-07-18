@@ -4099,6 +4099,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
     {/* #13 Wohnung Akte — Phase 1: composition hub, read-only, embeds existing data (no new debt logic/tables) */}
     {akteU&&(()=>{
       const auf=uFull[akteU.unit_id]||{};
+      const isEig=(auf.eigennutzung_personen!=null&&auf.eigennutzung_personen>=0); // F1: Eigennutzung ≠ Leerstand
       const uts=tncs.filter(t=>t.unit_id===akteU.unit_id);
       const at=uts.filter(t=>!t.bis).sort((a,b)=>String(b.von||"").localeCompare(String(a.von||"")))[0]||uts.slice().sort((a,b)=>String(b.von||"").localeCompare(String(a.von||"")))[0]||null;
       const atf=at?(tFull[at.tenancy_id]||{}):{};
@@ -4119,9 +4120,9 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
           {at&&<div style={{marginBottom:10,padding:"10px 14px",borderRadius:12,background:at.rueckstand>0?"rgba(239,68,68,0.08)":"rgba(16,185,129,0.08)",border:"1px solid "+(at.rueckstand>0?"rgba(239,68,68,0.3)":"rgba(16,185,129,0.3)")}}>
             <span style={{fontSize:13}}>{at.rueckstand>0?<b style={{color:theme.danger}}>● {at.monate} {_L("Monate offen","ay açık","months open")} · {_L("Rückstand","Borç","Arrears")} {_e(at.rueckstand)}</b>:<b style={{color:theme.accent}}>✓ {_L("Keine Rückstände","Borç yok","No arrears")}</b>}</span></div>}
           <div style={_sec}><div style={_h}>🏠 {_L("Stammdaten","Daire bilgisi","Flat data")}</div>
-            <div style={{fontSize:13,color:theme.textMuted}}>{_L("Soll-Miete","Hedef kira","Target rent")}: <b style={{color:theme.text}}>{_e(akteU.soll_miete)}</b>{auf.wohnflaeche!=null?<span> · {auf.wohnflaeche} m²</span>:""}{auf.eigennutzung_personen!=null?<span> · 🏠 {_L("Eigennutzung","Kendi kullanımı","Self-use")} {auf.eigennutzung_personen}</span>:""}</div></div>
+            <div style={{fontSize:13,color:theme.textMuted}}>{isEig?<span>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi kendi kullanıyor","Owner-occupied")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</span>:<span>{_L("Soll-Miete","Hedef kira","Target rent")}: <b style={{color:theme.text}}>{_e(akteU.soll_miete)}</b></span>}{auf.wohnflaeche!=null?<span> · {auf.wohnflaeche} m²</span>:""}</div></div>
           <div style={_sec}><div style={_h}>👤 {_L("Aktueller Mieter","Mevcut kiracı","Current tenant")}</div>
-            {at?<div style={{fontSize:13}}><b>{at.mieter_name}</b> <span style={{color:theme.textMuted}}>· {at.von}→{at.bis||_L("läuft","devam","ongoing")} · {_e(at.kaltmiete)}{atf.nk_voraus!=null?" + NK "+_e(atf.nk_voraus):""}</span></div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Kein Mieter","Kiracı yok","No tenant")}</div>}</div>
+            {at?<div style={{fontSize:13}}><b>{at.mieter_name}</b> <span style={{color:theme.textMuted}}>· {at.von}→{at.bis||_L("läuft","devam","ongoing")} · {_e(at.kaltmiete)}{atf.nk_voraus!=null?" + NK "+_e(atf.nk_voraus):""}</span></div>:isEig?<div style={{fontSize:13,color:theme.accent,fontWeight:600}}>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi oturuyor","Owner lives here")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Kein Mieter (Leerstand)","Kiracı yok (boş)","No tenant (vacant)")}</div>}</div>
           {at&&<div style={_sec}><div style={_h}>💰 {_L("Mietkonto","Kira hesabı","Rent account")}</div>
             <div style={{fontSize:13,color:theme.textMuted}}>Soll <b style={{color:theme.text}}>{_e(at.soll)}</b> · Ist <b style={{color:theme.accent}}>{_e(at.ist)}</b> · {_L("Rückstand","Borç","Arrears")} <b style={{color:at.rueckstand>0?theme.danger:theme.textMuted}}>{_e(at.rueckstand)}</b></div>
             <div style={{marginTop:8}}>{_lnk(_L("Mietkonto & Mahnung","Kira hesabı & ihtar","Account & dunning"),()=>onNav&&onNav("mieter"))}</div></div>}
