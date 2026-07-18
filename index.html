@@ -3618,6 +3618,8 @@ function NkEditor({propertyId,showToast}){
         <div style={{marginTop:6,fontSize:11.5,color:theme.textDim}}>ⓘ {_L("Nur die Kosten eintragen, die es wirklich gibt — was nicht in der Liste steht, wird mit 0 gerechnet.","Sadece gerçekten olan giderleri ekle — listede olmayan 0 sayılır.","Only add the costs that actually exist — anything not listed counts as 0.")}</div>
       </div>}
       <div style={{marginTop:12,fontSize:14,fontWeight:700,display:"flex",justifyContent:"space-between"}}><span>{_L("Summe umlagefähig","Toplam dağıtılabilir","Umlagefähig total")}</span><b style={{color:theme.accent}}>{_e(erg.umlagefaehige_summe)}</b></div>
+      {/* P2.5 — erklärt NUR das App-Verhalten (warum Reparaturen nicht verteilt werden), keine Rechtsberatung */}
+      <div style={{fontSize:11.5,color:theme.textDim,marginTop:5,lineHeight:1.4}}>ⓘ {_L("Reparaturen und Instandhaltung gehören nicht zu den umlagefähigen Betriebskosten und werden deshalb nicht auf die Mieter verteilt.","Tamirat ve bakım giderleri dağıtılabilir işletme giderlerine dahil değildir, bu yüzden kiracılara paylaştırılmaz.","Repairs and maintenance are not part of the apportionable operating costs and are therefore not distributed to tenants.")}</div>
     </div>
     {/* Personenzahl ALLOCATION panel — opens when a position is split by Personenzahl. The landlord
         enters ONLY head counts; the panel shows the invoice, the auto-summed persons and each computed
