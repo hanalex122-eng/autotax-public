@@ -3594,6 +3594,8 @@ function NkEditor({propertyId,showToast}){
                   {[30,35,40,45,50].map(g=><option key={g} value={g}>{g}%</option>)}</select>
                 <span style={{fontSize:13,color:theme.textMuted}}>→ {_L("Rest","kalan","rest")} {100-(pos&&pos.grund_prozent!=null?pos.grund_prozent:30)}% {_L("Verbrauch (Zähler)","Verbrauch (sayaç)","consumption (meter)")}</span>
               </div>
+              {/* P2.1 — beschreibt NUR, was die Anteile im UI bewirken (keine Rechtsberatung) */}
+              <div style={{fontSize:11.5,color:theme.textDim,marginTop:5,lineHeight:1.4}}>ⓘ {_L("„Grund“ = dieser Anteil der Rechnung wird nach Wohnfläche (m²) aufgeteilt, der Rest nach den Zählerständen (Verbrauch). Den Grund-Anteil stellst du oben ein.","„Grund“ = faturanın bu kısmı yaşam alanına (m²) göre bölünür, kalanı sayaç değerlerine (tüketim) göre bölünür. Grund oranını yukarıdan ayarlarsın.","„Grund“ = this share of the bill is split by living area (m²), the rest by the meter readings (consumption). You set the Grund share above.")}</div>
               {!pos&&<div style={{fontSize:12,color:"#b45309",marginTop:4}}>{_L("Erst einen Betrag eintragen.","Önce tutar girin.","Enter an amount first.")}</div>}
             </div>:null}
             <div style={{marginTop:NK_HEIZ.indexOf(kat)>=0?10:0}}>{renderMeterState(kat)}</div>
