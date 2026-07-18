@@ -4128,9 +4128,9 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
           {at&&<div style={{marginBottom:10,padding:"10px 14px",borderRadius:12,background:at.rueckstand>0?"rgba(239,68,68,0.08)":"rgba(16,185,129,0.08)",border:"1px solid "+(at.rueckstand>0?"rgba(239,68,68,0.3)":"rgba(16,185,129,0.3)")}}>
             <span style={{fontSize:13}}>{at.rueckstand>0?<b style={{color:theme.danger}}>● {at.monate} {_L("Monate offen","ay açık","months open")} · {_L("Rückstand","Borç","Arrears")} {_e(at.rueckstand)}</b>:<b style={{color:theme.accent}}>✓ {_L("Keine Rückstände","Borç yok","No arrears")}</b>}</span></div>}
           <div style={_sec}><div style={_h}>🏠 {_L("Stammdaten","Daire bilgisi","Flat data")}</div>
-            <div style={{fontSize:13,color:theme.textMuted}}>{isEig?<span>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi kendi kullanıyor","Owner-occupied")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</span>:<span>{_L("Soll-Miete","Hedef kira","Target rent")}: <b style={{color:theme.text}}>{_e(akteU.soll_miete)}</b></span>}{auf.wohnflaeche!=null?<span> · {auf.wohnflaeche} m²</span>:""}</div></div>
+            <div style={{fontSize:13,color:theme.textMuted}}>{isEig?<span>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi kendi kullanıyor","Owner-occupied")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</span>:<span>{_L("Soll-/Marktmiete","Hedef/piyasa kira","Target/market rent")}: <b style={{color:theme.text}}>{_e(akteU.soll_miete)}</b></span>}{auf.wohnflaeche!=null?<span> · {auf.wohnflaeche} m²</span>:""}</div></div>
           <div style={_sec}><div style={_h}>👤 {_L("Aktueller Mieter","Mevcut kiracı","Current tenant")}</div>
-            {at?<div style={{fontSize:13}}><b>{at.mieter_name}</b> <span style={{color:theme.textMuted}}>· {at.von}→{at.bis||_L("läuft","devam","ongoing")} · {_e(at.kaltmiete)}{atf.nk_voraus!=null?" + NK "+_e(atf.nk_voraus):""}</span></div>:isEig?<div style={{fontSize:13,color:theme.accent,fontWeight:600}}>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi oturuyor","Owner lives here")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Kein Mieter (Leerstand)","Kiracı yok (boş)","No tenant (vacant)")}</div>}</div>
+            {at?<div style={{fontSize:13}}><b>{at.mieter_name}</b> <span style={{color:theme.textMuted}}>· {at.von}→{at.bis||_L("läuft","devam","ongoing")} · {_L("Kaltmiete","Kira","Cold rent")} {_e(at.kaltmiete)}{atf.nk_voraus!=null?" · "+_L("Nebenkosten","Yan gider","Utilities")+" "+_e(atf.nk_voraus):""}</span></div>:isEig?<div style={{fontSize:13,color:theme.accent,fontWeight:600}}>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi oturuyor","Owner lives here")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Kein Mieter (Leerstand)","Kiracı yok (boş)","No tenant (vacant)")}</div>}</div>
           {at&&(()=>{
             const rows=(akteMk&&akteMk.rows)?akteMk.rows:[];
             const paid=rows.filter(r=>r.status==="paid"||r.status==="partial");
@@ -4139,6 +4139,8 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
             const mhl=(akteMh&&akteMh.mahnungen)?akteMh.mahnungen:[];
             const lastMh=mhl.length?mhl[mhl.length-1]:null;
             const MONk=["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+            const warmM=(rows.find(r=>r.status!=="future"&&r.status!=="inactive")||{}).soll; // aylık Warm-Soll (mk.rows alanı, hesaplama değil)
+            const fmtD=(d)=>{if(!d)return "";const p=String(d).slice(0,10).split("-");return p.length===3?p[2]+"."+p[1]+"."+p[0]:String(d);};
             return <div style={_sec}>
               <div onClick={()=>toggleAkteMk(at.tenancy_id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
                 <div style={{..._h,marginBottom:0}}>💰 {_L("Mietkonto & Mahnung","Kira hesabı & ihtar","Rent account & dunning")}</div>
@@ -4146,9 +4148,11 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
               </div>
               {akteMkOpen&&<div style={{marginTop:10,fontSize:13,color:theme.textMuted}}>
                 {akteMk===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>:<div>
+                  <div style={{marginBottom:8,color:theme.textDim}}>{_L("Mietzeitraum","Kira dönemi","Rental period")}: <b style={{color:theme.text}}>{fmtD(at.von)} – {at.bis?fmtD(at.bis):_L("heute","bugün","today")}</b></div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"5px 12px"}}>
-                    <span>Soll: <b style={{color:theme.text}}>{_e(at.soll)}</b></span>
+                    <span>{_L("Soll (Zeitraum)","Soll (dönem)","Target (period)")}: <b style={{color:theme.text}}>{_e(at.soll)}</b></span>
                     <span>Ist: <b style={{color:theme.accent}}>{_e(at.ist)}</b></span>
+                    {warmM!=null&&<span>{_L("Warmmiete/Monat","Brüt kira/ay","Warm rent/mo")}: <b style={{color:theme.text}}>{_e(warmM)}</b></span>}
                     <span>{_L("Rückstand","Borç","Arrears")}: <b style={{color:at.rueckstand>0?theme.danger:theme.textMuted}}>{_e(at.rueckstand)}</b></span>
                     <span>{_L("Offene Monate","Açık ay","Open months")}: <b style={{color:theme.text}}>{openMon}</b></span>
                     <span>{_L("Letzte Zahlung","Son ödeme","Last payment")}: <b style={{color:theme.text}}>{lastPaid?MONk[lastPaid.monat-1]:"—"}</b></span>
