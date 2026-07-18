@@ -17,6 +17,7 @@ from autotax.ocr import extract_text, extract_text_and_qr
 from autotax.parser import parse_invoice
 from autotax.db import init_db, save_invoice, SessionLocal
 from autotax.models import Invoice, User, CashEntry, UserCompany, LlmUsage, RecurringExpense, CashCategory, KasseDocument, CashReport
+from autotax.version import __version__   # single source of truth for the product version
 from autotax.duplicate_service import generate_file_hash, find_hard_duplicate, check_soft_duplicate
 from autotax.auth import hash_password, verify_password, create_token, create_access_token, create_refresh_token, decode_token, get_current_user, get_acting_context, require_owner_or_export
 from autotax.audit import audit
@@ -120,7 +121,7 @@ _BOOT_TIME = _time.time()
 
 app = FastAPI(
     title="AutoTax-HUB",
-    version="5.5.5",
+    version=__version__,
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -1377,7 +1378,7 @@ def health():
 
     return {
         "status": status,
-        "version": "5.5.5",
+        "version": __version__,
         "uptime_seconds": int(time.time() - _BOOT_TIME) if "_BOOT_TIME" in globals() else None,
         "response_time_ms": total_ms,
         "db": {"connected": db_ok, "latency_ms": db_latency_ms},

@@ -6616,6 +6616,9 @@ function AuditView(){
 function HelpView(){
   const[openFaq,setOpenFaq]=useState(null);
   const[openGuide,setOpenGuide]=useState(null);
+  // Version aus dem Backend (/health) → Single Source of Truth: autotax/version.py. Fallback bei Fehler.
+  const[ver,setVer]=useState("5.5.5");
+  React.useEffect(()=>{fetch(API+"/health").then(r=>r.json()).then(d=>{if(d&&d.version)setVer(String(d.version));}).catch(()=>{});},[]);
   const _hl=getLang();
   const h3=(de,en,tr)=>_hl==="de"?de:_hl==="tr"?tr:en;
   const features=[
@@ -7076,7 +7079,7 @@ function HelpView(){
     </div>
     <div style={{...css.card,border:"1px solid rgba(245,158,11,0.25)",background:"rgba(245,158,11,0.05)"}}>
       <h3 style={{fontSize:16,fontWeight:700,color:"#f59e0b",margin:"0 0 2px"}}>📣 {h3("Was ist neu?","What's new?","Neler yeni?")}</h3>
-      <div style={{fontSize:12,color:theme.textDim,margin:"0 0 14px",fontWeight:600,fontFamily:mono}}>Version 5.5.5 · {h3("Juni 2026","June 2026","Haziran 2026")}</div>
+      <div style={{fontSize:12,color:theme.textDim,margin:"0 0 14px",fontWeight:600,fontFamily:mono}}>Version {ver} · {h3("Juni 2026","June 2026","Haziran 2026")}</div>
       {(()=>{const blk=(ico,col,title,items)=>(<div style={{marginBottom:12}}><div style={{fontSize:13,fontWeight:700,color:col,marginBottom:4}}>{ico} {title}</div><ul style={{margin:0,paddingLeft:20,display:"flex",flexDirection:"column",gap:3}}>{items.map((x,i)=><li key={i} style={{fontSize:13,color:theme.textMuted,lineHeight:1.5}}>{x}</li>)}</ul></div>);return(<div>
         {blk("✨",theme.accent,h3("Neu","New","Yeni"),[
           h3("Kassenbuch: Zeitraum-Filter (Tag/Woche/Monat/Quartal/Jahr)","Cash Book: period filter (day/week/month/quarter/year)","Kasa: dönem filtresi (gün/hafta/ay/çeyrek/yıl)"),
@@ -7139,7 +7142,7 @@ function HelpView(){
     <div style={{...css.card,border:"1px solid rgba(59,130,246,0.2)",background:"rgba(59,130,246,0.05)"}}>
       <h3 style={{fontSize:14,fontWeight:600,color:theme.blue,margin:"0 0 8px"}}>ℹ️ Technische Informationen</h3>
       <div style={{fontSize:12,color:theme.textMuted,lineHeight:1.8}}>
-        <div>Version: 5.5.5 | Backend: FastAPI (Python) | Frontend: React</div>
+        <div>Version: {ver} | Backend: FastAPI (Python) | Frontend: React</div>
         <div>OCR: ocr.space API + pdfplumber | Datenbank: PostgreSQL</div>
         <div>Hosting: Railway | Encryption: bcrypt (passwords), JWT (auth)</div>
       </div>
