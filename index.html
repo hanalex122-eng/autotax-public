@@ -4144,7 +4144,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
             <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
               <span style={pill(isEig?CP.amber:at?CP.green:CP.grey)}>{isEig?"🟡 "+_L("Eigennutzung","Ev sahibi oturuyor","Owner-occupied"):at?"🟢 "+_L("Vermietet","Kiralık","Rented"):"⚪ "+_L("Leerstand","Boş","Vacant")}</span>
               {at&&<span style={pill(at.rueckstand>0?CP.red:CP.green)}>{at.rueckstand>0?"🔴 "+_L("Rückstand","Borç","Arrears")+" "+_e(at.rueckstand)+(mkReady?" · "+openMon+" "+_L("Monate","ay","mo"):""):"✔ "+_L("Keine Rückstände","Borç yok","No arrears")}</span>}
-              {at&&<span style={pill(lastMh?CP.red:CP.grey)}>📬 {lastMh?lastMh.stufe_text:_L("Mahnung nicht nötig","İhtar gerekmiyor","No dunning needed")}</span>}
+              {at&&<span style={pill(at.rueckstand>0?CP.red:CP.grey)}>📬 {at.rueckstand>0?(lastMh?lastMh.stufe_text:_L("Mahnung möglich","İhtar mümkün","Dunning possible")):_L("Mahnung nicht nötig","İhtar gerekmiyor","No dunning needed")}</span>}
             </div>
             {at&&<div style={{display:"flex",flexWrap:"wrap",gap:"3px 18px",marginTop:9,fontSize:12,color:theme.textMuted}}>
               <span>{_L("Letzte Zahlung","Son ödeme","Last payment")}: <b style={{color:theme.text}}>{mkReady?(lastPaid?MON[lastPaid.monat-1]+" "+acctY:_L("keine","yok","none")):"…"}</b></span>
