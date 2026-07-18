@@ -2477,6 +2477,8 @@ function ImmoTenancyForm({initial,onSave,onCancel}){
       <div style={{flex:1}}><_ImmoField label={_iL("Kaution €","Depozito","Deposit")} error={er.kaution}><input style={_fInp(er.kaution)} type="number" value={f.kaution} onChange={e=>setF({...f,kaution:e.target.value})}/></_ImmoField></div>
     </div>
     <_ImmoField label={_iL("NK-Vorauszahlung €/Monat","Aylık aidat avansı €","NK advance €/mo")} error={er.nk_voraus}><input style={_fInp(er.nk_voraus)} type="number" value={f.nk_voraus} onChange={e=>setF({...f,nk_voraus:e.target.value})}/></_ImmoField>
+    {/* P2.2 — beschreibt, was NK-Vorauszahlung bedeutet (gleiche Formulierung wie in der Erfassung) */}
+    <div style={{fontSize:11,color:theme.textDim,marginTop:-4,marginBottom:8,lineHeight:1.35}}>ⓘ {_iL("Monatliche Vorauszahlung (Wasser, Müll, Heizung…). Zählt zur Schuld.","Aylık avans (su, çöp, ısınma…). Borca dahildir.","Monthly advance (water, waste, heating…). It counts towards the debt.")}</div>
     <_ImmoActions onSave={submit} onCancel={onCancel}/>
   </div>);
 }
