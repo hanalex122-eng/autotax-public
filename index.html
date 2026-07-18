@@ -3669,7 +3669,7 @@ function NkEditor({propertyId,showToast}){
           <span style={{fontWeight:800,color:g?theme.accent:(n?theme.danger:theme.textMuted)}}>{g?_L("Guthaben","Alacak","Credit"):n?_L("Nachzahlung","Ek ödeme","Back-payment"):"±0"} {_e(Math.abs(t.saldo))}</span>
         </div>
         <div style={{fontSize:11,color:theme.textMuted,marginTop:2}}>{_L("Anteil","Pay","Share")} {_e(t.umlage)} − {_L("Vorauszahlung","Avans","Advance")} {_e(t.vorauszahlung)}
-          {locked&&<span onClick={()=>nkPdf(t.tenancy_id)} style={{color:theme.accent,cursor:"pointer",marginLeft:8}}>📄 PDF</span>}</div>
+          <span onClick={()=>nkPdf(t.tenancy_id)} style={{color:theme.accent,cursor:"pointer",marginLeft:8}}>📄 {locked?"PDF":_L("PDF-Entwurf","PDF-Taslak","Draft PDF")}</span></div>
       </div>);})}
       {(erg.tenants||[]).length===0&&<div style={{fontSize:12,color:"#b45309",padding:"6px 0"}}>ℹ️ {_L("Keine aktiven Mieter im Zeitraum — alle Kosten trägt der Vermieter (Leerstand). Richtiges Jahr gewählt?","Dönemde aktif kiracı yok — tüm maliyet ev sahibinde (Leerstand). Doğru yıl mı?","No active tenants in the period — all costs go to the landlord (vacancy). Right year?")}</div>}
       {(erg.eigennutzung||0)>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"9px 0",fontStyle:"italic",color:theme.textMuted}}>
