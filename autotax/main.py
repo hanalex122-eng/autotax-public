@@ -10901,6 +10901,10 @@ async def import_csv(file: UploadFile = File(...), user: dict = Depends(get_curr
                 mwst_raw = row.get("MwSt") or row.get("vat_amount") or ""
                 mwst_satz = row.get("MwSt-Satz") or row.get("vat_rate") or "19%"
                 inv_nr = row.get("Rechnungs-Nr.") or row.get("invoice_number") or ""
+                # Kassenbuch-Nr aus der CSV (handschriftliche Buch-Zeilennummer). Landet in
+                # reference, damit die Kassenbuch-Liste die BUCH-Reihenfolge behält (sortiert
+                # nach der Zahl in reference). Fehlt die Spalte, bleibt alles wie bisher.
+                nr_col = (row.get("Nr") or row.get("nr") or row.get("Nr.") or row.get("NR") or "").strip()
                 if not vendor:
                     vendor = beschreibung[:50] or "Import"
 
@@ -10989,7 +10993,7 @@ async def import_csv(file: UploadFile = File(...), user: dict = Depends(get_curr
                     entry_type=entry_type,
                     category=category,
                     payment_method=payment,
-                    reference=f"CSV-Import Zeile {idx}",
+                    reference=(f"Nr {nr_col}" if nr_col else f"CSV-Import Zeile {idx}"),
                     notes="Importiert aus CSV",
                     date=date_val,
                     invoice_id=inv.id,
