@@ -89,7 +89,10 @@ def init_db():
                                # Flexible Mietmodelle Faz 1 (Sprint 1.1): additive, nullable
                                ("heizkosten_voraus", "DOUBLE PRECISION"),
                                ("zahler_typ", "VARCHAR(20)"),
-                               ("zahler_name", "VARCHAR(200)")):
+                               ("zahler_name", "VARCHAR(200)"),
+                               # Flexible Mietmodelle Faz 2 (Sprint 2.1): Untermieter — additive, nullable
+                               ("typ", "VARCHAR(10)"),
+                               ("parent_tenancy_id", "INTEGER")):
                     if _c not in _tc:
                         conn.execute(text(f"ALTER TABLE immo_tenancy ADD COLUMN {_c} {_t}"))
                         logger.info("Added '%s' column to immo_tenancy", _c)

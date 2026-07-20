@@ -941,6 +941,11 @@ class ImmoTenancy(Base):
     heizkosten_voraus = Column(Float, nullable=True)
     zahler_typ = Column(String(20), nullable=True)
     zahler_name = Column(String(200), nullable=True)
+    # Flexible Mietmodelle Faz 2 (Sprint 2.1) — Untermieter. typ: haupt|unter (NULL=haupt, mevcut kiracı).
+    # parent_tenancy_id: soft self-ref to the Hauptmieter's tenancy. RELATIONSHIP/INFO only — no
+    # accounting effect (monat_soll/Mahnung/NK unchanged). Karar 1=A: Untermieter lives in a SEPARATE unit.
+    typ = Column(String(10), nullable=True)
+    parent_tenancy_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
