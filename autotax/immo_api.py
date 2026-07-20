@@ -237,6 +237,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "heizkosten_vorauszahlung": round(heiz, 2),   # Flexible Mietmodelle Faz 1
                 "gesamtmiete": round(kalt + nk + heiz, 2),
                 "zahler_typ": getattr(t, "zahler_typ", None), "zahler_name": getattr(t, "zahler_name", None),
+                "typ": getattr(t, "typ", None), "parent_tenancy_id": getattr(t, "parent_tenancy_id", None),   # Faz 2
                 "einzug": str(t.von) if t.von else None, "auszug": str(t.bis) if t.bis else None,
                 "offene_forderung": offen, "debtor": offen > 0,
                 # every open month, oldest first — so "Bu Ay" can stop lying with
@@ -859,6 +860,31 @@ def _norm_zahler(v):
     return v if v in _ZAHLER_TYPEN else None
 
 
+# Flexible Mietmodelle Faz 2 (Sprint 2.1): Untermieter — typ + Hauptmieter-Bindung. INFO/relationship
+# only, keine Buchhaltungswirkung.
+def _norm_typ(v):
+    v = (v or "").strip().lower()
+    return v if v in ("haupt", "unter") else None
+
+
+def _validate_parent(db, uid, self_tid, unit_id, parent_id):
+    """Untermieter -> Hauptmieter bağını doğrula. Geçersizse HTTPException. Karar 1=A: farklı Unit zorunlu."""
+    if parent_id is None or (isinstance(parent_id, (int, float)) and parent_id < 0):
+        return None
+    pid = int(parent_id)
+    if self_tid is not None and pid == int(self_tid):
+        raise HTTPException(status_code=400, detail="Untermieter kann sich nicht selbst als Hauptmieter haben")
+    p = db.query(ImmoTenancy).filter(ImmoTenancy.id == pid, ImmoTenancy.user_id == uid,
+                                     _notdel(ImmoTenancy)).first()
+    if not p:
+        raise HTTPException(status_code=400, detail="Hauptmieter (parent_tenancy_id) nicht gefunden")
+    if (getattr(p, "typ", None) or "haupt") == "unter":
+        raise HTTPException(status_code=400, detail="Ein Untermieter kann nicht Hauptmieter sein (nur eine Ebene)")
+    if unit_id is not None and p.unit_id == unit_id:
+        raise HTTPException(status_code=400, detail="Untermieter muss in einer ANDEREN Einheit sein (Phase 2 = getrennte Unit)")
+    return pid
+
+
 def _tenancy_dict(t):
     return {"id": t.id, "unit_id": t.unit_id, "mieter_name": t.mieter_name,
             "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
@@ -870,7 +896,9 @@ def _tenancy_dict(t):
             "personenzahl": getattr(t, "personenzahl", None),
             # Flexible Mietmodelle Faz 1 (Sprint 1.1)
             "heizkosten_voraus": getattr(t, "heizkosten_voraus", None),
-            "zahler_typ": getattr(t, "zahler_typ", None), "zahler_name": getattr(t, "zahler_name", None)}
+            "zahler_typ": getattr(t, "zahler_typ", None), "zahler_name": getattr(t, "zahler_name", None),
+            # Flexible Mietmodelle Faz 2 (Sprint 2.1)
+            "typ": getattr(t, "typ", None), "parent_tenancy_id": getattr(t, "parent_tenancy_id", None)}
 
 
 # Month math lives in autotax/immo_rules.py (pure, DB-free) so that the API layer and
@@ -920,6 +948,8 @@ class TenancyIn(BaseModel):
     heizkosten_voraus: Optional[float] = None   # Flexible Mietmodelle Faz 1 (Sprint 1.1)
     zahler_typ: Optional[str] = None            # mieter|sozialamt|jobcenter|sonstige — Info-only
     zahler_name: Optional[str] = Field(None, max_length=200)
+    typ: Optional[str] = None                   # Flexible Mietmodelle Faz 2 (Sprint 2.1): haupt|unter
+    parent_tenancy_id: Optional[int] = None     # Untermieter -> Hauptmieter tenancy.id
 
 
 class TenancyPatch(BaseModel):
@@ -938,6 +968,8 @@ class TenancyPatch(BaseModel):
     heizkosten_voraus: Optional[float] = None   # Flexible Mietmodelle Faz 1 (Sprint 1.1); -1 = löschen
     zahler_typ: Optional[str] = None            # mieter|sozialamt|jobcenter|sonstige — Info-only
     zahler_name: Optional[str] = Field(None, max_length=200)
+    typ: Optional[str] = None                   # Flexible Mietmodelle Faz 2 (Sprint 2.1): haupt|unter
+    parent_tenancy_id: Optional[int] = None     # Untermieter -> Hauptmieter; -1 = löschen
 
 
 # ── UNITS ─────────────────────────────────────────────────────────────
@@ -1017,12 +1049,15 @@ def create_tenancy(body: TenancyIn, user: dict = Depends(get_current_user)):
     db = SessionLocal()
     try:
         _own_unit(db, _uid(user), body.unit_id)
+        _typ = _norm_typ(body.typ)   # Flexible Mietmodelle Faz 2 (Sprint 2.1)
+        _parent = _validate_parent(db, _uid(user), None, body.unit_id, body.parent_tenancy_id) if _typ == "unter" else None
         t = ImmoTenancy(unit_id=body.unit_id, user_id=_uid(user), mieter_name=body.mieter_name.strip(),
                         von=_pdate(body.von), bis=_pdate(body.bis), kaltmiete=body.kaltmiete,
                         kaution=body.kaution, nk_voraus=body.nk_voraus,
                         heizkosten_voraus=body.heizkosten_voraus,          # Flexible Mietmodelle Faz 1
                         zahler_typ=_norm_zahler(body.zahler_typ),
-                        zahler_name=((body.zahler_name or "").strip() or None))
+                        zahler_name=((body.zahler_name or "").strip() or None),
+                        typ=_typ, parent_tenancy_id=_parent)               # Faz 2
         db.add(t); db.commit(); db.refresh(t)
         return {"success": True, **_tenancy_dict(t)}
     finally:
@@ -1057,6 +1092,16 @@ def update_tenancy(tid: int, body: TenancyPatch, user: dict = Depends(get_curren
             t.zahler_typ = _norm_zahler(body.zahler_typ)
         if body.zahler_name is not None:
             t.zahler_name = body.zahler_name.strip() or None
+        # Flexible Mietmodelle Faz 2 (Sprint 2.1) — Untermieter ilişkisi
+        if body.typ is not None:
+            t.typ = _norm_typ(body.typ)
+            if (t.typ or "haupt") != "unter":
+                t.parent_tenancy_id = None   # Hauptmieter'in parent'ı olmaz
+        if body.parent_tenancy_id is not None:
+            if body.parent_tenancy_id < 0 or (t.typ or "haupt") != "unter":
+                t.parent_tenancy_id = None
+            else:
+                t.parent_tenancy_id = _validate_parent(db, _uid(user), t.id, t.unit_id, body.parent_tenancy_id)
         db.commit(); db.refresh(t)
         return {"success": True, **_tenancy_dict(t)}
     finally:
