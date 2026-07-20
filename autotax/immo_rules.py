@@ -91,7 +91,7 @@ def effective_kalt(t, y: int, m: int) -> float:
 
 
 def monat_soll(t, y: int, m: int) -> float:
-    """Soll für EINEN Monat = WARMMIETE: (Kaltmiete + NK-Vorauszahlung) × Tagesanteil.
+    """Soll für EINEN Monat = WARMMIETE: (Kaltmiete + NK-Voraus. + Heizkosten-Voraus.) × Tagesanteil.
 
     Commit 2 (defect A3): the NK-Vorauszahlung is part of what the tenant owes every
     month. Before, the Soll was Kalt-only, so the debt — and the Mahnung amount — were
@@ -100,13 +100,19 @@ def monat_soll(t, y: int, m: int) -> float:
     Nebenkostenabrechnung (Masterplan #8): you cannot settle Vorauszahlungen you never
     tracked as owed.
 
+    Flexible Mietmodelle Faz 1 (Sprint 1.1): + heizkosten_voraus (separate Heizkosten
+    prepayment). heizkosten_voraus = None -> 0 -> BYTE-IDENTICAL to the pre-Faz-1 Soll.
+    Single-Ledger split (invariant): monat_soll == monat_kalt_soll + monat_nk_soll + monat_heiz_soll.
+
     Exception: `erstmonat_betrag` (vereinbarte Erstmiete) is a GROSS agreed amount for
-    the move-in month — NK is not added on top of it.
+    the move-in month — NK/Heiz are not added on top of it.
     """
     em = getattr(t, "erstmonat_betrag", None)
     if em is not None and t.von and t.von.year == y and t.von.month == m:
         return round(float(em), 2)
-    warm = effective_kalt(t, y, m) + float(getattr(t, "nk_voraus", 0) or 0)
+    warm = (effective_kalt(t, y, m)
+            + float(getattr(t, "nk_voraus", 0) or 0)
+            + float(getattr(t, "heizkosten_voraus", 0) or 0))
     return round(warm * month_proration(t, y, m), 2)
 
 
@@ -115,15 +121,27 @@ def monat_kalt_soll(t, y: int, m: int) -> float:
     (Anlage V, Nebenkostenabrechnung). NOT a debt figure: debt is always monat_soll."""
     em = getattr(t, "erstmonat_betrag", None)
     if em is not None and t.von and t.von.year == y and t.von.month == m:
-        nk = float(getattr(t, "nk_voraus", 0) or 0) * month_proration(t, y, m)
-        return round(max(0.0, float(em) - nk), 2)
+        # Erstmiete is gross: subtract the NK + Heiz prepayment parts to get the Kalt part.
+        # heiz=0 -> byte-identical to the pre-Faz-1 `em - nk`.
+        vor = (float(getattr(t, "nk_voraus", 0) or 0)
+               + float(getattr(t, "heizkosten_voraus", 0) or 0)) * month_proration(t, y, m)
+        return round(max(0.0, float(em) - vor), 2)
     return round(effective_kalt(t, y, m) * month_proration(t, y, m), 2)
+
+
+def monat_heiz_soll(t, y: int, m: int) -> float:
+    """Heizkostenvorauszahlung owed for one month (pro-rated). Flexible Mietmodelle Faz 1:
+    part of the Warmmiete/monat_soll, but deliberately NOT read by the Nebenkostenabrechnung
+    yet (Faz 4 = NK-Heiz-Mahsub). heizkosten_voraus = None -> 0 -> byte-identical to pre-Faz-1."""
+    return round(float(getattr(t, "heizkosten_voraus", 0) or 0) * month_proration(t, y, m), 2)
 
 
 def monat_nk_soll(t, y: int, m: int) -> float:
     """NK-Vorauszahlung owed for one month (pro-rated) — the basis of the future
-    Nebenkostenabrechnung (Masterplan #8)."""
-    return round(monat_soll(t, y, m) - monat_kalt_soll(t, y, m), 2)
+    Nebenkostenabrechnung (Masterplan #8). EXCLUDES Heiz (NK isolation, Faz 1):
+    = monat_soll - monat_kalt_soll - monat_heiz_soll. For heiz=0 this is byte-identical
+    to the pre-Faz-1 `monat_soll - monat_kalt_soll`."""
+    return round(monat_soll(t, y, m) - monat_kalt_soll(t, y, m) - monat_heiz_soll(t, y, m), 2)
 
 
 def soll_faellig(t, y: int, as_of: Optional[date] = None) -> float:
