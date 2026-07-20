@@ -210,6 +210,7 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
             p = props.get(u.property_id) if u else None
             kalt = _effective_kalt(t, now.year, now.month)   # güncel kira (Mieterhöhung sonrası)
             nk = float(t.nk_voraus or 0)
+            heiz = float(getattr(t, "heizkosten_voraus", 0) or 0)   # Flexible Mietmodelle Faz 1
             debt = svc.open_debt(uid, t, now)                # ALL open months, ALL years
             offen = debt.total
             # last payment (immo_rent = payment source of truth)
@@ -233,7 +234,9 @@ def list_mieter(year: Optional[int] = None, user: dict = Depends(get_current_use
                 "unit_id": t.unit_id,                      # Sprint 1: the meter series hangs on the unit
                 "unit_name": (u.name if u else None), "wohnflaeche": (u.wohnflaeche if u else None),
                 "kaltmiete": round(kalt, 2), "nk_vorauszahlung": round(nk, 2),
-                "gesamtmiete": round(kalt + nk, 2),
+                "heizkosten_vorauszahlung": round(heiz, 2),   # Flexible Mietmodelle Faz 1
+                "gesamtmiete": round(kalt + nk + heiz, 2),
+                "zahler_typ": getattr(t, "zahler_typ", None), "zahler_name": getattr(t, "zahler_name", None),
                 "einzug": str(t.von) if t.von else None, "auszug": str(t.bis) if t.bis else None,
                 "offene_forderung": offen, "debtor": offen > 0,
                 # every open month, oldest first — so "Bu Ay" can stop lying with
@@ -849,6 +852,13 @@ def _unit_dict(u):
             "eigennutzung_personen": getattr(u, "eigennutzung_personen", None)}
 
 
+# Flexible Mietmodelle Faz 1 (Sprint 1.1): Zahler-Typ Info-only, auf erlaubte Werte normalisiert.
+_ZAHLER_TYPEN = ("mieter", "sozialamt", "jobcenter", "sonstige")
+def _norm_zahler(v):
+    v = (v or "").strip().lower()
+    return v if v in _ZAHLER_TYPEN else None
+
+
 def _tenancy_dict(t):
     return {"id": t.id, "unit_id": t.unit_id, "mieter_name": t.mieter_name,
             "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
@@ -857,7 +867,10 @@ def _tenancy_dict(t):
             "wgb_erstellt_am": str(t.wgb_erstellt_am) if getattr(t, "wgb_erstellt_am", None) else None,
             "telefon": getattr(t, "telefon", None), "email": getattr(t, "email", None),
             "notiz": getattr(t, "notiz", None), "erstmonat_betrag": getattr(t, "erstmonat_betrag", None),
-            "personenzahl": getattr(t, "personenzahl", None)}
+            "personenzahl": getattr(t, "personenzahl", None),
+            # Flexible Mietmodelle Faz 1 (Sprint 1.1)
+            "heizkosten_voraus": getattr(t, "heizkosten_voraus", None),
+            "zahler_typ": getattr(t, "zahler_typ", None), "zahler_name": getattr(t, "zahler_name", None)}
 
 
 # Month math lives in autotax/immo_rules.py (pure, DB-free) so that the API layer and
@@ -904,6 +917,9 @@ class TenancyIn(BaseModel):
     kaltmiete: Optional[float] = None
     kaution: Optional[float] = None
     nk_voraus: Optional[float] = None
+    heizkosten_voraus: Optional[float] = None   # Flexible Mietmodelle Faz 1 (Sprint 1.1)
+    zahler_typ: Optional[str] = None            # mieter|sozialamt|jobcenter|sonstige — Info-only
+    zahler_name: Optional[str] = Field(None, max_length=200)
 
 
 class TenancyPatch(BaseModel):
@@ -919,6 +935,9 @@ class TenancyPatch(BaseModel):
     notiz: Optional[str] = None
     erstmonat_betrag: Optional[float] = None    # vereinbarte Erstmiete; -1 = löschen (zurück zu Tagesanteil)
     personenzahl: Optional[int] = None          # Sprint 2 (Nebenkosten): Personenzahl key basis
+    heizkosten_voraus: Optional[float] = None   # Flexible Mietmodelle Faz 1 (Sprint 1.1); -1 = löschen
+    zahler_typ: Optional[str] = None            # mieter|sozialamt|jobcenter|sonstige — Info-only
+    zahler_name: Optional[str] = Field(None, max_length=200)
 
 
 # ── UNITS ─────────────────────────────────────────────────────────────
@@ -1000,7 +1019,10 @@ def create_tenancy(body: TenancyIn, user: dict = Depends(get_current_user)):
         _own_unit(db, _uid(user), body.unit_id)
         t = ImmoTenancy(unit_id=body.unit_id, user_id=_uid(user), mieter_name=body.mieter_name.strip(),
                         von=_pdate(body.von), bis=_pdate(body.bis), kaltmiete=body.kaltmiete,
-                        kaution=body.kaution, nk_voraus=body.nk_voraus)
+                        kaution=body.kaution, nk_voraus=body.nk_voraus,
+                        heizkosten_voraus=body.heizkosten_voraus,          # Flexible Mietmodelle Faz 1
+                        zahler_typ=_norm_zahler(body.zahler_typ),
+                        zahler_name=((body.zahler_name or "").strip() or None))
         db.add(t); db.commit(); db.refresh(t)
         return {"success": True, **_tenancy_dict(t)}
     finally:
@@ -1028,6 +1050,13 @@ def update_tenancy(tid: int, body: TenancyPatch, user: dict = Depends(get_curren
             t.erstmonat_betrag = None if body.erstmonat_betrag < 0 else body.erstmonat_betrag
         if body.personenzahl is not None:
             t.personenzahl = None if body.personenzahl < 0 else int(body.personenzahl)
+        # Flexible Mietmodelle Faz 1 (Sprint 1.1)
+        if body.heizkosten_voraus is not None:
+            t.heizkosten_voraus = None if body.heizkosten_voraus < 0 else body.heizkosten_voraus
+        if body.zahler_typ is not None:
+            t.zahler_typ = _norm_zahler(body.zahler_typ)
+        if body.zahler_name is not None:
+            t.zahler_name = body.zahler_name.strip() or None
         db.commit(); db.refresh(t)
         return {"success": True, **_tenancy_dict(t)}
     finally:
