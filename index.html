@@ -2460,10 +2460,12 @@ function ImmoUnitForm({initial,onSave,onCancel}){
 }
 function ImmoTenancyForm({initial,onSave,onCancel}){
   const g=(k)=>{const v=initial?.[k];return (v===null||v===undefined)?"":v;};
-  const [f,setF]=React.useState({mieter_name:initial?.mieter_name||"",von:g("von"),bis:g("bis"),kaltmiete:g("kaltmiete"),kaution:g("kaution"),nk_voraus:g("nk_voraus")});
+  const [f,setF]=React.useState({mieter_name:initial?.mieter_name||"",von:g("von"),bis:g("bis"),kaltmiete:g("kaltmiete"),kaution:g("kaution"),nk_voraus:g("nk_voraus"),heizkosten_voraus:g("heizkosten_voraus"),zahler_typ:initial?.zahler_typ||"mieter",zahler_name:g("zahler_name")});
   const [er,setEr]=React.useState({});
-  const submit=()=>{const e={};if(!f.mieter_name.trim())e.mieter_name=_reqMsg();["kaltmiete","kaution","nk_voraus"].forEach(k=>{if(_badNum(f[k]))e[k]=_numMsg();});setEr(e);if(Object.keys(e).length)return;
-    onSave({mieter_name:f.mieter_name.trim(),von:f.von||null,bis:f.bis||null,kaltmiete:f.kaltmiete===""?null:parseFloat(f.kaltmiete),kaution:f.kaution===""?null:parseFloat(f.kaution),nk_voraus:f.nk_voraus===""?null:parseFloat(f.nk_voraus)});};
+  // Sprint 1.2 — Warmmiete NUR Anzeige (kalt+nk+heiz), salt-okunur; wird nicht gesendet, Backend rechnet selbst.
+  const _warm=(parseFloat(f.kaltmiete)||0)+(parseFloat(f.nk_voraus)||0)+(parseFloat(f.heizkosten_voraus)||0);
+  const submit=()=>{const e={};if(!f.mieter_name.trim())e.mieter_name=_reqMsg();["kaltmiete","kaution","nk_voraus","heizkosten_voraus"].forEach(k=>{if(_badNum(f[k]))e[k]=_numMsg();});setEr(e);if(Object.keys(e).length)return;
+    onSave({mieter_name:f.mieter_name.trim(),von:f.von||null,bis:f.bis||null,kaltmiete:f.kaltmiete===""?null:parseFloat(f.kaltmiete),kaution:f.kaution===""?null:parseFloat(f.kaution),nk_voraus:f.nk_voraus===""?null:parseFloat(f.nk_voraus),heizkosten_voraus:f.heizkosten_voraus===""?null:parseFloat(f.heizkosten_voraus),zahler_typ:f.zahler_typ||"mieter",zahler_name:(f.zahler_typ&&f.zahler_typ!=="mieter")?((f.zahler_name||"").trim()||null):null});};
   const half={display:"flex",gap:6};
   return(<div style={{...css.card,marginTop:8}}>
     <div style={{fontWeight:600,marginBottom:6,fontSize:13}}>{initial?"✎ "+_iL("Mieter bearbeiten","Kiracı düzenle","Edit tenant"):"➕ "+_iL("Mieter / Mietzeit","Kiracı / dönem","Tenancy")}</div>
@@ -2478,7 +2480,25 @@ function ImmoTenancyForm({initial,onSave,onCancel}){
     </div>
     <_ImmoField label={_iL("NK-Vorauszahlung €/Monat","Aylık aidat avansı €","NK advance €/mo")} error={er.nk_voraus}><input style={_fInp(er.nk_voraus)} type="number" value={f.nk_voraus} onChange={e=>setF({...f,nk_voraus:e.target.value})}/></_ImmoField>
     {/* P2.2 — beschreibt, was NK-Vorauszahlung bedeutet (gleiche Formulierung wie in der Erfassung) */}
-    <div style={{fontSize:11,color:theme.textDim,marginTop:-4,marginBottom:8,lineHeight:1.35}}>ⓘ {_iL("Monatliche Vorauszahlung (Wasser, Müll, Heizung…). Zählt zur Schuld.","Aylık avans (su, çöp, ısınma…). Borca dahildir.","Monthly advance (water, waste, heating…). It counts towards the debt.")}</div>
+    <div style={{fontSize:11,color:theme.textDim,marginTop:-4,marginBottom:8,lineHeight:1.35}}>ⓘ {_iL("Monatliche Vorauszahlung (Wasser, Müll…). Zählt zur Schuld.","Aylık avans (su, çöp…). Borca dahildir.","Monthly advance (water, waste…). It counts towards the debt.")}</div>
+    {/* Sprint 1.2 (Flexible Mietmodelle Faz 1) — Heizkosten-Vorauszahlung */}
+    <_ImmoField label={_iL("Heizkosten-Vorauszahlung €/Monat","Isıtma avansı €/ay","Heating advance €/mo")} error={er.heizkosten_voraus}><input style={_fInp(er.heizkosten_voraus)} type="number" value={f.heizkosten_voraus} onChange={e=>setF({...f,heizkosten_voraus:e.target.value})}/></_ImmoField>
+    {/* Warmmiete — automatisch berechnet, salt-okunur (Kalt+NK+Heiz) */}
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",marginBottom:6,background:theme.accentSoft,border:"1px solid "+theme.accent,borderRadius:8}}>
+      <span style={{fontSize:13,fontWeight:700,color:theme.text}}>🔒 {_iL("Warmmiete / Monat","Brüt kira / ay","Warm rent / mo")} <span style={{fontSize:11,fontWeight:400,color:theme.textDim}}>({_iL("automatisch","otomatik","auto")})</span></span>
+      <span style={{fontSize:16,fontWeight:800,color:theme.accent}}>{_warm.toFixed(2)} €</span>
+    </div>
+    <div style={{fontSize:11,color:theme.textDim,marginTop:-2,marginBottom:8,lineHeight:1.35}}>ⓘ {_iL("Warmmiete = Kaltmiete + NK + Heizkosten. Wird automatisch berechnet und kann nicht manuell geändert werden.","Brüt kira = kira + NK + ısıtma. Otomatik hesaplanır, elle değiştirilemez.","Warm rent = cold rent + NK + heating. Calculated automatically, not manually editable.")}</div>
+    {/* Zahler — Info-only (Mieter / Sozialamt / Jobcenter / Sonstige) */}
+    <_ImmoField label={_iL("Zahler","Ödeyen","Payer")}>
+      <select style={_fInp()} value={f.zahler_typ} onChange={e=>setF({...f,zahler_typ:e.target.value})}>
+        <option value="mieter">{_iL("Mieter","Kiracı","Tenant")}</option>
+        <option value="sozialamt">Sozialamt</option>
+        <option value="jobcenter">Jobcenter</option>
+        <option value="sonstige">{_iL("Sonstige","Diğer","Other")}</option>
+      </select>
+    </_ImmoField>
+    {f.zahler_typ&&f.zahler_typ!=="mieter"&&<_ImmoField label={_iL("Name des Zahlers","Ödeyen adı","Payer name")}><input style={_fInp()} value={f.zahler_name} onChange={e=>setF({...f,zahler_name:e.target.value})} placeholder={_iL("z.B. Sozialamt Krefeld","ör. Sozialamt Krefeld","e.g. Sozialamt Krefeld")}/></_ImmoField>}
     <_ImmoActions onSave={submit} onCancel={onCancel}/>
   </div>);
 }
@@ -4080,7 +4100,7 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
           ? <ImmoUnitForm initial={{name:(uf.name!=null?uf.name:u.name),wohnflaeche:uf.wohnflaeche,soll_miete:(uf.soll_miete!=null?uf.soll_miete:u.soll_miete),eigennutzung_personen:uf.eigennutzung_personen}} onSave={b=>saveUnit(u.unit_id,b)} onCancel={()=>setEditUnit(null)}/>
           : <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div style={{fontWeight:700,fontSize:15}}>🏠 {u.name} <span style={{fontSize:12,fontWeight:400,color:theme.textMuted}}>· {_L("Soll","Hedef","Target")} {_e(u.soll_miete)}/{_L("Mon.","ay","mo")}{uf.wohnflaeche!=null?" · "+uf.wohnflaeche+" m²":""} · {_L("Belegung","Doluluk","Occ")} {u.belegungsquote}%</span>{uf.eigennutzung_personen!=null&&<span style={{fontSize:11,fontWeight:700,color:theme.accent,marginLeft:6}}>🏠 {_L("Eigennutzung","Kendi kullanımı","Self-use")} · {uf.eigennutzung_personen} {_L("Pers.","kişi","pers.")}</span>}</div><div style={{display:"flex",gap:12,alignItems:"center"}}><span style={{cursor:"pointer",color:theme.accent,fontWeight:700}} title={_L("Wohnung-Akte öffnen","Daire dosyasını aç","Open flat file")} onClick={()=>openAkte(u)}>📂 {_L("Akte","Dosya","File")}</span><span style={{cursor:"pointer",color:theme.textMuted}} title={_L("Bearbeiten","Düzenle","Edit")} onClick={()=>{setEditUnit(u.unit_id);setEditTen(null);}}>✎</span><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("units",u.unit_id)}>✕</span></div></div>}
         <div style={{marginTop:8}}>{tncs.filter(t=>t.unit_id===u.unit_id).map(t=>{const tf=tFull[t.tenancy_id]||{};return editTen===t.tenancy_id
-          ? <ImmoTenancyForm key={t.tenancy_id} initial={{mieter_name:t.mieter_name,von:t.von,bis:t.bis,kaltmiete:t.kaltmiete,kaution:tf.kaution,nk_voraus:tf.nk_voraus}} onSave={b=>saveTen(t.tenancy_id,b)} onCancel={()=>setEditTen(null)}/>
+          ? <ImmoTenancyForm key={t.tenancy_id} initial={{mieter_name:t.mieter_name,von:t.von,bis:t.bis,kaltmiete:t.kaltmiete,kaution:tf.kaution,nk_voraus:tf.nk_voraus,heizkosten_voraus:tf.heizkosten_voraus,zahler_typ:tf.zahler_typ,zahler_name:tf.zahler_name}} onSave={b=>saveTen(t.tenancy_id,b)} onCancel={()=>setEditTen(null)}/>
           : <React.Fragment key={t.tenancy_id}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:13,padding:"6px 8px",background:theme.surfaceAlt,borderRadius:8,marginBottom:4,flexWrap:"wrap"}}><span>👤 <b>{t.mieter_name}</b> <span style={{color:theme.textMuted,fontSize:12}}>{t.von}→{t.bis||_L("läuft","devam","ongoing")} · {_e(t.kaltmiete)}{tf.nk_voraus!=null?" + NK "+_e(tf.nk_voraus):""}</span></span><span style={{display:"flex",gap:12}}><span style={{cursor:"pointer",color:theme.blue}} title={_L("Wohnungsgeberbestätigung","Konut sağlayıcı belgesi","Landlord confirmation")} onClick={()=>setWgbFor(wgbFor===t.tenancy_id?null:t.tenancy_id)}>📄</span><span style={{cursor:"pointer",color:theme.textMuted}} title={_L("Bearbeiten","Düzenle","Edit")} onClick={()=>{setEditTen(t.tenancy_id);setEditUnit(null);}}>✎</span><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("tenancies",t.tenancy_id)}>✕</span></span></div>
           {wgbFor===t.tenancy_id&&<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",padding:"6px 8px",marginBottom:4,background:theme.blueSoft,borderRadius:8,fontSize:12}}><span style={{color:theme.textMuted}}>📄 {_L("Wohnungsgeberbestätigung (§19 BMG)","Konut belgesi","Confirmation")}:</span><button style={{...css.btn(theme.blue),padding:"5px 12px",fontSize:12}} onClick={()=>dlWgb(t.tenancy_id,"einzug")}>{_L("Einzug","Giriş","Move-in")}</button><button style={{...css.btnOutline,padding:"5px 12px",fontSize:12}} onClick={()=>dlWgb(t.tenancy_id,"auszug")}>{_L("Auszug","Çıkış","Move-out")}</button><button style={{...css.btnOutline,padding:"5px 12px",fontSize:12}} onClick={()=>setWgbFor(null)}>{_L("Abbrechen","İptal","Cancel")}</button></div>}
           </React.Fragment>;})}</div>
