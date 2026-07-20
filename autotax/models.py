@@ -935,6 +935,12 @@ class ImmoTenancy(Base):
     # Sprint 2 (Nebenkosten): basis for the Personenzahl allocation key (e.g. Müll).
     # Stored now so Sprint 3 wiring is code-only; nullable, no existing behaviour depends on it.
     personenzahl = Column(Integer, nullable=True)
+    # Flexible Mietmodelle Faz 1 (Sprint 1.1) — additive, nullable. heizkosten_voraus: separate
+    # monthly Heizkosten prepayment; Warmmiete/monat_soll = Kalt + NK + Heiz. zahler_typ/name:
+    # WHO pays (mieter|sozialamt|jobcenter|sonstige) — INFO ONLY, no accounting effect (Faz 1).
+    heizkosten_voraus = Column(Float, nullable=True)
+    zahler_typ = Column(String(20), nullable=True)
+    zahler_name = Column(String(200), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)

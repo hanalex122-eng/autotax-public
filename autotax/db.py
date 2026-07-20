@@ -85,7 +85,11 @@ def init_db():
                 for _c, _t in (("telefon", "VARCHAR(50)"), ("email", "VARCHAR(200)"),
                                ("notiz", "TEXT"), ("miete_historie", "TEXT"),
                                ("erstmonat_betrag", "DOUBLE PRECISION"),
-                               ("personenzahl", "INTEGER")):   # Sprint 2 (Nebenkosten): Personenzahl key
+                               ("personenzahl", "INTEGER"),   # Sprint 2 (Nebenkosten): Personenzahl key
+                               # Flexible Mietmodelle Faz 1 (Sprint 1.1): additive, nullable
+                               ("heizkosten_voraus", "DOUBLE PRECISION"),
+                               ("zahler_typ", "VARCHAR(20)"),
+                               ("zahler_name", "VARCHAR(200)")):
                     if _c not in _tc:
                         conn.execute(text(f"ALTER TABLE immo_tenancy ADD COLUMN {_c} {_t}"))
                         logger.info("Added '%s' column to immo_tenancy", _c)
