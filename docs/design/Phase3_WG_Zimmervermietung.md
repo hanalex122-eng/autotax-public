@@ -6,6 +6,15 @@
 > `.claude/nk_architecture.md` (Principle A/B/C) · `docs/roadmap/Flexible_Mietmodelle_Phase1.md` (§7 Ürün Prensibi, §8 Veri Modeli, §9 Tasarım İlkeleri)
 > **Yöntem:** Bu belgedeki her teknik iddia mevcut kod okunarak doğrulandı; iddialar `dosya:satır` ile referanslıdır. Varsayım kullanılmadı.
 >
+> **Revizyon 3 (2026-07-21) — Guardrail = HARD VALIDATION.** §9.3-U3 ve §10/Sprint 3.0'daki
+> *"uyarı, engelleme değil"* ifadesi geçersizdir. Karar: aynı Unit'te tarih aralığı **örtüşen** ikinci
+> tenancy'nin oluşturulması **engellenir** — **override yok, sadece-uyarı yok.** Gerekçe: Sprint 3.0
+> unit-seviye türetmeleri düzeltir ama **NK motoru aynı Unit'teki çoklu tenancy'yi henüz doğru
+> hesaplamaz** (Sprint 3.1); hesaplanamayan bir durumun kaydedilmesine izin vermek, sessizce yanlış
+> Abrechnung üretmek ve finalize edilirse snapshot'a dondurmak demektir. Bu karar **Sprint 3.1 sonrasında
+> yeniden değerlendirilebilir** (o zaman kural kaldırılmaz, alan korunumuna **koşullu** hale gelir).
+> Uygulama planı: `Sprint_3_0_Technical_Design.md` §5.
+>
 > **Revizyon 2 (2026-07-21) — alınan kararlar:** ① T2 prod'da ölçüldü → **0 örtüşme** (§9.1-T2) ·
 > ② HeizkostenV: oda bazlı tüketim dağıtımı **kapsam dışı**, m² + görünür Hinweis, **Professional Review
 > Required** (§6.3) · ③ Gesamtschuldnerische WG **kapsam dışı — onaylandı** (§1.2-A, §2.2) ·
@@ -372,7 +381,7 @@ hiçbir yazma yapılmadı), uygulama container'ı üzerinden çalıştırıldı.
 |---|---|---|
 | U1 | **Karmaşıklık, çoğunluğa sızar** — 1 daire = 1 kiracı olan ev sahibi yeni alanlar görürse ürün "ağırlaşır" | §8'deki "sessiz aktivasyon yok" ilkesi: WG alanları yalnız gerektiğinde görünür |
 | U2 | Ev sahibi `anteil_flaeche`'yi **yanlış anlar** (odanın net alanı mı, ortak alan payı dahil mi?) | Alan yanında tek cümlelik açıklama + toplam/kalan göstergesi. Boş bırakılabilir olması güvenlik supabıdır |
-| U3 | **WG'yi yanlış senaryoda kullanma** — aslında ayrı daire olması gereken yerde | Guardrail: aynı Unit'e ikinci aktif tenancy eklenirken açık onay ("Bu bir WG/Zimmervermietung mu, yoksa ayrı bir daire mi?") — backlog'daki Doppel-Wohnung Guardrail ile aynı ailedendir |
+| U3 | **WG'yi yanlış senaryoda kullanma** — aslında ayrı daire olması gereken yerde | **Guardrail = HARD VALIDATION (Rev. 3):** aynı Unit'te tarih aralığı örtüşen ikinci tenancy **reddedilir** (400), override yok. Hata mesajı yol gösterir (ayrı Einheit / kiracı değişimiyse önce Auszug tarihi). Sprint 3.1'de kural kaldırılmaz, **alan korunumuna koşullu** hale gelir. Backlog'daki Doppel-Wohnung Guardrail ile aynı ailedendir |
 | U4 | Üç formun yeniden ayrışması | Sprint 2.1'in dersi: her form değişikliği üçünde de aynı anda yapılır, aksi hâlde "iki ekran farklı gerçek söyler" |
 
 ---
@@ -391,7 +400,7 @@ Aynı Unit'te birden çok tenancy **bugün de mümkün** olduğu için (API çak
 türetmeler önce düzeltilir. Prod'da bugün örtüşen kayıt **yok** (§9.1-T2) → bu sprint **saf iyileştirmedir**,
 hiçbir mevcut rakamı değiştirmez.
 Kapsam: `act[0]` → tüm aktif tenancy'lerin toplamı (`immo_api.py:1185`, `:1292`) · Wohnung Akte'nin N kiracı
-göstermesi (`index.html:3939`) · aynı Unit'te örtüşen tenancy için **guardrail uyarısı** (engelleme değil, U3).
+göstermesi (`index.html:3939`) · aynı Unit'te örtüşen tenancy için **guardrail = hard validation** (Rev. 3, U3).
 **Şema değişikliği yok. NK motoruna dokunulmaz.**
 **DoD:** tek tenancy'li tüm senaryolarda rakamlar **birebir aynı** (SHA256 snapshot testi) · iki tenancy'li
 **sentetik** senaryoda property Soll = iki tenancy'nin toplamı · guardrail yanlış kullanımı yakalıyor ·
