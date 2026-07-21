@@ -27,3 +27,15 @@ node_modules/
 # Local file storage (uploads)
 data/
 
+# Test harness OUTPUT — üretilen dosyalar, kaynak değil. tests/build_*.py ile her an
+# yeniden üretilir; commit edilmez. Kaynaklar (tests/build_*.py, tests/_babelcheck.js)
+# bilerek KAPSAM DIŞI — onlar araç, çıktı değil.
+tests/_*.html
+tests/_*.txt
+tests/*.png
+tests/*.pdf
+
+# Tek seferlik operasyon/analiz script'leri için ortak ev (kök dizin temiz kalsın).
+# Kalıcı olması gereken bir şey yazdıysan scratch/ dışına taşı.
+scratch/
+
