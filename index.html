@@ -2932,9 +2932,14 @@ function MieterView({onNav,showToast}){
     if(!confirm(_L(stTxt+" für „"+m.mieter_name+"“ über "+_e(m.offene_forderung)+" erstellen? (wird dauerhaft protokolliert)","„"+m.mieter_name+"“ için "+stTxt+" ("+_e(m.offene_forderung)+") oluşturulsun mu? (kalıcı kaydedilir)","Create "+stTxt+" for „"+m.mieter_name+"“ over "+_e(m.offene_forderung)+"? (recorded permanently)")))return;try{const r=await fetch(API+"/immo/tenancies/"+m.tenancy_id+"/mahnung",{method:"POST",headers:{Authorization:"Bearer "+localStorage.getItem("atx_token"),"Content-Type":"application/json"},body:JSON.stringify({stufe:st,year:new Date().getFullYear()})});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();if(j&&j.detail)msg=j.detail;}catch(e){}alert(msg);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Mahnung_"+((m.mieter_name||"Mieter").replace(/[^a-zA-Z0-9]/g,"_"))+".pdf";a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(u);},1500);if(showToast)showToast(_L("Mahnung erstellt ✓","Mahnung oluşturuldu ✓","Mahnung created ✓"),"success");}catch(e){alert(e.message);}};
   // ── Bearbeiten: von/bis/Kaltmiete/NK düzenle (bis boş = aktif, çıkış yok) ──
   const [editFor,setEditFor]=React.useState(null);
-  const [editF,setEditF]=React.useState({name:"",von:"",bis:"",kalt:"",nk:"",heiz:"",ztyp:"mieter",zname:"",telefon:"",email:"",kaution:"",erst:"",personen:"",erhAb:"",erhKalt:""});
-  const openEdit=(m)=>{setEditF({name:m.mieter_name||"",von:m.einzug||"",bis:m.auszug||"",kalt:String(m.kaltmiete==null?"":m.kaltmiete),nk:String(m.nk_vorauszahlung==null?"":m.nk_vorauszahlung),heiz:(m.heizkosten_vorauszahlung?String(m.heizkosten_vorauszahlung):""),ztyp:m.zahler_typ||"mieter",zname:m.zahler_name||"",telefon:m.telefon||"",email:m.email||"",kaution:String(m.kaution==null?"":m.kaution),erst:String(m.erstmonat_betrag==null?"":m.erstmonat_betrag),personen:String(m.personenzahl==null?"":m.personenzahl),erhAb:"",erhKalt:""});setEditFor(editFor===m.tenancy_id?null:m.tenancy_id);};
-  const saveEdit=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id,{method:"PATCH",body:JSON.stringify({mieter_name:editF.name.trim()||m.mieter_name,von:editF.von||"",bis:editF.bis||"",kaltmiete:editF.kalt===""?null:parseFloat(editF.kalt),nk_voraus:editF.nk===""?null:parseFloat(editF.nk),heizkosten_voraus:editF.heiz===""?null:parseFloat(editF.heiz),zahler_typ:editF.ztyp||"mieter",zahler_name:(editF.ztyp&&editF.ztyp!=="mieter")?((editF.zname||"").trim()||null):null,kaution:editF.kaution===""?null:parseFloat(editF.kaution),telefon:editF.telefon,email:editF.email,erstmonat_betrag:editF.erst===""?-1:parseFloat(editF.erst),personenzahl:editF.personen===""?-1:parseInt(editF.personen)})});setEditFor(null);load();if(showToast)showToast(_L("Gespeichert ✓","Kaydedildi ✓","Saved ✓"),"success");}catch(e){alert(e.message);}};
+  const [editF,setEditF]=React.useState({name:"",von:"",bis:"",kalt:"",nk:"",heiz:"",ztyp:"mieter",zname:"",typ:"haupt",parent:"",telefon:"",email:"",kaution:"",erst:"",personen:"",erhAb:"",erhKalt:""});
+  // Sprint 2.1 (Flexible Mietmodelle Faz 2) — Untermieter: aday Hauptmieter = aynı bina · farklı Unit ·
+  // typ!=unter (tek seviye) · kendisi değil. Backend _validate_parent aynı kuralları zorunlu kılar.
+  const _pKey=(x)=>(x.property_name||"")+"|"+(x.property_address||"");
+  const hmCands=(m)=>(rows||[]).filter(x=>x.tenancy_id!==m.tenancy_id&&x.unit_id!==m.unit_id&&x.typ!=="unter"&&_pKey(x)===_pKey(m));
+  const hmName=(pid)=>{const p=(rows||[]).find(x=>x.tenancy_id===pid);return p?p.mieter_name:null;};
+  const openEdit=(m)=>{setEditF({name:m.mieter_name||"",von:m.einzug||"",bis:m.auszug||"",kalt:String(m.kaltmiete==null?"":m.kaltmiete),nk:String(m.nk_vorauszahlung==null?"":m.nk_vorauszahlung),heiz:(m.heizkosten_vorauszahlung?String(m.heizkosten_vorauszahlung):""),ztyp:m.zahler_typ||"mieter",zname:m.zahler_name||"",typ:(m.typ==="unter"?"unter":"haupt"),parent:(m.parent_tenancy_id==null?"":String(m.parent_tenancy_id)),telefon:m.telefon||"",email:m.email||"",kaution:String(m.kaution==null?"":m.kaution),erst:String(m.erstmonat_betrag==null?"":m.erstmonat_betrag),personen:String(m.personenzahl==null?"":m.personenzahl),erhAb:"",erhKalt:""});setEditFor(editFor===m.tenancy_id?null:m.tenancy_id);};
+  const saveEdit=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id,{method:"PATCH",body:JSON.stringify({mieter_name:editF.name.trim()||m.mieter_name,von:editF.von||"",bis:editF.bis||"",kaltmiete:editF.kalt===""?null:parseFloat(editF.kalt),nk_voraus:editF.nk===""?null:parseFloat(editF.nk),heizkosten_voraus:editF.heiz===""?null:parseFloat(editF.heiz),zahler_typ:editF.ztyp||"mieter",zahler_name:(editF.ztyp&&editF.ztyp!=="mieter")?((editF.zname||"").trim()||null):null,typ:editF.typ||"haupt",parent_tenancy_id:(editF.typ==="unter"&&editF.parent)?parseInt(editF.parent):-1,kaution:editF.kaution===""?null:parseFloat(editF.kaution),telefon:editF.telefon,email:editF.email,erstmonat_betrag:editF.erst===""?-1:parseFloat(editF.erst),personenzahl:editF.personen===""?-1:parseInt(editF.personen)})});setEditFor(null);load();if(showToast)showToast(_L("Gespeichert ✓","Kaydedildi ✓","Saved ✓"),"success");}catch(e){alert(e.message);}};
   const saveErhoehung=async(m)=>{if(!editF.erhAb||!(parseFloat(editF.erhKalt)>0)){alert(_L("Datum und neue Kaltmiete nötig.","Tarih ve yeni kira gerekli.","Date and new rent required."));return;}try{await api("/immo/tenancies/"+m.tenancy_id+"/mieterhoehung",{method:"POST",body:JSON.stringify({ab:editF.erhAb,kalt:parseFloat(editF.erhKalt)})});setEditF({...editF,erhAb:"",erhKalt:""});setEditFor(null);load();if(showToast)showToast(_L("Mieterhöhung gespeichert ✓","Kira artışı kaydedildi ✓","Rent increase saved ✓"),"success");}catch(e){alert(e.message);}};
   const openPay=(m)=>{setPayDate(new Date().toISOString().slice(0,10));setPayAmt(String(m.gesamtmiete||""));setPayFor(m.tenancy_id);};
   const confirmPay=async(m)=>{try{await api("/immo/tenancies/"+m.tenancy_id+"/monat-bezahlt",{method:"POST",body:JSON.stringify({jahr:curY,monat:curM,datum:payDate,betrag:parseFloat(payAmt)||m.gesamtmiete})});setPayFor(null);load();if(showToast)showToast(_L("Als bezahlt markiert","Ödendi işaretlendi","Marked paid"),"success");}catch(e){alert(e.message);}};
@@ -2994,6 +2999,8 @@ function MieterView({onNav,showToast}){
         <span style={css.badge(ph.bg,ph.c)}>{ph.lbl}</span>
         <div style={{fontSize:22,fontWeight:800,color:theme.text,marginTop:6}}>{m.mieter_name}</div>
         <div style={{fontSize:13,color:theme.textMuted}}>{[m.property_name,m.unit_name,(m.wohnflaeche!=null?m.wohnflaeche+" m²":null)].filter(Boolean).join(" · ")}</div>
+        {/* Sprint 2.1 — Untermieter-Beziehung (NUR Anzeige; Miete/Schuld bleibt bei diesem Mietverhältnis) */}
+        {m.typ==="unter"&&<div style={{fontSize:12,color:theme.textDim,marginTop:3}}>🔗 {_L("Untermieter","Alt kiracı","Subtenant")}{hmName(m.parent_tenancy_id)?" → "+hmName(m.parent_tenancy_id):(m.parent_tenancy_id?"":" · ⚠ "+_L("Hauptmieter nicht gewählt","ana kiracı seçilmedi","no main tenant selected"))}</div>}
         {(m.telefon||m.email)&&<div style={{fontSize:12,color:theme.textDim,marginTop:2}}>{[m.telefon?"📞 "+m.telefon:null,m.email?"✉️ "+m.email:null].filter(Boolean).join("   ·   ")}</div>}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{chip(m.anmeldung_done,"Anmeldung")}{chip(m.wgb_done,"WGB")}</div>
       </div>
@@ -3176,6 +3183,8 @@ function MieterView({onNav,showToast}){
         <div><span style={css.badge(ph.bg,ph.c)}>{ph.lbl}</span></div>
         <div style={{fontSize:17,fontWeight:800,color:theme.text,marginTop:6}}>{m.mieter_name}</div>
         <div style={{fontSize:13,color:theme.textMuted}}>{[m.property_name,m.unit_name,(m.wohnflaeche!=null?m.wohnflaeche+" m²":null)].filter(Boolean).join(" · ")}</div>
+        {/* Sprint 2.1 — Untermieter-Beziehung (NUR Anzeige; Miete/Schuld bleibt bei diesem Mietverhältnis) */}
+        {m.typ==="unter"&&<div style={{fontSize:12,color:theme.textDim,marginTop:3}}>🔗 {_L("Untermieter","Alt kiracı","Subtenant")}{hmName(m.parent_tenancy_id)?" → "+hmName(m.parent_tenancy_id):(m.parent_tenancy_id?"":" · ⚠ "+_L("Hauptmieter nicht gewählt","ana kiracı seçilmedi","no main tenant selected"))}</div>}
         {(m.telefon||m.email)&&<div style={{fontSize:12,color:theme.textDim,marginTop:2}}>{[m.telefon?"📞 "+m.telefon:null,m.email?"✉️ "+m.email:null].filter(Boolean).join("   ·   ")}</div>}
         <div style={{display:"flex",gap:"4px 14px",flexWrap:"wrap",fontSize:13,marginTop:10,paddingTop:10,borderTop:"1px solid "+theme.border}}>
           <span style={{color:theme.textMuted}}>Kalt <b style={{color:theme.text}}>{_e(m.kaltmiete)}</b></span>
@@ -3229,6 +3238,25 @@ function MieterView({onNav,showToast}){
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Zahler","Ödeyen","Payer")}</label><select style={_ef} value={editF.ztyp} onChange={e=>setEditF({...editF,ztyp:e.target.value})}><option value="mieter">{_L("Mieter","Kiracı","Tenant")}</option><option value="sozialamt">Sozialamt</option><option value="jobcenter">Jobcenter</option><option value="sonstige">{_L("Sonstige","Diğer","Other")}</option></select></div>
             {editF.ztyp&&editF.ztyp!=="mieter"&&<div style={{flex:1,minWidth:120}}><label style={{fontSize:11,color:theme.textDim}}>{_L("Zahler-Name","Ödeyen adı","Payer name")}</label><input style={_ef} value={editF.zname} onChange={e=>setEditF({...editF,zname:e.target.value})} placeholder="z.B. Sozialamt Krefeld"/></div>}
+          </div>
+          {/* Sprint 2.1 (Flexible Mietmodelle Faz 2) — Untermieter: nur Beziehung, keine Buchhaltung.
+              Eigenes Mietkonto/Mahnung bleibt pro Mietverhältnis (Single Ledger). */}
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <input type="checkbox" checked={editF.typ==="unter"} onChange={e=>setEditF({...editF,typ:e.target.checked?"unter":"haupt",parent:e.target.checked?editF.parent:""})}/>
+              <span style={{fontSize:13,color:theme.text,cursor:"pointer"}} onClick={()=>setEditF({...editF,typ:editF.typ==="unter"?"haupt":"unter",parent:editF.typ==="unter"?"":editF.parent})}>🔗 {_L("Untermieter (in anderer Einheit)","Untermieter (ayrı dairede)","Subtenant (separate flat)")}</span>
+            </div>
+            {editF.typ==="unter"&&<div style={{marginTop:6}}>
+              <label style={{fontSize:11,color:theme.textDim}}>{_L("Hauptmieter","Ana kiracı","Main tenant")}</label>
+              <select style={_ef} value={editF.parent} onChange={e=>setEditF({...editF,parent:e.target.value})}>
+                <option value="">— {_L("wählen","seç","select")} —</option>
+                {hmCands(m).map(h=><option key={h.tenancy_id} value={h.tenancy_id}>{h.mieter_name}{h.unit_name?" · "+h.unit_name:""}</option>)}
+                {/* bestehende Bindung, die nicht (mehr) in der Kandidatenliste steht — sonst wäre das Feld leer */}
+                {editF.parent&&!hmCands(m).some(h=>String(h.tenancy_id)===String(editF.parent))&&<option value={editF.parent}>{hmName(parseInt(editF.parent))||("#"+editF.parent)}</option>}
+              </select>
+              {!editF.parent&&<div style={{fontSize:11,color:"#f59e0b",marginTop:4}}>⚠ {_L("Kein Hauptmieter gewählt — die Beziehung bleibt offen.","Ana kiracı seçilmedi — ilişki boş kalır.","No main tenant selected — the link stays empty.")}</div>}
+              {!hmCands(m).length&&<div style={{fontSize:11,color:theme.textDim,marginTop:4}}>{_L("Kein möglicher Hauptmieter im Gebäude (nötig: andere Einheit).","Binada uygun ana kiracı yok (farklı daire gerekir).","No eligible main tenant in this building (a different flat is required).")}</div>}
+            </div>}
           </div>
           <div style={{background:"rgba(59,130,246,0.08)",border:"1px solid rgba(59,130,246,0.25)",borderRadius:8,padding:"8px 10px"}}>
             <label style={{fontSize:11,color:theme.textDim,display:"block",marginBottom:4}}>📅 {_L("Vereinbarte Erstmiete (Einzugsmonat) €","İlk ay anlaşılan kira (giriş ayı) €","Agreed first-month rent €")}</label>
