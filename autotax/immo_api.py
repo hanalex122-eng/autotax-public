@@ -885,6 +885,46 @@ def _validate_parent(db, uid, self_tid, unit_id, parent_id):
     return pid
 
 
+# ── Sprint 3.0 (Phase 3 guardrail) — one unit, one contract at a time ────────────────
+# Two contracts in the same unit at the same time (WG / Zimmervermietung) is a real German
+# renting model, but the Nebenkosten engine cannot yet split a unit's area between them
+# (Sprint 3.1). Until it can, creating such an overlap would silently produce a wrong
+# Abrechnung — and a finalised one freezes into an immutable snapshot. So we block it here
+# rather than letting the landlord discover it in a settlement. HARD VALIDATION, no override
+# (design: docs/design/Phase3_WG_Zimmervermietung.md Rev.3 · Sprint_3_0_Technical_Design.md §5).
+def _ranges_overlap(a_von, a_bis, b_von, b_bis):
+    """True if two tenancy periods really overlap. Touching endpoints (A ends the day B starts)
+    is NOT an overlap — that is the normal same-day handover."""
+    if a_von is not None and b_bis is not None and a_von >= b_bis:
+        return False
+    if b_von is not None and a_bis is not None and b_von >= a_bis:
+        return False
+    return True
+
+
+def _assert_no_overlap(db, uid, unit_id, von, bis, self_tid=None):
+    """Reject a second, time-overlapping tenancy in the same unit. Only NEW writes are checked —
+    existing rows are never validated or touched."""
+    if unit_id is None:
+        return
+    q = db.query(ImmoTenancy).filter(ImmoTenancy.unit_id == unit_id, ImmoTenancy.user_id == uid,
+                                     _notdel(ImmoTenancy))
+    if self_tid is not None:
+        q = q.filter(ImmoTenancy.id != self_tid)
+    for o in q.all():
+        if not _ranges_overlap(von, bis, o.von, o.bis):
+            continue
+        u = db.query(ImmoUnit).filter(ImmoUnit.id == unit_id).first()
+        _u = (u.name if u and u.name else "diese Einheit")
+        _z = "%s–%s" % (o.von or "?", o.bis or "offen")
+        raise HTTPException(status_code=400, detail=(
+            "Die Einheit „%s“ ist in diesem Zeitraum bereits vermietet (%s, %s). "
+            "Mehrere gleichzeitige Mietverhältnisse in einer Einheit sind noch nicht möglich. "
+            "→ Bei Mieterwechsel zuerst das Auszugsdatum des bisherigen Mietverhältnisses eintragen. "
+            "→ Für Zimmervermietung/WG bitte je Zimmer eine eigene Einheit anlegen."
+        ) % (_u, o.mieter_name or "bestehendes Mietverhältnis", _z))
+
+
 def _tenancy_dict(t):
     return {"id": t.id, "unit_id": t.unit_id, "mieter_name": t.mieter_name,
             "von": str(t.von) if t.von else "", "bis": str(t.bis) if t.bis else "",
@@ -1051,6 +1091,8 @@ def create_tenancy(body: TenancyIn, user: dict = Depends(get_current_user)):
         _own_unit(db, _uid(user), body.unit_id)
         _typ = _norm_typ(body.typ)   # Flexible Mietmodelle Faz 2 (Sprint 2.1)
         _parent = _validate_parent(db, _uid(user), None, body.unit_id, body.parent_tenancy_id) if _typ == "unter" else None
+        # Sprint 3.0 guardrail — one unit, one contract at a time (see _assert_no_overlap)
+        _assert_no_overlap(db, _uid(user), body.unit_id, _pdate(body.von), _pdate(body.bis))
         t = ImmoTenancy(unit_id=body.unit_id, user_id=_uid(user), mieter_name=body.mieter_name.strip(),
                         von=_pdate(body.von), bis=_pdate(body.bis), kaltmiete=body.kaltmiete,
                         kaution=body.kaution, nk_voraus=body.nk_voraus,
@@ -1074,6 +1116,9 @@ def update_tenancy(tid: int, body: TenancyPatch, user: dict = Depends(get_curren
         if body.mieter_name is not None: t.mieter_name = body.mieter_name.strip()
         if body.von is not None: t.von = _pdate(body.von)
         if body.bis is not None: t.bis = _pdate(body.bis)
+        # Sprint 3.0 guardrail — only when the period actually changed; nothing is committed if it raises
+        if body.von is not None or body.bis is not None:
+            _assert_no_overlap(db, _uid(user), t.unit_id, t.von, t.bis, self_tid=t.id)
         if body.kaltmiete is not None: t.kaltmiete = body.kaltmiete
         if body.kaution is not None: t.kaution = body.kaution
         if body.nk_voraus is not None: t.nk_voraus = body.nk_voraus
@@ -1182,7 +1227,11 @@ def _accounting(db, uid, pid, year):
             act = [t for t in u_ten if _tenancy_active_in_month(t, year, m)]
             if act:
                 occ += 1
-                soll_u += _monat_soll(act[0], year, m)   # Warmmiete, anteilig — same Soll as the debt
+                # Sprint 3.0: SUM over every active tenancy, not just the first one. A unit may carry
+                # more than one contract (WG/Zimmervermietung, or a data-entry overlap) — with act[0]
+                # the second contract's Warmmiete silently vanished from the property Soll while its
+                # Rückstand was still counted, so a report could show "arrears > target".
+                soll_u += sum(_monat_soll(t, year, m) for t in act)   # Warmmiete, anteilig — same Soll as the debt
             else:
                 vac += 1
         leer = vac * float(u.soll_miete or 0)
@@ -1289,7 +1338,9 @@ def _portfolio(db, uid, year):
         for m in range(1, 13):
             act = [t for t in ut if _tenancy_active_in_month(t, year, m)]
             if act:
-                soll_total += _monat_soll(act[0], year, m)   # same Soll the debt uses
+                # Sprint 3.0: sum every active tenancy (see _accounting) — act[0] under-reported the
+                # portfolio Soll and skewed the cockpit inkasso ratio (ist/soll) above 100%.
+                soll_total += sum(_monat_soll(t, year, m) for t in act)   # same Soll the debt uses
             else:
                 vac_months += 1
                 vacancy_trend[m - 1] += 1
