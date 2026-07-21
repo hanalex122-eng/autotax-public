@@ -2507,8 +2507,12 @@ function ImmoTenancyForm({initial,onSave,onCancel,hauptmieter}){
     {f.typ==="unter"&&<_ImmoField label={_iL("Hauptmieter","Ana kiracı","Main tenant")}>
       <select style={_fInp()} value={f.parent_tenancy_id} onChange={e=>setF({...f,parent_tenancy_id:e.target.value})}>
         <option value="">— {_iL("wählen","seç","select")} —</option>
-        {(hauptmieter||[]).map(hm=><option key={hm.tenancy_id} value={hm.tenancy_id}>{hm.mieter_name}</option>)}
+        {(hauptmieter||[]).map(hm=><option key={hm.tenancy_id} value={hm.tenancy_id}>{hm.mieter_name}{hm.unit_name?" · "+hm.unit_name:""}</option>)}
+        {/* bestehende Bindung, die nicht (mehr) in der Kandidatenliste steht — sonst wäre das Feld leer */}
+        {f.parent_tenancy_id&&!(hauptmieter||[]).some(hm=>String(hm.tenancy_id)===String(f.parent_tenancy_id))&&<option value={f.parent_tenancy_id}>{"#"+f.parent_tenancy_id}</option>}
       </select>
+      {!f.parent_tenancy_id&&<div style={{fontSize:11,color:"#f59e0b",marginTop:4}}>⚠ {_iL("Kein Hauptmieter gewählt — die Beziehung bleibt offen.","Ana kiracı seçilmedi — ilişki boş kalır.","No main tenant selected — the link stays empty.")}</div>}
+      {!(hauptmieter||[]).length&&<div style={{fontSize:11,color:theme.textDim,marginTop:4}}>{_iL("Kein möglicher Hauptmieter im Gebäude (nötig: andere Einheit).","Binada uygun ana kiracı yok (farklı daire gerekir).","No eligible main tenant in this building (a different flat is required).")}</div>}
     </_ImmoField>}
     <_ImmoActions onSave={submit} onCancel={onCancel}/>
   </div>);
@@ -4043,7 +4047,11 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   // missing/empty (e.g. a swallowed fetch error) fall back to the independently-loaded tFull dict,
   // so the dropdown never ends up silently empty when the tenant actually exists.
   const tncs=(acc&&acc.tenancies&&acc.tenancies.length)?acc.tenancies
-    :Object.values(tFull||{}).map(t=>({tenancy_id:t.id,mieter_name:t.mieter_name,von:t.von,bis:t.bis,soll:0,ist:0,rueckstand:0,monate:0}));
+    :Object.values(tFull||{}).map(t=>({tenancy_id:t.id,unit_id:t.unit_id,mieter_name:t.mieter_name,von:t.von,bis:t.bis,soll:0,ist:0,rueckstand:0,monate:0}));
+  // Sprint 2.1 — Hauptmieter adayları: farklı Unit · typ!=unter (tek seviye) · kendisi değil.
+  // typ /accounting yanıtında yok, bu yüzden tFull'den okunur. Backend _validate_parent aynı kuralı zorunlu kılar.
+  const hmCands=(unitId,selfTid)=>tncs.filter(x=>x.unit_id!==unitId&&x.tenancy_id!==selfTid&&((tFull[x.tenancy_id]||{}).typ!=="unter"))
+    .map(x=>({tenancy_id:x.tenancy_id,mieter_name:x.mieter_name,unit_name:(uFull[x.unit_id]||{}).name}));
   // ============ LIST VIEW ============
   if(!sel){
     return (<div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -4149,12 +4157,12 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
           ? <ImmoUnitForm initial={{name:(uf.name!=null?uf.name:u.name),wohnflaeche:uf.wohnflaeche,soll_miete:(uf.soll_miete!=null?uf.soll_miete:u.soll_miete),eigennutzung_personen:uf.eigennutzung_personen}} onSave={b=>saveUnit(u.unit_id,b)} onCancel={()=>setEditUnit(null)}/>
           : <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><div style={{fontWeight:700,fontSize:15}}>🏠 {u.name} <span style={{fontSize:12,fontWeight:400,color:theme.textMuted}}>· {_L("Soll","Hedef","Target")} {_e(u.soll_miete)}/{_L("Mon.","ay","mo")}{uf.wohnflaeche!=null?" · "+uf.wohnflaeche+" m²":""} · {_L("Belegung","Doluluk","Occ")} {u.belegungsquote}%</span>{uf.eigennutzung_personen!=null&&<span style={{fontSize:11,fontWeight:700,color:theme.accent,marginLeft:6}}>🏠 {_L("Eigennutzung","Kendi kullanımı","Self-use")} · {uf.eigennutzung_personen} {_L("Pers.","kişi","pers.")}</span>}</div><div style={{display:"flex",gap:12,alignItems:"center"}}><span style={{cursor:"pointer",color:theme.accent,fontWeight:700}} title={_L("Wohnung-Akte öffnen","Daire dosyasını aç","Open flat file")} onClick={()=>openAkte(u)}>📂 {_L("Akte","Dosya","File")}</span><span style={{cursor:"pointer",color:theme.textMuted}} title={_L("Bearbeiten","Düzenle","Edit")} onClick={()=>{setEditUnit(u.unit_id);setEditTen(null);}}>✎</span><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("units",u.unit_id)}>✕</span></div></div>}
         <div style={{marginTop:8}}>{tncs.filter(t=>t.unit_id===u.unit_id).map(t=>{const tf=tFull[t.tenancy_id]||{};return editTen===t.tenancy_id
-          ? <ImmoTenancyForm key={t.tenancy_id} initial={{mieter_name:t.mieter_name,von:t.von,bis:t.bis,kaltmiete:t.kaltmiete,kaution:tf.kaution,nk_voraus:tf.nk_voraus,heizkosten_voraus:tf.heizkosten_voraus,zahler_typ:tf.zahler_typ,zahler_name:tf.zahler_name,typ:tf.typ,parent_tenancy_id:tf.parent_tenancy_id}} hauptmieter={tncs.filter(x=>x.unit_id!==u.unit_id&&x.tenancy_id!==t.tenancy_id).map(x=>({tenancy_id:x.tenancy_id,mieter_name:x.mieter_name}))} onSave={b=>saveTen(t.tenancy_id,b)} onCancel={()=>setEditTen(null)}/>
+          ? <ImmoTenancyForm key={t.tenancy_id} initial={{mieter_name:t.mieter_name,von:t.von,bis:t.bis,kaltmiete:t.kaltmiete,kaution:tf.kaution,nk_voraus:tf.nk_voraus,heizkosten_voraus:tf.heizkosten_voraus,zahler_typ:tf.zahler_typ,zahler_name:tf.zahler_name,typ:tf.typ,parent_tenancy_id:tf.parent_tenancy_id}} hauptmieter={hmCands(u.unit_id,t.tenancy_id)} onSave={b=>saveTen(t.tenancy_id,b)} onCancel={()=>setEditTen(null)}/>
           : <React.Fragment key={t.tenancy_id}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:13,padding:"6px 8px",background:theme.surfaceAlt,borderRadius:8,marginBottom:4,flexWrap:"wrap"}}><span>👤 <b>{t.mieter_name}</b> <span style={{color:theme.textMuted,fontSize:12}}>{t.von}→{t.bis||_L("läuft","devam","ongoing")} · {_e(t.kaltmiete)}{tf.nk_voraus!=null?" + NK "+_e(tf.nk_voraus):""}</span></span><span style={{display:"flex",gap:12}}><span style={{cursor:"pointer",color:theme.blue}} title={_L("Wohnungsgeberbestätigung","Konut sağlayıcı belgesi","Landlord confirmation")} onClick={()=>setWgbFor(wgbFor===t.tenancy_id?null:t.tenancy_id)}>📄</span><span style={{cursor:"pointer",color:theme.textMuted}} title={_L("Bearbeiten","Düzenle","Edit")} onClick={()=>{setEditTen(t.tenancy_id);setEditUnit(null);}}>✎</span><span style={{cursor:"pointer",color:theme.danger}} onClick={()=>delItem("tenancies",t.tenancy_id)}>✕</span></span></div>
           {wgbFor===t.tenancy_id&&<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",padding:"6px 8px",marginBottom:4,background:theme.blueSoft,borderRadius:8,fontSize:12}}><span style={{color:theme.textMuted}}>📄 {_L("Wohnungsgeberbestätigung (§19 BMG)","Konut belgesi","Confirmation")}:</span><button style={{...css.btn(theme.blue),padding:"5px 12px",fontSize:12}} onClick={()=>dlWgb(t.tenancy_id,"einzug")}>{_L("Einzug","Giriş","Move-in")}</button><button style={{...css.btnOutline,padding:"5px 12px",fontSize:12}} onClick={()=>dlWgb(t.tenancy_id,"auszug")}>{_L("Auszug","Çıkış","Move-out")}</button><button style={{...css.btnOutline,padding:"5px 12px",fontSize:12}} onClick={()=>setWgbFor(null)}>{_L("Abbrechen","İptal","Cancel")}</button></div>}
           </React.Fragment>;})}</div>
         {addTenFor===u.unit_id
-          ? <ImmoTenancyForm hauptmieter={tncs.filter(x=>x.unit_id!==u.unit_id).map(x=>({tenancy_id:x.tenancy_id,mieter_name:x.mieter_name}))} onSave={b=>createTen(u.unit_id,b)} onCancel={()=>setAddTenFor(null)}/>
+          ? <ImmoTenancyForm hauptmieter={hmCands(u.unit_id,null)} onSave={b=>createTen(u.unit_id,b)} onCancel={()=>setAddTenFor(null)}/>
           : <button style={{...css.btnOutline,padding:"6px 12px",fontSize:13,marginTop:6}} onClick={()=>setAddTenFor(u.unit_id)}>➕ {_L("Mieter hinzufügen","Kiracı ekle","Add tenant")}</button>}
       </div>);})}
       {!units.length&&!showAddUnit&&<div style={{...css.card,textAlign:"center",color:theme.textMuted}}>{_L("Lege zuerst eine Einheit an, dann Mieter mit Ein-/Auszug.","Önce daire ekle.","Add a unit first.")}</div>}
