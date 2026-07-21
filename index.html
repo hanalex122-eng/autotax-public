@@ -2896,7 +2896,16 @@ function MieterView({onNav,showToast}){
   const delEigCard=async(uid)=>{if(!confirm(_L("Eigennutzung entfernen? Die Wohnung bleibt bestehen.","Ev sahibi (Eigennutzung) kaydı kaldırılsın mı? Daire silinmez.","Remove owner-occupancy? The unit stays.")))return;try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify({eigennutzung_personen:-1})});load();if(showToast)showToast(_L("Entfernt","Kaldırıldı","Removed"),"info");}catch(e){alert(e.message);}};
   React.useEffect(()=>{load();},[]);
   // ── Tek-sayfa Erfassung: kiracı → DOĞRU bina + DOĞRU daire (çok-daireli binada ayrı property yaratmaz) ──
-  const _erf0=()=>({gmode:"existing",property_id:"",adresse:"",umode:"new",unit_id:"",daire:"",qm:"",name:"",von:new Date().toISOString().slice(0,10),kalt:"",nk:""});
+  const _erf0=()=>({gmode:"existing",property_id:"",adresse:"",umode:"new",unit_id:"",daire:"",qm:"",name:"",von:new Date().toISOString().slice(0,10),kalt:"",nk:"",typ:"haupt",parent:""});
+  // Sprint 2.2 — sihirbazda da Untermieter: aday kuralı Form A/B ile AYNI (aynı bina · farklı Unit ·
+  // typ!=unter). Yeni bina seçiliyse aday yoktur. Bina eşleşmesi ad+adres üzerinden (feed'de property_id yok).
+  const erfHmCands=()=>{
+    if(erf.gmode!=="existing"||!erf.property_id)return [];
+    const p=(erfProps||[]).find(x=>String(x.id)===String(erf.property_id));if(!p)return [];
+    const key=(p.name||"")+"|"+(p.adresse||"");
+    const selUnit=(erf.umode==="existing"&&erf.unit_id)?parseInt(erf.unit_id):null;
+    return (rows||[]).filter(x=>x.typ!=="unter"&&_pKey(x)===key&&(selUnit===null||x.unit_id!==selUnit));
+  };
   const [showErf,setShowErf]=React.useState(false);
   const [erf,setErf]=React.useState(_erf0());
   const [erfBusy,setErfBusy]=React.useState(false);
@@ -2921,7 +2930,10 @@ function MieterView({onNav,showToast}){
       let uid=erf.unit_id;
       if(!(erf.gmode==="existing"&&erf.umode==="existing"&&uid)){
         const u=await api("/immo/units",{method:"POST",body:JSON.stringify({property_id:pid,name:erf.daire.trim()||"Wohnung",wohnflaeche:parseFloat(erf.qm)||null,soll_miete:kalt})});uid=u.id;}
-      await api("/immo/tenancies",{method:"POST",body:JSON.stringify({unit_id:uid,mieter_name:erf.name.trim(),von:erf.von||null,kaltmiete:kalt,nk_voraus:parseFloat(erf.nk)||null})});
+      // Sprint 2.2 — Untermieter ilişkisi (Form A/B ile aynı sözleşme). Seçilen Hauptmieter aday
+      // listesinden düşmüşse (bina/daire sonradan değişti) gönderilmez; backend zaten doğrular.
+      const _hmOk=erf.typ==="unter"&&erf.parent&&erfHmCands().some(x=>String(x.tenancy_id)===String(erf.parent));
+      await api("/immo/tenancies",{method:"POST",body:JSON.stringify({unit_id:uid,mieter_name:erf.name.trim(),von:erf.von||null,kaltmiete:kalt,nk_voraus:parseFloat(erf.nk)||null,typ:erf.typ||"haupt",parent_tenancy_id:_hmOk?parseInt(erf.parent):-1})});
       setErf(_erf0());setShowErf(false);load();
       try{setErfProps((await api("/immo/properties")).properties||[]);}catch(e){}
       if(showToast)showToast(_L("Mieter angelegt ✓","Kiracı eklendi ✓","Tenant added ✓"),"success");
@@ -3173,6 +3185,23 @@ function MieterView({onNav,showToast}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:10,padding:"12px 15px"}}>
         <span style={{fontSize:13,color:theme.textMuted}}><b style={{color:theme.textDim}}>7. </b><b style={{color:theme.text}}>{_L("Gesamtmiete / Monat","Toplam / Ay","Total / mo")}</b> ({_L("automatisch","otomatik","auto")})<div style={{fontSize:11,color:theme.textDim,marginTop:2}}>{_L("Kaltmiete + Nebenkosten = was der Mieter jeden Monat schuldet.","Kira + yan gider = kiracının her ay borçlu olduğu tutar.","Cold rent + running costs = what the tenant owes each month.")}</div></span>
         <span style={{fontSize:22,fontWeight:800,color:theme.accent}}>{_e(erfGesamt)}</span>
+      </div>
+      {/* Sprint 2.2 — Untermieter (opsiyonel, Form A/B ile aynı davranış). NUR Beziehung:
+          eigenes Mietkonto/Mahnung bleibt bei diesem Mietverhältnis. */}
+      <div style={{marginTop:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <input type="checkbox" checked={erf.typ==="unter"} onChange={e=>setErf({...erf,typ:e.target.checked?"unter":"haupt",parent:e.target.checked?erf.parent:""})}/>
+          <span style={{fontSize:13,color:theme.text,cursor:"pointer"}} onClick={()=>setErf({...erf,typ:erf.typ==="unter"?"haupt":"unter",parent:erf.typ==="unter"?"":erf.parent})}>🔗 {_L("Untermieter (in anderer Einheit)","Untermieter (ayrı dairede)","Subtenant (separate flat)")}</span>
+        </div>
+        {erf.typ==="unter"&&<div style={{marginTop:6}}>
+          <label style={_efl}>{_L("Hauptmieter","Ana kiracı","Main tenant")}</label>
+          <select style={_ef} value={erf.parent} onChange={e=>setErf({...erf,parent:e.target.value})}>
+            <option value="">— {_L("wählen","seç","select")} —</option>
+            {erfHmCands().map(h=><option key={h.tenancy_id} value={h.tenancy_id}>{h.mieter_name}{h.unit_name?" · "+h.unit_name:""}</option>)}
+          </select>
+          {!erf.parent&&<div style={{fontSize:11,color:"#f59e0b",marginTop:4}}>⚠ {_L("Kein Hauptmieter gewählt — die Beziehung bleibt offen.","Ana kiracı seçilmedi — ilişki boş kalır.","No main tenant selected — the link stays empty.")}</div>}
+          {!erfHmCands().length&&<div style={_efh}>{_L("Kein möglicher Hauptmieter im Gebäude (nötig: andere Einheit).","Binada uygun ana kiracı yok (farklı daire gerekir).","No eligible main tenant in this building (a different flat is required).")}</div>}
+        </div>}
       </div>
       <div style={{display:"flex",gap:10,marginTop:16}}>
         <button disabled={erfBusy} onClick={saveErf} style={{flex:1,padding:"13px",background:theme.accent,color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:800,cursor:"pointer",opacity:erfBusy?0.6:1}}>{erfBusy?"…":"✓ "+_L("Speichern","Kaydet","Save")}</button>

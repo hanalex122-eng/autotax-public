@@ -56,8 +56,14 @@ const MOCK={mieter:[
    kaution:1000,typ:null,parent_tenancy_id:null,zahler_typ:"mieter",zahler_name:null,erstmonat_betrag:null,personenzahl:1,miete_historie:null},
 ],eigennutzer:[],summe:{aktiv:3,sorgenfrei:1,schuldner:2,teilzahlung:0}};
 const MK={tenancy_id:1,year:2026,rows:[{monat:6,soll:680,bezahlt:0,status:"open"}],summe:{soll_faellig:680,bezahlt:0,offen:680}};
-function api(p,o){if(String(p).indexOf("/mietkonto")>=0)return Promise.resolve(MK);
-  if(o&&(o.method==="POST"||o.method==="PATCH")){console.log("API "+o.method+" "+p+" -> "+o.body);return Promise.resolve({success:true,id:99});}
+const PROPS={properties:[{id:10,name:"Musterstr. 12",adresse:"Musterstr. 12, Krefeld"},
+                         {id:11,name:"Hauptweg 3",adresse:"Hauptweg 3, Krefeld"}]};
+const UNITS={units:[{id:1,name:"EG links"},{id:2,name:"2.OG"}]};
+function api(p,o){const s=String(p);
+  if(o&&(o.method==="POST"||o.method==="PATCH")){console.log("API "+o.method+" "+s+" -> "+o.body);return Promise.resolve({success:true,id:99});}
+  if(s.indexOf("/mietkonto")>=0)return Promise.resolve(MK);
+  if(s.indexOf("/units")>=0)return Promise.resolve(UNITS);
+  if(s.indexOf("/immo/properties")>=0)return Promise.resolve(PROPS);
   return Promise.resolve(MOCK);}
 
 // Form A demo: gerçek ImmoTenancyForm, aday listesi = ImmobilienView'daki hmCands ile aynı şekil
@@ -71,6 +77,9 @@ function FormADemo(){
 
 CLICK = """
 setTimeout(function(){
+  // Sihirbaz (Neuer Mieter) açılsın — Sprint 2.2 Untermieter desteği görünsün
+  var nb=[].slice.call(document.querySelectorAll('button')).filter(function(x){return x.textContent.indexOf('Neuer Mieter')>=0;})[0];
+  if(nb)nb.click();
   // Form B: Maria'nın kartındaki 'Bearbeiten' -> satır-içi form açılsın
   var bs=[].slice.call(document.querySelectorAll('button'));
   var b=bs.filter(function(x){return x.textContent.indexOf('Bearbeiten')>=0;})[1];
