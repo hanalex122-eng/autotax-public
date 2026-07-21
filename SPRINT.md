@@ -461,6 +461,21 @@ NK-Vorauszahlung is finally tracked as owed.
 
 ## BACKLOG — parked, do NOT start before the active sprint closes
 
+### [OPS] Railway Postgres servisinin PGPASSWORD / DATABASE_PUBLIC_URL senkronsuzluğu  (bulundu 2026-07-21)
+Faz 3 ön kontrolü sırasında ortaya çıktı: Postgres servisinin `PGPASSWORD` (ve dolayısıyla
+`DATABASE_PUBLIC_URL`) değeri, çalışan veritabanının gerçek şifresiyle **uyuşmuyor**. Hem TCP proxy
+üzerinden (`roundhouse.proxy.rlwy.net`) hem de Postgres container'ının içinden
+`FATAL: password authentication failed for user "postgres"` alınıyor.
+
+**Etkilenmeyen:** uygulama (`/health` → `db: true`) ve **haftalık R2 yedeklemesi** — ikisi de
+AutoTax-Hub servisinin kendi `DATABASE_URL`'ini kullanıyor (`autotax/backup.py:43,94`), o çalışıyor.
+**Etkilenen:** elle `psql` / proxy ile bağlanma yolu — yani bir **restore veya acil elle sorgu** anında
+ihtiyaç duyulacak erişim. Geçici çözüm: sorgular `railway ssh --service AutoTax-Hub` ile app
+container'ından çalıştırılabiliyor (Faz 3 ön kontrolü böyle yapıldı).
+
+**Yapılacak:** Railway panelinden Postgres şifresinin yenilenmesi/senkronlanması + `psql` ile bağlantının
+bir kez doğrulanması. **Faz 3 kapsamına DAHİL DEĞİL** — bağımsız ops işi.
+
 ### Allgemeinstrom single (building-level) meter field  (user feedback 2026-07-17 — parked)
 The landlord asked for an Allgemeinstrom meter field. It would NOT change the NK split (common
 electricity has no per-flat measurement → split by Wohnfläche/Wohneinheiten from the total invoice), so
