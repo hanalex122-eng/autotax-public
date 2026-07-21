@@ -18,7 +18,63 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — Sprint 2.2 closed & production-verified 2026-07-21
+## NO ACTIVE SPRINT — Sprint 3.0 closed & production-verified 2026-07-21
+
+## ✅ SPRINT 3.0 — Faz 3 doğruluk sprinti + örtüşme guardrail'i — CLOSED (canlı `bee9043`, 2026-07-21)
+
+**Tek hedef:** bugün *sessizce* yanlış hesaplanan unit-seviye türetmeleri düzeltmek ve aynı Unit'te
+ikinci bir sözleşmenin fark edilmeden oluşmasını engellemek — **yeni özellik yok, şema değişikliği yok.**
+Sprint 3.0 WG desteği **getirmez**; NK motoru bunu doğru hesaplayana kadar (3.1) **engeller**.
+Tasarım: `docs/design/Sprint_3_0_Technical_Design.md` · ADD Rev.3 `docs/design/Phase3_WG_Zimmervermietung.md`.
+
+**Düzeltilenler:** `act[0]` yerine tüm aktif tenancy'lerin toplamı (`immo_api.py` `_accounting` + `_portfolio`)
+→ property/portföy Soll'u artık eksik değil, cockpit inkasso oranı (ist/soll) şişmiyor, rapor içinde
+"Rückstand > Soll" görülemiyor · Wohnung Akte artık N sözleşme gösteriyor (`akteActiveTens`; `akteActiveTen`
+listenin ilki → **N=1'de görünüm birebir aynı**) + salt-okunur "Offen gesamt".
+
+**Guardrail (ADD Rev.3 — HARD VALIDATION):** aynı Unit'te tarih aralığı **örtüşen** ikinci tenancy 400 ile
+reddedilir; **override yok, sadece-uyarı yok.** Aynı gün devir (`bis == von`) ve ardışık sözleşmeler serbest.
+PATCH ile örtüşme yaratmak da reddedilir. **Geçmişe dönük doğrulama yok** — mevcut kayıtlar hiç denetlenmez.
+
+**Commit'ler (3):**
+| Commit | İçerik |
+|---|---|
+| `950decd` | Sprint 3.0 teknik tasarım + ADD Revision 3 (guardrail kararı, Akte "Toplam Açık" kararı) |
+| `1119da5` | 3.0a backend — `act[0]` → toplam · `_ranges_overlap` + `_assert_no_overlap` · yeni test (23 kontrol) |
+| `bee9043` | 3.0b frontend — Akte N sözleşme + salt-okunur "Offen gesamt" |
+
+**Go/No-Go — kanıtlar:**
+1. **Commit:** HEAD == origin/main == `bee9043`.
+2. **Suite 47/47 PASS** (46 → +1). Yeni `test_immo_sprint_3_0.py`: örtüşme mantığı 7 senaryo · guardrail
+   400/200 yolları · reddedilen PATCH kaydı değiştirmiyor · geçmişe dönük doğrulama yok · Soll toplamı
+   bağımsız türetmeyle doğrulandı (**9201.67 doğru vs 7980.00 `act[0]` → 1221.67 eksik raporlanıyordu**).
+3. **Gate H4 kanıtı:** `git diff --stat` → `models.py` · `db.py` · `immo_payments.py` · `immo_rules.py` ·
+   `immo_payment_models.py` · `immo_payment_repository.py` · `immo_nebenkosten.py` · `immo_ledger.py`
+   = **0 satır**. Muhasebe, Mahnung, NK motoru, Single Ledger dokunulmadı. Şema/migration yok.
+4. **Gate T2 deploy öncesi tekrar:** 3 tenancy · 3 unit · **0 örtüşme** → deploy koşulu sağlandı,
+   hiçbir mevcut rakam değişmedi.
+5. **Prod smoke:** `/health` ok · db connected · `/app` 200 (914 KB) · `akteActiveTens` 3× · "Offen gesamt" 1× ·
+   Faz 2 Untermieter UI bozulmadı 3× · auth guard 401 · console error yok.
+6. **Guardrail canlı doğrulaması (tarayıcı, gerçek hesap):** dolu daireye (Whg 1, aktif kiracı 2026-06-15→açık)
+   örtüşen ikinci sözleşme denendi → **HTTP 400** · UI mesajı doğru ve iki çıkış yolunu gösteriyor
+   (*„… ist in diesem Zeitraum bereits vermietet … → Auszugsdatum … → je Zimmer eine eigene Einheit"*) ·
+   **kayıt OLUŞMADI** (kiracı sayısı 3 → 3, "TEST Guardrail" yok) · console error yok.
+
+**Definition of Done: 12/12.**
+
+**Bilinçli ertelenen:** `anteil_flaeche`/`zimmer` + alan korunumu + NK ağırlıkları → **3.1** ·
+Verbrauch çift sayımı (K3) + Zähler şeffaflığı → **3.2** · Mahnung/WGB oda gösterimi, "2/3 oda dolu" → **3.3** ·
+oda bazlı tüketim dağıtımı → **Professional Review Required** (açık) · aynı Unit'te Untermieter,
+Eigennutzung+kiracı aynı dairede → **Faz 4**.
+
+**Açık riskler / borçlar:** Akte'nin N>1 dalı prod'da render **olmuyor** (guardrail örtüşmeyi engelliyor,
+mevcut örtüşme 0) → 3.1 için savunma kodu; tarayıcı doğrulaması bilinçli olarak yapılmadı ·
+`/app` ilk render ~14 s (Babel in-browser, bu sprintin regresyonu değil) · [OPS] Railway Postgres
+PGPASSWORD senkronsuzluğu (bu backlog'da, Faz 3 dışı).
+
+**Bu sprint gerçekten bitti mi? EVET.** Kapsamın tamamı canlı ve kanıtlı; kullanıcı gözünden kritik boşluk yok.
+
+---
 
 ## ✅ SPRINT 2.2 — Housekeeping / Closure — CLOSED (canlı `792398c`, 2026-07-21)
 
