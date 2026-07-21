@@ -113,7 +113,12 @@ For detailed structure see `.claude/architecture.md`.
 5. **Language:** UI/messages German (DE) primary, EN/TR fallback. Code comments TR or DE mixed; new code prefer English.
 6. **StBerG compliance:** AI messages must use "Vorschlag/Empfehlung", NOT prescriptive tax advice.
 7. **Commit messages:** Conventional (feat/fix/docs/refactor), Co-Authored-By trailer for AI commits.
-8. **Auto-push:** After meaningful changes, commit + push automatically (user preference).
+8. **Git workflow (BINDING — replaces the old "auto-push" rule):**
+   - Commit **locally** after meaningful, self-contained changes.
+   - **Do NOT push automatically.**
+   - Always wait for **explicit user approval** before: `git push` · production deployment.
+   - **Default state:** local commits are preferred until approval is given. Approval is
+     per-action — approving one push does not authorise the next.
 
 ---
 
