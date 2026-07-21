@@ -75,11 +75,21 @@ Herhangi bir AutoTax müşterisinin kullanabileceği **standart** kiralama biçi
 
 ## 5. Gelecek Fazlar
 
-### Faz 2 — Untermieter
-- Untermieter
-- Hauptmieter ilişkisi
-- Parent tenancy (`typ` haupt|unter, `parent_tenancy_id`)
-- **Eigennutzung + Untermieter AYNI dairede** (ev sahibi oturur + aile bireyi/başkası Sozialamt Untermieter) → çift-kayıt olmadan tek dairede modellenir (madde 10 karışık hâlin çözümü)
+### Faz 2 — Untermieter ✅ TAMAMLANDI (Sprint 2.1, canlı 2026-07-21)
+Tasarım: [`docs/design/Sprint_2_1_Untermieter.md`](../design/Sprint_2_1_Untermieter.md) · kapanış raporu: `SPRINT.md`.
+
+- ✅ Untermieter
+- ✅ Hauptmieter ilişkisi
+- ✅ Parent tenancy (`typ` haupt|unter, `parent_tenancy_id`) — additive/nullable, **relationship-only**
+      (muhasebe değişmedi; her tenancy kendi Mietkonto/borç/Mahnung akışını korur)
+- ⏭️ **Eigennutzung + Untermieter AYNI dairede** (ev sahibi oturur + aile bireyi/başkası Sozialamt Untermieter) → çift-kayıt olmadan tek dairede modellenir (madde 10 karışık hâlin çözümü)
+      — **Sprint 2.1 kapsamı dışı bırakıldı (Seçenek B: ayrı Unit).** NK m²-payı sorununu açtığı için **Faz 4**'e taşındı.
+
+> 🔒 **Faz 2 bağlayıcı prensipler (kullanıcı, 2026-07-20):**
+> 1. **Geriye dönük uyumluluk bozulmaz.**
+> 2. **Mevcut kiracı modeli VARSAYILAN olarak AYNI çalışır** (`typ` boş/null = `haupt`; eski davranış birebir).
+> 3. **Untermieter mevcut mimarinin ÜZERİNE eklenir, onu DEĞİŞTİRMEZ** (additive/nullable, Sprint 1.1'deki gibi).
+> 4. **Ön koşul:** Faz 1 kapanışı + **kısa stabilizasyon** tamamlanmadan Faz 2'ye başlanmaz.
 
 ### Faz 3 — WG / Zimmervermietung
 - WG (Wohngemeinschaft)
