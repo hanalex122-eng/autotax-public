@@ -3936,7 +3936,10 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const [akteNkO,setAkteNkO]=React.useState(false);
   const [akteNkD,setAkteNkD]=React.useState(null); // /immo/nk/{id} Detail (ergebnis)
   const [akteZO,setAkteZO]=React.useState(false);
-  const akteActiveTen=(uid)=>{const u=tncs.filter(t=>t.unit_id===uid);return u.filter(t=>!t.bis).sort((a,b)=>String(b.von||"").localeCompare(String(a.von||"")))[0]||u.slice().sort((a,b)=>String(b.von||"").localeCompare(String(a.von||"")))[0]||null;};
+  // Sprint 3.0: bir dairede birden fazla aktif sözleşme olabilir (Faz 3). Liste asıl kaynak;
+  // akteActiveTen listenin ilkidir → N=1'de görünüm ve eager yüklemeler BİREBİR eskisi gibi kalır.
+  const akteActiveTens=(uid)=>{const u=tncs.filter(t=>t.unit_id===uid);const a=u.filter(t=>!t.bis).sort((x,y)=>String(y.von||"").localeCompare(String(x.von||"")));return a.length?a:u.slice().sort((x,y)=>String(y.von||"").localeCompare(String(x.von||""))).slice(0,1);};
+  const akteActiveTen=(uid)=>akteActiveTens(uid)[0]||null;
   const toggleAkteNk=(aid)=>{if(akteNkO){setAkteNkO(false);return;}setAkteNkO(true);if(aid&&akteNkD===null)api("/immo/nk/"+aid).then(setAkteNkD).catch(()=>setAkteNkD(false));};
   const openAkte=(u)=>{setAkteU(u);setAkteNk(null);setAkteZ(null);setAkteMkOpen(false);setAkteMk(null);setAkteMh(null);setAkteNkO(false);setAkteNkD(null);setAkteZO(false);const cy=new Date().getFullYear();
     api("/immo/nk?property_id="+sel.id).then(d=>setAkteNk(d.abrechnungen||[])).catch(()=>setAkteNk([]));
@@ -4226,8 +4229,12 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
     {akteU&&(()=>{
       const auf=uFull[akteU.unit_id]||{};
       const isEig=(auf.eigennutzung_personen!=null&&auf.eigennutzung_personen>=0); // F1: Eigennutzung ≠ Leerstand
-      const at=akteActiveTen(akteU.unit_id);
+      const ats=akteActiveTens(akteU.unit_id);          // Sprint 3.0 — N aktif sözleşme
+      const at=ats[0]||null;
       const atf=at?(tFull[at.tenancy_id]||{}):{};
+      // "Toplam Açık" — SALT OKUNUR, UI'da hesaplanan. DB'ye yazılmaz, endpoint değişmez,
+      // Mahnung üretmez, ledger değişmez. Borç TÜRETİLMEZ: tenancy başına gelen sayılar toplanır.
+      const atOffenSum=ats.reduce((s,x)=>s+(Number(x.rueckstand)||0),0);
       const nkLatest=(akteNk&&akteNk.length)?akteNk.slice().sort((a,b)=>(b.jahr||0)-(a.jahr||0))[0]:null;
       const zrow=(akteZ&&akteZ.units)?akteZ.units.find(x=>x.unit_id===akteU.unit_id):null;
       const zarts=zrow?Object.keys(zrow.arts||{}).map(k=>({k,...(zrow.arts[k]||{})})).filter(x=>x.anfang!=null||x.ende!=null):[];
@@ -4271,11 +4278,22 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
           </div>
           <div style={_sec}><div style={_h}>🏠 {_L("Stammdaten","Daire bilgisi","Flat data")}</div>
             <div style={{fontSize:13,color:theme.textMuted}}>{isEig?<span>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi kendi kullanıyor","Owner-occupied")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</span>:<span>{_L("Soll-/Marktmiete","Hedef/piyasa kira","Target/market rent")}: <b style={{color:theme.text}}>{_e(akteU.soll_miete)}</b></span>}{auf.wohnflaeche!=null?<span> · {auf.wohnflaeche} m²</span>:""}</div></div>
-          <div style={_sec}><div style={_h}>👤 {_L("Aktueller Mieter","Mevcut kiracı","Current tenant")}</div>
-            {at?<div style={{fontSize:13}}><b>{at.mieter_name}</b> <span style={{color:theme.textMuted}}>· {at.von}→{at.bis||_L("läuft","devam","ongoing")} · {_L("Kaltmiete","Kira","Cold rent")} {_e(at.kaltmiete)}{atf.nk_voraus!=null?" · "+_L("Nebenkosten","Yan gider","Utilities")+" "+_e(atf.nk_voraus):""}</span></div>:isEig?<div style={{fontSize:13,color:theme.accent,fontWeight:600}}>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi oturuyor","Owner lives here")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Kein Mieter (Leerstand)","Kiracı yok (boş)","No tenant (vacant)")}</div>}</div>
+          <div style={_sec}><div style={_h}>👤 {ats.length>1?_L("Aktuelle Mietverhältnisse","Mevcut sözleşmeler","Current tenancies")+" ("+ats.length+")":_L("Aktueller Mieter","Mevcut kiracı","Current tenant")}</div>
+            {/* Sprint 3.0 — N sözleşme listesi + salt-okunur Toplam Açık (UI'da hesaplanır) */}
+            {ats.length>1?<div>
+              {ats.map(x=>{const xf=tFull[x.tenancy_id]||{};return(<div key={x.tenancy_id} style={{fontSize:13,padding:"5px 0",borderBottom:"1px solid "+theme.border,display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                <span><b>{x.mieter_name}</b> <span style={{color:theme.textMuted}}>· {x.von}→{x.bis||_L("läuft","devam","ongoing")} · {_e(x.kaltmiete)}{xf.nk_voraus!=null?" + NK "+_e(xf.nk_voraus):""}</span></span>
+                <span style={{color:(Number(x.rueckstand)||0)>0?theme.danger:theme.accent,fontWeight:700}}>{(Number(x.rueckstand)||0)>0?_L("Rückstand","Borç","Arrears")+" "+_e(x.rueckstand):"✓"}</span>
+              </div>);})}
+              <div style={{display:"flex",justifyContent:"space-between",marginTop:8,fontSize:13}}>
+                <span style={{color:theme.textMuted}}>{_L("Offen gesamt","Toplam açık","Total open")} <span style={{color:theme.textDim,fontSize:11}}>({_L("Summe der Mietverhältnisse","sözleşmelerin toplamı","sum of tenancies")})</span></span>
+                <b style={{color:atOffenSum>0?theme.danger:theme.accent}}>{_e(atOffenSum)}</b>
+              </div>
+            </div>
+            :at?<div style={{fontSize:13}}><b>{at.mieter_name}</b> <span style={{color:theme.textMuted}}>· {at.von}→{at.bis||_L("läuft","devam","ongoing")} · {_L("Kaltmiete","Kira","Cold rent")} {_e(at.kaltmiete)}{atf.nk_voraus!=null?" · "+_L("Nebenkosten","Yan gider","Utilities")+" "+_e(atf.nk_voraus):""}</span></div>:isEig?<div style={{fontSize:13,color:theme.accent,fontWeight:600}}>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi oturuyor","Owner lives here")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Kein Mieter (Leerstand)","Kiracı yok (boş)","No tenant (vacant)")}</div>}</div>
           {at&&<div style={_sec}>
               <div onClick={()=>toggleAkteMk()} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
-                <div style={{..._h,marginBottom:0}}>💰 {_L("Mietkonto & Mahnung","Kira hesabı & ihtar","Rent account & dunning")}</div>
+                <div style={{..._h,marginBottom:0}}>💰 {_L("Mietkonto & Mahnung","Kira hesabı & ihtar","Rent account & dunning")}{ats.length>1?<span style={{fontWeight:400,color:theme.textDim,fontSize:12}}> · {at.mieter_name}</span>:null}</div>
                 <span style={{fontSize:13}}>{at.rueckstand>0?<b style={{color:theme.danger}}>{_L("Rückstand","Borç","Arrears")} {_e(at.rueckstand)}</b>:<b style={{color:theme.accent}}>✓</b>} <span style={{color:theme.textDim}}>{akteMkOpen?"▾":"▸"}</span></span>
               </div>
               {akteMkOpen&&<div style={{marginTop:10,fontSize:13,color:theme.textMuted}}>
