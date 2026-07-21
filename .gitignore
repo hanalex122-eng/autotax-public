@@ -34,6 +34,8 @@ tests/_*.html
 tests/_*.txt
 tests/*.png
 tests/*.pdf
+*.log
+*.tmp
 
 # Tek seferlik operasyon/analiz script'leri için ortak ev (kök dizin temiz kalsın).
 # Kalıcı olması gereken bir şey yazdıysan scratch/ dışına taşı.
