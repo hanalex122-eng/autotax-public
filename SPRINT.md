@@ -18,7 +18,70 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — P0 Abrechnungsjahr-Auswahl closed & production-verified 2026-07-17
+## 🔵 AKTİF SPRINT — 2.2 Housekeeping / Closure (2026-07-21)
+Kapsam (yeni iş kuralı YOK, muhasebe/Mietkonto/Mahnung/NK dokunulmaz, Faz 3 kapsam dışı):
+1. ✅ Sprint 2.1 tasarım dokümanları + roadmap Faz 2 kapanışı (`6cbd0d3`)
+2. ✅ SPRINT.md — Sprint 2.1 Final Closure Report (bu bölüm)
+3. ⏳ `Neuer Mieter` sihirbazı → Form A/B ile aynı Untermieter davranışı
+4. ⏳ `.gitignore` — geçici artifact temizliği (ayrı housekeeping commit'i)
+
+---
+
+## ✅ SPRINT 2.1 — Untermieter (Flexible Mietmodelle Faz 2) — CLOSED (canlı `70cd732`, 2026-07-21)
+
+**Tek hedef:** ev sahibi bir kiracının Untermieter olduğunu ve hangi Hauptmieter'e bağlı olduğunu
+kaydedebilsin — **muhasebeye hiç dokunmadan**. Sprintin başarısı eklediği özellik değil,
+**değiştirmediği şey**: `typ` / `parent_tenancy_id` hiçbir hesaba girmez.
+
+**Mimari kararlar:** Untermieter **ayrı bir Unit**'te (Seçenek B) → aynı-daire NK m²-payı sorunu hiç
+doğmaz · her tenancy kendi Mietkonto/borç/ödeme/Mahnung akışını korur (**Single Ledger**) · alanlar
+additive/nullable, hard FK yok, `typ=NULL` = `haupt` (mevcut kayıtlar birebir aynı) · tek seviye
+(Untermieter'in Untermieter'i yok). Sunucu 4 kuralı zorunlu kılar: parent aynı user · kendine bağlanamaz ·
+parent `unter` olamaz · **farklı Unit**. Tasarım: `docs/design/Sprint_2_1_Untermieter.md`.
+
+**Commit'ler (6):**
+| Commit | İçerik |
+|---|---|
+| `3bbdf40` | `typ` + `parent_tenancy_id` (model + idempotent migration) |
+| `c92f49e` | API create/patch + `_norm_typ` + `_validate_parent` + okuma yüzeyleri |
+| `d833120` | Form A (`ImmoTenancyForm`) — toggle + Hauptmieter dropdown |
+| `28175c5` | 2.1c — Form B (satır-içi düzenleme) + kiracı kartı & Mietkonto başlığı rozeti |
+| `b3e7223` | 2.1d — Form A'nın tasarımdan sapan 3 noktası (typ filtresi · K3 uyarısı · `unit_id` fallback) |
+| `70cd732` | 2.1e — E2E regresyon testi + görsel doğrulama harness'i |
+
+**Go/No-Go — kanıtlar (iddia değil, ölçüm):**
+1. **Commit:** HEAD == origin/main == `70cd732`.
+2. **Suite 46/46 PASS.** Kritik kanıt `test_immo_sprint_2_1_e2e.py` (25 kontrol): Untermieter
+   eklenince Hauptmieter'in Mietkonto'su **SHA256 birebir aynı** (`4bba7996a9ac6cf5`), borç 680→680,
+   Mahnung geçmişi aynı; Untermieter kendi borcunu (370) ve kendi Mahnung'unu taşıyor; bağ koparılınca
+   yine hiçbir tutar değişmiyor. `monat_soll` 645 == 645 (typ eklenince değişmez).
+3. **Görsel doğrulama (Chrome, gerçek `index.html` kodu):** iki formda da aday dropdown'ı **tek kişi**
+   (başka binadaki kiracı ve Untermieter'in kendisi elendi) · rozet 1× `🔗 Untermieter → [ad]` ·
+   PATCH gövdesi işaretliyken `typ:"unter",parent:1`, kaldırılınca `typ:"haupt",parent:-1` · konsol hatası yok.
+4. **Canlı kod:** `/openapi.json` → `TenancyIn`/`TenancyPatch` içinde `typ` + `parent_tenancy_id`;
+   `/app` → Untermieter kutusu 2× (Form A+B), K3 uyarısı 2×, rozet 2×, `hmCands` 7×. Health: status ok · db connected.
+5. **Prod smoke (ev sahibi, manuel, 11/11 PASS):** ayrı Unit'te Untermieter oluşturuldu, aynı Unit
+   dropdown'da görünmedi, rozet doğru (Hauptmieter'de yok / Untermieter'de var), **Hauptmieter'in Offen
+   tutarı + Mietkonto'su + Mahnung geçmişi değişmedi**, Untermieter kendi Mietkonto'su ve kendi borcuyla çalışıyor.
+
+**Definition of Done: 8/8** — kod ✅ · testler ✅ · UX ✅ · çelişen legacy akış yok ✅ (2.1d ile iki form
+birebir aynı davranıyor) · review ✅ (tasarımla satır satır karşılaştırma, 5 sapma bulundu ve kapatıldı) ·
+deploy ✅ · prod smoke ✅ · kritik boşluk yok ✅.
+
+**Bilinçli ertelenen:** aynı dairede Untermieter → **Faz 4** · WG / Zimmervermietung → **Faz 3**.
+
+**Açık teknik borçlar (backlog, kritik değil):**
+- `Neuer Mieter` sihirbazı Untermieter'i desteklemiyor (üçüncü giriş yolu) → **Sprint 2.2 kapsamında**.
+- `ImmobilienView` kiracı satırında rozet yok (rozet MieterView kartı + Mietkonto başlığında).
+- Hauptmieter silinirse `parent_tenancy_id` sarkıyor (rozet ada çözülemez → sadece `🔗 Untermieter`; borç etkilenmez).
+- Aday listesi bina eşleşmesi `property_name + property_address` string'ine dayanıyor (feed'de `property_id` yok).
+- `tFull` yüklenmeden Form A'da filtre kısa süre eksik kalabilir → backend 400 ile yakalar.
+- Prod'da Untermieter Mahnung PDF'i ayrıca denenmedi (E2E'de kanıtlı).
+
+**Bu sprint gerçekten bitti mi? EVET.** Kullanıcı gözünden kalan kritik boşluk yok; açık maddeler
+ya bilinçli sonraki faz ya da Sprint 2.2 housekeeping kapsamında.
+
+---
 
 ## ✅ SPRINT — P0 Guided year picker (no empty wrong-year statement) — CLOSED (canlı `0955961`, 2026-07-17)
 **Single goal (the one approved P0 from the QA sprint):** the bare `prompt()` for the settlement year let
