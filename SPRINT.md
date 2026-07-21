@@ -18,12 +18,40 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## 🔵 AKTİF SPRINT — 2.2 Housekeeping / Closure (2026-07-21)
-Kapsam (yeni iş kuralı YOK, muhasebe/Mietkonto/Mahnung/NK dokunulmaz, Faz 3 kapsam dışı):
-1. ✅ Sprint 2.1 tasarım dokümanları + roadmap Faz 2 kapanışı (`6cbd0d3`)
-2. ✅ SPRINT.md — Sprint 2.1 Final Closure Report (bu bölüm)
-3. ⏳ `Neuer Mieter` sihirbazı → Form A/B ile aynı Untermieter davranışı
-4. ⏳ `.gitignore` — geçici artifact temizliği (ayrı housekeeping commit'i)
+## NO ACTIVE SPRINT — Sprint 2.2 closed & production-verified 2026-07-21
+
+## ✅ SPRINT 2.2 — Housekeeping / Closure — CLOSED (canlı `792398c`, 2026-07-21)
+
+**Amaç:** Sprint 2.1'i kayda geçirmek ve arkasında kalan düzensizliği temizlemek. Yeni iş kuralı YOK ·
+muhasebe / Mietkonto / Mahnung / NK motoru / Single Ledger'a dokunulmadı · Faz 3 kapsam dışı ·
+backend tek satır bile değişmedi.
+
+**Kapsam 4/4 + onaylı 1 ek (5 commit):**
+| Commit | İçerik |
+|---|---|
+| `6cbd0d3` | Sprint 2.1 tasarım dokümanları repoya girdi; roadmap Faz 2 ✅ işaretlendi (aynı-daire maddesi Faz 4'e taşındı, Seçenek B'nin sonucu). Eski taslak SUPERSEDED banner'ıyla korundu → iki belge çelişmiyor. |
+| `871d070` | `SPRINT.md` — Sprint 2.1 Final Closure Report |
+| `bbdeef0` | **`Neuer Mieter` sihirbazına Untermieter** — aday kuralı Form A/B ile birebir (aynı bina · farklı Unit · `typ≠unter`). Üçüncü giriş yolu kapandı. |
+| `04ea414` | `.gitignore` — harness **çıktıları** yoksayıldı (`tests/_*.html|txt`, `tests/*.png|pdf`, `*.log`, `*.tmp`) |
+| `792398c` | Geliştirici **araçları** repoya alındı: `_babelcheck.js` + 4 `build_*_harness.py` (kaynak; çıktı değil) |
+
+**Kanıtlar:** suite **46/46 PASS** · babel PARSE OK · JSX BALANCED · 6 harness script'i commit sonrası
+çalışıyor, çıktıları `git status`'e sızmıyor (0 sızıntı) · gizli bilgi taraması temiz.
+Tarayıcı: sihirbazın aday dropdown'ında tek aday, POST gövdeleri `typ:"unter",parent:1` /
+`typ:"haupt",parent:-1`.
+**Post-deploy smoke:** `/health` ok · db connected · `/app` 200 (912 KB) · Untermieter kutusu canlıda
+**3×** (Form A + Form B + sihirbaz) · `erfHmCands` 4× · **console error yok**. Sihirbazın görsel
+açılışını ev sahibi manuel doğruladı.
+
+**Repo:** untracked 98 → 50 · `main` == `origin/main` == `792398c`.
+
+**Açık teknik borçlar (devreden, kritik değil):** `ImmobilienView` satırında rozet yok · Hauptmieter
+silinirse `parent_tenancy_id` sarkıyor · bina eşleşmesi ad+adres string'ine dayanıyor (feed'de
+`property_id` yok) · `tFull` yüklenmeden Form A filtresi kısa süre eksik (backend 400 yakalar) ·
+kök dizindeki 27 tek-seferlik script + 23 `.claude` notu → ayrı **Repository Cleanup** görevi ·
+ölçüm notu: `/app` ilk render 13.6 s (Babel in-browser; bu sprintin regresyonu değil).
+
+**Bu sprint gerçekten bitti mi? EVET.** Kapsamın tamamı tamamlandı, kanıtlandı ve canlıda.
 
 ---
 
