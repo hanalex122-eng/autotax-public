@@ -2890,7 +2890,11 @@ function MieterView({onNav,showToast}){
   const [payFor,setPayFor]=React.useState(null);
   const [payDate,setPayDate]=React.useState(_now.toISOString().slice(0,10));
   const [payAmt,setPayAmt]=React.useState("");
-  const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setEig(d.eigennutzer||[]);setLoading(false);}).catch(()=>setLoading(false));};
+  // Sprint 13.0 — Wohnung Akte'den deep-link: hedef kiracının kartı doğrudan açılır.
+  // Mevcut desen (bkz. atx_invoices_status, index.html:1098). Anahtar okununca hemen silinir.
+  const _focusFromAkte=(list)=>{let tid=null;try{tid=sessionStorage.getItem("atx_mieter_focus");sessionStorage.removeItem("atx_mieter_focus");}catch(e){}
+    if(!tid)return;const m=(list||[]).find(x=>String(x.tenancy_id)===String(tid));if(m)openDetail(m);};
+  const load=()=>{setLoading(true);api("/immo/mieter").then(d=>{setRows(d.mieter||[]);setEig(d.eigennutzer||[]);setLoading(false);_focusFromAkte(d.mieter||[]);}).catch(()=>setLoading(false));};
   const openEigEdit=(u)=>{setEigF({name:u.unit_name||"",wohnflaeche:(u.wohnflaeche==null?"":String(u.wohnflaeche)),personen:(u.personenzahl==null?"":String(u.personenzahl))});setEigEdit(u.unit_id);};
   const saveEigCard=async(uid)=>{const b={wohnflaeche:eigF.wohnflaeche===""?null:parseFloat(eigF.wohnflaeche),eigennutzung_personen:eigF.personen===""?-1:parseInt(eigF.personen)};if(eigF.name.trim())b.name=eigF.name.trim();try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify(b)});setEigEdit(null);load();if(showToast)showToast(_L("Gespeichert ✓","Kaydedildi ✓","Saved ✓"),"success");}catch(e){alert(e.message);}};
   const delEigCard=async(uid)=>{if(!confirm(_L("Eigennutzung entfernen? Die Wohnung bleibt bestehen.","Ev sahibi (Eigennutzung) kaydı kaldırılsın mı? Daire silinmez.","Remove owner-occupancy? The unit stays.")))return;try{await api("/immo/units/"+uid,{method:"PATCH",body:JSON.stringify({eigennutzung_personen:-1})});load();if(showToast)showToast(_L("Entfernt","Kaldırıldı","Removed"),"info");}catch(e){alert(e.message);}};
@@ -3936,18 +3940,48 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const [akteNkO,setAkteNkO]=React.useState(false);
   const [akteNkD,setAkteNkD]=React.useState(null); // /immo/nk/{id} Detail (ergebnis)
   const [akteZO,setAkteZO]=React.useState(false);
+  // Sprint 13.0 — Akte = composition hub. Yeni hesaplama/endpoint YOK; yalnız mevcut modüller bağlanır.
+  // Yükleme durumu sözleşmesi: null = yükleniyor · false = HATA · veri = boş/dolu.
+  // (Önceden hata da "veri yok" gibi görünüyordu: "0 Zähler", "Offene Monate 0" gibi.)
+  const [akteProtO,setAkteProtO]=React.useState(false);
+  const [akteProt,setAkteProt]=React.useState(null);   // GET /immo/protokolle?tenancy_id= (aktif sözleşmeler)
+  const [akteZH,setAkteZH]=React.useState(null);       // GET /immo/units/{uid}/zaehler (geçmiş + Verbrauch)
   // Sprint 3.0: bir dairede birden fazla aktif sözleşme olabilir (Faz 3). Liste asıl kaynak;
   // akteActiveTen listenin ilkidir → N=1'de görünüm ve eager yüklemeler BİREBİR eskisi gibi kalır.
   const akteActiveTens=(uid)=>{const u=tncs.filter(t=>t.unit_id===uid);const a=u.filter(t=>!t.bis).sort((x,y)=>String(y.von||"").localeCompare(String(x.von||"")));return a.length?a:u.slice().sort((x,y)=>String(y.von||"").localeCompare(String(x.von||""))).slice(0,1);};
   const akteActiveTen=(uid)=>akteActiveTens(uid)[0]||null;
   const toggleAkteNk=(aid)=>{if(akteNkO){setAkteNkO(false);return;}setAkteNkO(true);if(aid&&akteNkD===null)api("/immo/nk/"+aid).then(setAkteNkD).catch(()=>setAkteNkD(false));};
-  const openAkte=(u)=>{setAkteU(u);setAkteNk(null);setAkteZ(null);setAkteMkOpen(false);setAkteMk(null);setAkteMh(null);setAkteNkO(false);setAkteNkD(null);setAkteZO(false);const cy=new Date().getFullYear();
-    api("/immo/nk?property_id="+sel.id).then(d=>setAkteNk(d.abrechnungen||[])).catch(()=>setAkteNk([]));
-    api("/immo/properties/"+sel.id+"/zaehler-matrix?jahr="+cy).then(setAkteZ).catch(()=>setAkteZ(false));
+  // Sprint 13.0 — tek yükleyici: hem açılışta hem "Erneut versuchen"de hem yıl değişince kullanılır.
+  // Yıl artık ekranın yıl seçicisinden gelir (önce sabit new Date().getFullYear() idi → iki ekran
+  // farklı yıl gösteriyordu). Hata → false (boş veriyle karıştırılmasın).
+  const loadAkte=(u,yr)=>{
+    if(!u||!sel)return;
+    setAkteNk(null);setAkteZ(null);setAkteMk(null);setAkteMh(null);setAkteNkD(null);setAkteProt(null);setAkteZH(null);
+    api("/immo/nk?property_id="+sel.id).then(d=>setAkteNk(d.abrechnungen||[])).catch(()=>setAkteNk(false));
+    api("/immo/properties/"+sel.id+"/zaehler-matrix?jahr="+yr).then(setAkteZ).catch(()=>setAkteZ(false));
     const at=akteActiveTen(u.unit_id); // Status-Summary braucht Mietkonto+Mahnung sofort → eager (bestehende Endpunkte, read-only)
-    if(at){api("/immo/tenancies/"+at.tenancy_id+"/mietkonto?year="+cy).then(setAkteMk).catch(()=>setAkteMk(false));
-      api("/immo/tenancies/"+at.tenancy_id+"/mahnungen").then(setAkteMh).catch(()=>setAkteMh(false));}};
+    if(at){api("/immo/tenancies/"+at.tenancy_id+"/mietkonto?year="+yr).then(setAkteMk).catch(()=>setAkteMk(false));
+      api("/immo/tenancies/"+at.tenancy_id+"/mahnungen").then(setAkteMh).catch(()=>setAkteMh(false));}
+    else{setAkteMk(null);setAkteMh(null);}
+  };
+  const openAkte=(u)=>{setAkteU(u);setAkteMkOpen(false);setAkteNkO(false);setAkteZO(false);setAkteProtO(false);loadAkte(u,year);};
   const toggleAkteMk=()=>setAkteMkOpen(o=>!o);
+  // Akte açıkken yıl değişirse veriyi tazele (yıl senkronizasyonu)
+  React.useEffect(()=>{if(akteU)loadAkte(akteU,year);},[year]);
+  // ESC ile kapat
+  React.useEffect(()=>{if(!akteU)return;const h=(e)=>{if(e.key==="Escape")setAkteU(null);};window.addEventListener("keydown",h);return ()=>window.removeEventListener("keydown",h);},[akteU]);
+  // Protokolle (Übergabe/Rückgabe) — lazy, aktif sözleşme(ler) başına mevcut endpoint
+  const toggleAkteProt=(ats)=>{if(akteProtO){setAkteProtO(false);return;}setAkteProtO(true);
+    if(akteProt===null&&ats&&ats.length){
+      Promise.all(ats.map(x=>api("/immo/protokolle?tenancy_id="+x.tenancy_id).then(d=>(d.protokolle||[]).map(p=>({...p,_mieter:x.mieter_name}))).catch(()=>null)))
+        .then(ls=>setAkteProt(ls.some(x=>x===null)?false:ls.flat())).catch(()=>setAkteProt(false));
+    }else if(akteProt===null){setAkteProt([]);}};
+  // Zähler geçmişi + Verbrauch — lazy, mevcut GET /immo/units/{uid}/zaehler
+  const toggleAkteZ=(uid)=>{if(akteZO){setAkteZO(false);return;}setAkteZO(true);
+    if(akteZH===null)api("/immo/units/"+uid+"/zaehler").then(setAkteZH).catch(()=>setAkteZH(false));};
+  const dlProtokoll=async(pid)=>{try{const r=await fetch(API+"/immo/protokolle/"+pid+"/pdf",{headers:{Authorization:"Bearer "+_tk()}});if(!r.ok){alert("PDF "+r.status);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Protokoll_"+pid+".pdf";a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(u);},1500);}catch(e){alert(e.message);}};
+  // Deep-link: hedef kiracıyı taşı (mevcut desen — bkz. atx_invoices_status), Akte'yi kapat.
+  const gotoMieter=(tid)=>{try{if(tid)sessionStorage.setItem("atx_mieter_focus",String(tid));}catch(e){}setAkteU(null);if(onNav)onNav("mieter");};
   const [addTenFor,setAddTenFor]=React.useState(null);  // unit_id to add a tenancy
   const [wgbFor,setWgbFor]=React.useState(null);        // tenancy_id: Wohnungsgeberbestätigung Einzug/Auszug seçimi açık
   const [uFull,setUFull]=React.useState({});            // {unit_id: full unit incl. wohnflaeche}
@@ -4212,8 +4246,15 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       const warmM=(rows.find(r=>r.status!=="future"&&r.status!=="inactive")||{}).soll;
       const MON=["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
       const fmtD=(d)=>{if(!d)return "";const p=String(d).slice(0,10).split("-");return p.length===3?p[2]+"."+p[1]+"."+p[0]:String(d);};
-      const acctY=new Date().getFullYear();
+      const acctY=year;                      // Sprint 13.0 — Akte ekranın yıl seçicisini izler
       const mkReady=!!akteMk&&akteMk!==false;
+      // Sprint 13.0 — yükleme durumu sözleşmesi: null=yükleniyor · false=HATA · veri=boş/dolu.
+      const _errBox=(retry)=><div style={{fontSize:12.5,color:theme.danger,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <span>⚠ {_L("Daten konnten nicht geladen werden.","Veriler yüklenemedi.","Could not load the data.")}</span>
+        {retry?<button style={{...css.btnOutline,padding:"4px 10px",fontSize:12,borderColor:theme.danger,color:theme.danger}} onClick={retry}>{_L("Erneut versuchen","Tekrar dene","Try again")}</button>:null}
+      </div>;
+      const _stateOf=(v)=>v===null?"loading":(v===false?"error":"ok");
+      const retryAkte=()=>loadAkte(akteU,year);
       const CP={green:{bg:"rgba(16,185,129,0.12)",bd:"rgba(16,185,129,0.4)",fg:theme.accent},red:{bg:"rgba(239,68,68,0.1)",bd:"rgba(239,68,68,0.4)",fg:theme.danger},amber:{bg:"rgba(245,158,11,0.12)",bd:"rgba(245,158,11,0.4)",fg:"#b45309"},grey:{bg:theme.surfaceAlt,bd:theme.border,fg:theme.textMuted}};
       const pill=(c)=>({display:"inline-flex",alignItems:"center",gap:4,padding:"5px 11px",borderRadius:20,fontSize:12.5,fontWeight:700,background:c.bg,border:"1px solid "+c.bd,color:c.fg});
       const _sec={...css.card,marginBottom:10,padding:"12px 14px"};
@@ -4253,16 +4294,24 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
                 <b style={{color:atOffenSum>0?theme.danger:theme.accent}}>{_e(atOffenSum)}</b>
               </div>
             </div>
-            :at?<div style={{fontSize:13}}><b>{at.mieter_name}</b> <span style={{color:theme.textMuted}}>· {at.von}→{at.bis||_L("läuft","devam","ongoing")} · {_L("Kaltmiete","Kira","Cold rent")} {_e(at.kaltmiete)}{atf.nk_voraus!=null?" · "+_L("Nebenkosten","Yan gider","Utilities")+" "+_e(atf.nk_voraus):""}</span></div>:isEig?<div style={{fontSize:13,color:theme.accent,fontWeight:600}}>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi oturuyor","Owner lives here")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Kein Mieter (Leerstand)","Kiracı yok (boş)","No tenant (vacant)")}</div>}</div>
+            :at?<div style={{fontSize:13}}><b>{at.mieter_name}</b> <span style={{color:theme.textMuted}}>· {at.von}→{at.bis||_L("läuft","devam","ongoing")} · {_L("Kaltmiete","Kira","Cold rent")} {_e(at.kaltmiete)}{atf.nk_voraus!=null?" · "+_L("Nebenkosten","Yan gider","Utilities")+" "+_e(atf.nk_voraus):""}</span>
+              {/* Sprint 13.0 — iletişim + Kaution: veri zaten yüklü (tFull), sadece gösterilmiyordu */}
+              {(atf.telefon||atf.email)&&<div style={{fontSize:12,color:theme.textDim,marginTop:3}}>{[atf.telefon?"📞 "+atf.telefon:null,atf.email?"✉️ "+atf.email:null].filter(Boolean).join("   ·   ")}</div>}
+              <div style={{fontSize:12,color:theme.textDim,marginTop:3}}>
+                🔐 {_L("Kaution","Depozito","Deposit")}: <b style={{color:theme.text}}>{atf.kaution!=null?_e(atf.kaution):_L("nicht erfasst","girilmemiş","not recorded")}</b>
+                {atf.personenzahl!=null?<span> · 👥 {atf.personenzahl} {_L("Personen","kişi","persons")}</span>:null}
+                {atf.anmeldung_done!=null?<span> · {atf.anmeldung_done?"✓ "+_L("Anmeldung erledigt","Kayıt yapıldı","Registration done"):"○ "+_L("Anmeldung offen","Kayıt açık","Registration open")}</span>:null}
+              </div>
+            </div>:isEig?<div style={{fontSize:13,color:theme.accent,fontWeight:600}}>🏠 {_L("Eigennutzung durch Eigentümer","Ev sahibi oturuyor","Owner lives here")} · {auf.eigennutzung_personen} {_L("Personen","kişi","persons")}</div>:<div style={{fontSize:13,color:theme.textMuted}}>{_L("Kein Mieter (Leerstand)","Kiracı yok (boş)","No tenant (vacant)")}</div>}</div>
           {at&&<div style={_sec}>
               <div onClick={()=>toggleAkteMk()} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
                 <div style={{..._h,marginBottom:0}}>💰 {_L("Mietkonto & Mahnung","Kira hesabı & ihtar","Rent account & dunning")}{ats.length>1?<span style={{fontWeight:400,color:theme.textDim,fontSize:12}}> · {at.mieter_name}</span>:null}</div>
                 <span style={{fontSize:13}}>{at.rueckstand>0?<b style={{color:theme.danger}}>{_L("Rückstand","Borç","Arrears")} {_e(at.rueckstand)}</b>:<b style={{color:theme.accent}}>✓</b>} <span style={{color:theme.textDim}}>{akteMkOpen?"▾":"▸"}</span></span>
               </div>
               {akteMkOpen&&<div style={{marginTop:10,fontSize:13,color:theme.textMuted}}>
-                {akteMk===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>:<div>
+                {akteMk===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>:akteMk===false?_errBox(retryAkte):<div>
                   <div style={{marginBottom:8,color:theme.textDim}}>{_L("Mietzeitraum","Kira dönemi","Rental period")}: <b style={{color:theme.text}}>{fmtD(at.von)} – {at.bis?fmtD(at.bis):_L("heute","bugün","today")}</b></div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"5px 12px"}}>
+                  <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:"5px 12px"}}>
                     <span>{_L("Soll (Zeitraum)","Soll (dönem)","Target (period)")}: <b style={{color:theme.text}}>{_e(at.soll)}</b></span>
                     <span>Ist: <b style={{color:theme.accent}}>{_e(at.ist)}</b></span>
                     {warmM!=null&&<span>{_L("Warmmiete/Monat","Brüt kira/ay","Warm rent/mo")}: <b style={{color:theme.text}}>{_e(warmM)}</b></span>}
@@ -4273,9 +4322,11 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
                   </div>
                   {lastMh&&<div style={{marginTop:5}}>{_L("Letzte Mahnung","Son ihtar","Last dunning")}: {lastMh.datum} · {_e(lastMh.betrag)}</div>}
                   {akteMh&&akteMh.naechste_stufe_text&&at.rueckstand>0&&<div style={{marginTop:5}}>{_L("Nächster Schritt","Sonraki adım","Next step")}: <b style={{color:"#f59e0b"}}>{akteMh.naechste_stufe_text}</b></div>}
+                  {/* Sprint 13.0 — deep-link: hedef kiracıyı taşır, Akte'yi kapatır (önce ikisi de
+                      parametresiz onNav("mieter") idi → kullanıcı listede kiracıyı yeniden arıyordu) */}
                   <div style={{marginTop:10,display:"flex",gap:8,flexWrap:"wrap"}}>
-                    {_lnk(_L("Mietkonto öffnen","Kira hesabını aç","Open account"),()=>onNav&&onNav("mieter"))}
-                    {_lnk(_L("Mahnung öffnen","İhtarı aç","Open dunning"),()=>onNav&&onNav("mieter"))}
+                    {_lnk(_L("Mietkonto öffnen","Kira hesabını aç","Open account"),()=>gotoMieter(at.tenancy_id))}
+                    {_lnk(_L("Mahnung öffnen","İhtarı aç","Open dunning"),()=>gotoMieter(at.tenancy_id))}
                   </div>
                 </div>}
               </div>}
@@ -4283,14 +4334,16 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
           <div style={_sec}>
             <div onClick={()=>toggleAkteNk(nkLatest&&nkLatest.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
               <div style={{..._h,marginBottom:0}}>📑 {_L("Nebenkosten","Yan giderler","Utility costs")}</div>
-              <span style={{fontSize:13,color:theme.textMuted}}>{akteNk===null?"…":nkLatest?nkLatest.jahr+" "+(nkLatest.final?_L("Abgeschlossen","Kapatıldı","Finalised"):_L("Entwurf","Taslak","Draft")):_L("keine","yok","none")} <span style={{color:theme.textDim}}>{akteNkO?"▾":"▸"}</span></span>
+              <span style={{fontSize:13,color:theme.textMuted}}>{akteNk===null?"…":akteNk===false?"⚠":nkLatest?nkLatest.jahr+" "+(nkLatest.final?_L("Abgeschlossen","Kapatıldı","Finalised"):_L("Entwurf","Taslak","Draft")):_L("keine","yok","none")} <span style={{color:theme.textDim}}>{akteNkO?"▾":"▸"}</span></span>
             </div>
             {akteNkO&&<div style={{marginTop:10,fontSize:13,color:theme.textMuted}}>
-              {!nkLatest?<div>{_L("Noch keine Abrechnung","Henüz hesap yok","No statement yet")}</div>
+              {akteNk===false?_errBox(retryAkte)
+               :!nkLatest?<div>{_L("Noch keine Abrechnung","Henüz hesap yok","No statement yet")}</div>
                :akteNkD===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>
+               :akteNkD===false?_errBox(()=>{setAkteNkD(null);api("/immo/nk/"+nkLatest.id).then(setAkteNkD).catch(()=>setAkteNkD(false));})
                :!at?<div>{_L("Kein Mieter","Kiracı yok","No tenant")}</div>
                :nkTen?<div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"5px 12px"}}>
+                  <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:"5px 12px"}}>
                     <span>{_L("Kostenanteil","Gider payı","Cost share")}: <b style={{color:theme.text}}>{_e(nkTen.umlage)}</b></span>
                     <span>{_L("Vorauszahlung","Avans","Advance")}: <b style={{color:theme.text}}>{_e(nkTen.vorauszahlung)}</b></span>
                   </div>
@@ -4300,13 +4353,49 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
               <div style={{marginTop:10}}>{_lnk(_L("Zur Nebenkosten","Yan giderlere","To utilities"),()=>goTab("nebenkosten"))}</div>
             </div>}
           </div>
+          {/* Sprint 13.0 — Protokolle (Übergabe/Rückgabe) + Wohnungsgeberbestätigung.
+              İkisi de Sprint 1'den beri canlıydı ama Akte'den erişilemiyordu. Yeni endpoint YOK. */}
+          {at&&<div style={_sec}>
+            <div onClick={()=>toggleAkteProt(ats)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
+              <div style={{..._h,marginBottom:0}}>📋 {_L("Protokolle & Bescheinigungen","Protokoller & belgeler","Protocols & certificates")}</div>
+              <span style={{fontSize:13,color:theme.textMuted}}>{akteProt===null?(akteProtO?"…":""):akteProt===false?"⚠":akteProt.length+" "+_L("Protokoll(e)","protokol","protocol(s)")} <span style={{color:theme.textDim}}>{akteProtO?"▾":"▸"}</span></span>
+            </div>
+            {akteProtO&&<div style={{marginTop:10,fontSize:13,color:theme.textMuted}}>
+              {akteProt===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>
+               :akteProt===false?_errBox(()=>{setAkteProt(null);setAkteProtO(false);setTimeout(()=>toggleAkteProt(ats),0);})
+               :akteProt.length?<div>{akteProt.map(p=>(<div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"4px 0",borderBottom:"1px solid "+theme.border,flexWrap:"wrap"}}>
+                  <span>{p.art==="auszug"?"📤 "+_L("Auszug","Çıkış","Move-out"):"📥 "+_L("Einzug","Giriş","Move-in")} · {fmtD(p.datum)}{ats.length>1&&p._mieter?" · "+p._mieter:""} <span style={{color:p.status==="abgeschlossen"?theme.accent:"#f59e0b"}}>{p.status==="abgeschlossen"?"🔒 "+_L("abgeschlossen","tamamlandı","completed"):_L("Entwurf","taslak","draft")}</span></span>
+                  <button style={{...css.btnOutline,padding:"4px 10px",fontSize:12}} onClick={()=>dlProtokoll(p.id)}>📄 PDF</button>
+                </div>))}</div>
+               :<div>{_L("Noch kein Protokoll","Henüz protokol yok","No protocol yet")}</div>}
+              <div style={{marginTop:10,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{fontSize:12,color:theme.textDim}}>{_L("Wohnungsgeberbestätigung","Konut sağlayıcı belgesi","Landlord confirmation")} (§19 BMG):</span>
+                <button style={{...css.btnOutline,padding:"4px 10px",fontSize:12}} onClick={()=>dlWgb(at.tenancy_id,"einzug")}>{_L("Einzug","Giriş","Move-in")}</button>
+                <button style={{...css.btnOutline,padding:"4px 10px",fontSize:12}} onClick={()=>dlWgb(at.tenancy_id,"auszug")}>{_L("Auszug","Çıkış","Move-out")}</button>
+              </div>
+            </div>}
+          </div>}
           <div style={_sec}>
-            <div onClick={()=>setAkteZO(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
+            <div onClick={()=>toggleAkteZ(akteU.unit_id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
               <div style={{..._h,marginBottom:0}}>⚡ {_L("Zählerstände","Sayaçlar","Meter readings")}</div>
-              <span style={{fontSize:13,color:theme.textMuted}}>{akteZ===null?"…":zarts.length+" "+_L("Zähler","sayaç","meters")} <span style={{color:theme.textDim}}>{akteZO?"▾":"▸"}</span></span>
+              <span style={{fontSize:13,color:theme.textMuted}}>{akteZ===null?"…":akteZ===false?"⚠":zarts.length+" "+_L("Zähler","sayaç","meters")} <span style={{color:theme.textDim}}>{akteZO?"▾":"▸"}</span></span>
             </div>
             {akteZO&&<div style={{marginTop:10,fontSize:13,color:theme.textMuted}}>
-              {akteZ===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>:zarts.length?<div>{zarts.map((z,i)=><div key={i} style={{padding:"2px 0"}}>{z.label||z.k}: <b style={{color:theme.text}}>{z.anfang==null?"—":z.anfang} → {z.ende==null?"—":z.ende}</b>{z.einheit?" "+z.einheit:""}</div>)}</div>:<div>{_L("Keine Zählerstände","Sayaç yok","No readings")}</div>}
+              {/* Yıl matrisi (Anfang→Ende) + Sprint 13.0: tam geçmiş & Verbrauch (mevcut /units/{uid}/zaehler) */}
+              {akteZ===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>
+               :akteZ===false?_errBox(retryAkte)
+               :zarts.length?<div>{zarts.map((z,i)=><div key={i} style={{padding:"2px 0"}}>{z.label||z.k} ({year}): <b style={{color:theme.text}}>{z.anfang==null?"—":z.anfang} → {z.ende==null?"—":z.ende}</b>{z.einheit?" "+z.einheit:""}</div>)}</div>
+               :<div>{_L("Keine Zählerstände in diesem Jahr","Bu yıl sayaç okuması yok","No readings this year")}</div>}
+              <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+theme.border}}>
+                <div style={{fontSize:12,color:theme.textDim,marginBottom:4}}>{_L("Verlauf & Verbrauch","Geçmiş & tüketim","History & consumption")}</div>
+                {akteZH===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>
+                 :akteZH===false?_errBox(()=>{setAkteZH(null);api("/immo/units/"+akteU.unit_id+"/zaehler").then(setAkteZH).catch(()=>setAkteZH(false));})
+                 :(()=>{const zz=Object.keys(akteZH.zaehler||{}).map(k=>({k,...akteZH.zaehler[k]})).filter(x=>(x.messungen||[]).length);
+                   return zz.length?<div>{zz.map(x=>{const ms=x.messungen.slice(-3);return(<div key={x.k} style={{padding:"3px 0"}}>
+                     <span style={{color:theme.text,fontWeight:600}}>{x.label}</span> <span style={{color:theme.textDim}}>({x.einheit})</span>
+                     {ms.map((m,i)=><span key={i} style={{marginLeft:8}}>{fmtD(m.datum)}: <b style={{color:theme.text}}>{m.stand}</b>{m.verbrauch!=null?<span style={{color:theme.accent}}> (+{m.verbrauch})</span>:null}</span>)}
+                   </div>);})}</div>:<div>{_L("Noch keine Messungen","Henüz ölçüm yok","No measurements yet")}</div>;})()}
+              </div>
               <div style={{marginTop:10}}>{_lnk(_L("Zu Zählerständen","Sayaçlara","To meters"),()=>goTab("nebenkosten"))}</div>
             </div>}
           </div>
