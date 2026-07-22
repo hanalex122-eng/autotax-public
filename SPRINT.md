@@ -549,9 +549,11 @@ fotoğraflar · Energieausweis · sigorta belgeleri. Yetenekler: yükleme · ind
 > sayıyor: #9 Mietvertrag Generator (🔴 zorunlu) · #11 Kündigung Generator · #13 Wohnung Akte ·
 > #15 Dokumente. Bu not onları **post-MVP'ye** itiyor. Masterplan "backlog değildir, yeni fikirler
 > önüne geçemez" diyor → bu bir **kapsam kararıdır**, sessizce uygulanamaz.
-> **Karar gerekiyor:** (a) Masterplan güncellensin ve bu maddeler post-MVP'ye taşınsın mı, yoksa
-> (b) not yalnızca *listedeki geri kalan* (arşiv katmanı, Kaution/Mieterhöhung şablonları) için mi
-> geçerli olsun? Karar verilene kadar **Masterplan bağlayıcı kalır**.
+> **✅ KARAR (kullanıcı, 2026-07-22) = (b):** Bu post-MVP notu **yalnızca listenin geri kalanı** için
+> geçerlidir — yani **belge arşivinin arama/kategori/etiket katmanı** ve **Kaution / Mieterhöhung /
+> ek hukuki şablonlar**. `VERMIETER_MASTERPLAN.md` **değişmedi ve bağlayıcı kalıyor**: #9 Mietvertrag ·
+> #11 Kündigung · #13 Wohnung Akte · #15 Dokumente **çekirdek MVP'dedir**. Zaten canlı olanlar
+> (WGB, Übergabe-/Rückgabeprotokoll, Mahnung/NK PDF, temel belge yükleme) bu notun kapsamında değildir.
 
 ### [OPS] Railway Postgres servisinin PGPASSWORD / DATABASE_PUBLIC_URL senkronsuzluğu  (bulundu 2026-07-21)
 Faz 3 ön kontrolü sırasında ortaya çıktı: Postgres servisinin `PGPASSWORD` (ve dolayısıyla
