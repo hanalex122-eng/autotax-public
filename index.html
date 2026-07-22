@@ -3956,7 +3956,10 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   // farklı yıl gösteriyordu). Hata → false (boş veriyle karıştırılmasın).
   const loadAkte=(u,yr)=>{
     if(!u||!sel)return;
-    setAkteNk(null);setAkteZ(null);setAkteMk(null);setAkteMh(null);setAkteNkD(null);setAkteProt(null);setAkteZH(null);
+    // NOT: akteProt ve akteZH YILA BAĞLI DEĞİL (protokol listesi + sayaç geçmişi tüm dönem) ve yalnız
+    // akordiyon açılışında yükleniyorlar → burada sıfırlanırlarsa açık akordiyon kalıcı "lädt…" olur.
+    // Onlar sadece BAŞKA bir daire açılırken sıfırlanır (openAkte).
+    setAkteNk(null);setAkteZ(null);setAkteMk(null);setAkteMh(null);setAkteNkD(null);
     api("/immo/nk?property_id="+sel.id).then(d=>setAkteNk(d.abrechnungen||[])).catch(()=>setAkteNk(false));
     api("/immo/properties/"+sel.id+"/zaehler-matrix?jahr="+yr).then(setAkteZ).catch(()=>setAkteZ(false));
     const at=akteActiveTen(u.unit_id); // Status-Summary braucht Mietkonto+Mahnung sofort → eager (bestehende Endpunkte, read-only)
@@ -3964,7 +3967,9 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       api("/immo/tenancies/"+at.tenancy_id+"/mahnungen").then(setAkteMh).catch(()=>setAkteMh(false));}
     else{setAkteMk(null);setAkteMh(null);}
   };
-  const openAkte=(u)=>{setAkteU(u);setAkteMkOpen(false);setAkteNkO(false);setAkteZO(false);setAkteProtO(false);loadAkte(u,year);};
+  const openAkte=(u)=>{setAkteU(u);setAkteMkOpen(false);setAkteNkO(false);setAkteZO(false);setAkteProtO(false);
+    setAkteProt(null);setAkteZH(null);   // daire değişti → daireye/sözleşmeye bağlı lazy veriler sıfırlanır
+    loadAkte(u,year);};
   const toggleAkteMk=()=>setAkteMkOpen(o=>!o);
   // Akte açıkken yıl değişirse veriyi tazele (yıl senkronizasyonu)
   React.useEffect(()=>{if(akteU)loadAkte(akteU,year);},[year]);
