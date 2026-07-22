@@ -3971,50 +3971,13 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
     if(!confirm(_L("Immobilie wirklich löschen?\\n\\nAlle Einheiten, Mieter und deren Mietkonten werden mitgelöscht.","Mülk silinsin mi?\\n\\nTüm daireler, kiracılar ve kira hesapları da silinir.","Delete this property?\\n\\nIts units, tenants and their rent accounts are deleted too.")))return;
     try{await api("/immo/properties/"+pid,{method:"DELETE"});loadProps();if(showToast)showToast(_L("Gelöscht","Silindi","Deleted"),"info");}catch(ex){alert(ex.message);}};
   const dlWgb=async(tid,art)=>{setWgbFor(null);try{const r=await fetch(API+"/immo/tenancies/"+tid+"/wohnungsgeberbestaetigung/pdf?art="+art,{headers:{Authorization:"Bearer "+_tk()}});if(!r.ok){let m="HTTP "+r.status;try{const j=await r.json();if(j&&j.detail)m=j.detail;}catch(e){}alert(m);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="wohnungsgeberbestaetigung_"+tid+".pdf";a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(u);},1500);}catch(e){alert(e.message);}};
-  // Nebenkostenabrechnung (Sprint 2). No business logic here — the backend derives every share,
-  // the Vorauszahlung, the Leerstand and the lock. The tab only collects costs and displays.
-  const [nkList,setNkList]=React.useState([]);
-  const [nkOpen,setNkOpen]=React.useState(null);          // the open Abrechnung (full object) or null
-  const [nkPos,setNkPos]=React.useState({kategorie:"grundsteuer",betrag:"",umlage_pct:"100",schluessel:""});
-  const NK_SCHL=[["","(Standard)"],["wohnflaeche","Wohnfläche (m²)"],["wohneinheiten","Wohneinheiten"],["personenzahl","Personenzahl"],["verbrauch","Verbrauch"],["individuell","Individuell"]];
-  const NK_KAT=[["heizkosten","Heizkosten"],["warmwasser","Warmwasser"],["wasser","Wasser (kalt)"],["abwasser","Abwasser"],["muell","Müllabfuhr"],["grundsteuer","Grundsteuer"],["gebaeudeversicherung","Gebäudeversicherung"],["hausmeister","Hausmeister"],["allgemeinstrom","Allgemeinstrom"],["gartenpflege","Gartenpflege"],["schornsteinfeger","Schornsteinfeger"],["winterdienst","Winterdienst"],["strassenreinigung","Straßenreinigung"],["sonstige","Sonstige"],["reparatur","Reparatur (nicht umlagefähig)"],["verwaltung","Verwaltung (nicht umlagefähig)"]];
-  const loadNk=(pid)=>api("/immo/nk?property_id="+pid).then(d=>setNkList(d.abrechnungen||[])).catch(()=>setNkList([]));
-  const openNk=async(aid)=>{try{setNkOpen(await api("/immo/nk/"+aid));}catch(e){alert(e.message);}};
-  const newNk=async(pid)=>{const jahr=parseInt(prompt(_L("Abrechnungsjahr","Hesap yılı","Settlement year"),String(new Date().getFullYear()-1)));if(!jahr)return;try{const a=await api("/immo/nk",{method:"POST",body:JSON.stringify({property_id:pid,jahr:jahr})});setNkOpen(a);loadNk(pid);}catch(e){alert(e.message);}};
-  const addNkPos=async()=>{const amt=parseFloat(nkPos.betrag);if(!(amt>0)){alert(_L("Betrag eingeben","Tutar gir","Enter an amount"));return;}const body={kategorie:nkPos.kategorie,betrag:amt,umlage_pct:parseInt(nkPos.umlage_pct)||100};if(nkPos.schluessel)body.schluessel=nkPos.schluessel;try{const a=await api("/immo/nk/"+nkOpen.id+"/position",{method:"POST",body:JSON.stringify(body)});setNkOpen(a);setNkPos({kategorie:"grundsteuer",betrag:"",umlage_pct:"100",schluessel:""});}catch(e){alert(e.message);}};
-  const toggleNkPos=async(pid,cur)=>{try{setNkOpen(await api("/immo/nk/"+nkOpen.id+"/position/"+pid,{method:"PATCH",body:JSON.stringify({umlagefaehig:!cur})}));}catch(e){alert(e.message);}};
-  const delNkPos=async(pid)=>{try{setNkOpen(await api("/immo/nk/"+nkOpen.id+"/position/"+pid,{method:"DELETE"}));}catch(e){alert(e.message);}};
-  const finalizeNk=async()=>{if(!confirm(_L("Abrechnung abschließen?\n\nDanach nicht mehr änderbar (nur Entsperren).","Hesap kapatılsın mı?\n\nSonra değiştirilemez (sadece kilit açma).","Finalise?\n\nNot editable afterwards (only unlock).")))return;try{const a=await api("/immo/nk/"+nkOpen.id+"/finalisieren",{method:"POST"});setNkOpen(a);loadNk(sel.id);if(showToast)showToast(_L("Abgeschlossen ✓","Kapatıldı ✓","Finalised ✓"),"success");}catch(e){alert(e.message);}};
-  const unlockNk=async()=>{if(!confirm(_L("Entsperren und wieder bearbeitbar machen?","Kilidi aç ve düzenlenebilir yap?","Unlock and make editable again?")))return;try{setNkOpen(await api("/immo/nk/"+nkOpen.id+"/entsperren",{method:"POST"}));loadNk(sel.id);}catch(e){alert(e.message);}};
-  const nkPdf=async(tid)=>{try{const r=await fetch(API+"/immo/nk/"+nkOpen.id+"/pdf"+(tid?"?tenancy_id="+tid:""),{headers:{Authorization:"Bearer "+_tk()}});if(!r.ok){alert("PDF "+r.status);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Nebenkosten_"+nkOpen.jahr+(tid?"_"+tid:"_Uebersicht")+".pdf";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);}catch(e){alert(e.message);}};
-  // OPEN cost grid — every standard category is a visible row with its own amount field; no dropdown
-  // to pick from, and no "add one at a time". Type an amount, it auto-saves (upsert) on blur/Enter.
-  const NK_STD=[["heizkosten","Heizkosten"],["warmwasser","Warmwasser"],["wasser","Wasser (kalt)"],["abwasser","Abwasser"],["muell","Müllabfuhr"],["grundsteuer","Grundsteuer"],["gebaeudeversicherung","Gebäudeversicherung"],["hausmeister","Hausmeister"],["allgemeinstrom","Allgemeinstrom"],["gartenpflege","Gartenpflege"],["schornsteinfeger","Schornsteinfeger"],["winterdienst","Winterdienst"],["strassenreinigung","Straßenreinigung"],["sonstige","Sonstige"]];
-  const [nkGrid,setNkGrid]=React.useState({});     // {kategorie: betrag-string being typed}
-  const [nkSchl,setNkSchl]=React.useState({});     // {kategorie: schlüssel override being chosen}
-  const nkPosOf=(kat)=>((nkOpen&&nkOpen.positionen)||[]).find(p=>p.kategorie===kat);
-  const nkSaveRow=async(kat)=>{
-    const raw=nkGrid[kat]; if(raw===undefined)return;      // untouched
-    const amt=parseFloat(raw); const ex=nkPosOf(kat);
-    try{let a;
-      if(ex){ if(!(amt>0)) a=await api("/immo/nk/"+nkOpen.id+"/position/"+ex.id,{method:"DELETE"});
-              else a=await api("/immo/nk/"+nkOpen.id+"/position/"+ex.id,{method:"PATCH",body:JSON.stringify({betrag:amt})}); }
-      else if(amt>0){ const body={kategorie:kat,betrag:amt}; if(nkSchl[kat])body.schluessel=nkSchl[kat];
-              a=await api("/immo/nk/"+nkOpen.id+"/position",{method:"POST",body:JSON.stringify(body)}); }
-      else return;
-      setNkOpen(a); setNkGrid(g=>{const n={...g};delete n[kat];return n;});
-    }catch(e){alert(e.message);}
-  };
-  const nkSaveSchl=async(kat,schl)=>{setNkSchl(s=>({...s,[kat]:schl}));const ex=nkPosOf(kat);
-    if(ex){try{setNkOpen(await api("/immo/nk/"+nkOpen.id+"/position/"+ex.id,{method:"PATCH",body:JSON.stringify({schluessel:schl})}));}catch(e){alert(e.message);}}};
-  const openProp=(p)=>{setSel(p);setTab("uebersicht");setNkOpen(null);refreshDetail(p.id,year);};
+  const openProp=(p)=>{setSel(p);setTab("uebersicht");refreshDetail(p.id,year);};
   const refreshDetail=(pid,yr)=>{
     setEditUnit(null);setEditTen(null);setShowAddUnit(false);setAddTenFor(null);
     api("/immo/properties/"+pid+"/accounting?year="+yr).then(setAcc).catch(()=>{});
     api("/immo/properties/"+pid+"/rent?year="+yr).then(d=>setRents(d.rent||[])).catch(()=>{});
     api("/immo/properties/"+pid+"/expenses?year="+yr).then(d=>setExps(d.expenses||[])).catch(()=>{});
     api("/immo/properties/"+pid+"/documents").then(d=>setDocs(d.documents||[])).catch(()=>{});
-    loadNk(pid);
     // Full unit/tenancy dicts (wohnflaeche / nk_voraus not in /accounting) — frontend-only.
     api("/immo/properties/"+pid+"/units").then(d=>{
       const um={};(d.units||[]).forEach(u=>um[u.id]=u);setUFull(um);
