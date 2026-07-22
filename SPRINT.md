@@ -517,6 +517,42 @@ NK-Vorauszahlung is finally tracked as owed.
 
 ## BACKLOG — parked, do NOT start before the active sprint closes
 
+### 🔒 POST-MVP BACKLOG — Dokumentvorlagen + Dokumentenarchiv (kullanıcı, 2026-07-22)
+**KURAL:** Aşağıdakilerin hiçbiri, kullanıcı **çekirdek ürünün bittiğini açıkça teyit etmeden**
+başlatılmaz. Sıra: ① kalan çekirdek ev-sahibi özellikleri bitir → ② test → ③ production doğrulama →
+④ kullanıcı onayı → ⑤ ancak o zaman aşağıdakiler.
+
+**Dokumentvorlagen:** Mietvertrag · Wohnungsübergabeprotokoll (Einzug) · Wohnungsrückgabeprotokoll
+(Auszug) · Wohnungsgeberbestätigung · Vermieter-Kündigungsschreiben · Mieterhöhung şablonları ·
+Kaution belgeleri · diğer hukuki şablonlar.
+
+**Dokumentenarchiv (property/unit başına güvenli arşiv):** sözleşmeler · protokoller ·
+Anmeldebestätigungen · Nebenkostenabrechnungen · Mahnungen · faturalar · tamirat belgeleri ·
+fotoğraflar · Energieausweis · sigorta belgeleri. Yetenekler: yükleme · indirme · **arama** ·
+**kategoriler** · **etiketler** · tarih sıralaması · uzun süreli güvenli saklama.
+
+> ⚠️ **İki çelişki — kodlamadan önce kullanıcı kararı gerekiyor (bilerek çözülmedi):**
+>
+> **(1) Listedeki bazı maddeler ZATEN CANLI.** "Post-MVP'ye ertelendi" diye kaydetmek yanlış olur:
+> · **Wohnungsgeberbestätigung** → PDF canlı, `einzug|auszug` iki varyantıyla (`immo_api.py:1670-1691`);
+>   Masterplan #5 ✅ TAMAM (Sprint 1)
+> · **Übergabeprotokoll (Einzug) + Rückgabeprotokoll (Auszug)** → tek modelde canlı
+>   (`ImmoProtokoll.art = einzug|auszug`, `models.py:1037`; `immo_protokoll.py:26`); 5 adımlı sihirbaz,
+>   oda-oda durum, imzalar, kilit, PDF (`immo_api.py:2222-2322`); Masterplan #6 ✅ TAMAM (Sprint 1)
+> · **Mahnung / Nebenkostenabrechnung PDF'leri** → canlı
+> · **Belge yükleme/indirme** → temel hâli canlı (`immo_api.py:674, 688, 708`); eksik olan **arama,
+>   kategori, etiket** ve daire bazlı tasnif (Masterplan #15 🟡)
+>   → Yani gerçek yeni iş: **arşivin arama/kategori/etiket katmanı** + **Mietvertrag/Kündigung/Kaution/
+>   Mieterhöhung şablonları**. Diğerleri "yapılacak" değil, olsa olsa "iyileştirilecek".
+>
+> **(2) Masterplan çelişkisi.** `VERMIETER_MASTERPLAN.md` **kilitli** ve şunları **çekirdek MVP**
+> sayıyor: #9 Mietvertrag Generator (🔴 zorunlu) · #11 Kündigung Generator · #13 Wohnung Akte ·
+> #15 Dokumente. Bu not onları **post-MVP'ye** itiyor. Masterplan "backlog değildir, yeni fikirler
+> önüne geçemez" diyor → bu bir **kapsam kararıdır**, sessizce uygulanamaz.
+> **Karar gerekiyor:** (a) Masterplan güncellensin ve bu maddeler post-MVP'ye taşınsın mı, yoksa
+> (b) not yalnızca *listedeki geri kalan* (arşiv katmanı, Kaution/Mieterhöhung şablonları) için mi
+> geçerli olsun? Karar verilene kadar **Masterplan bağlayıcı kalır**.
+
 ### [OPS] Railway Postgres servisinin PGPASSWORD / DATABASE_PUBLIC_URL senkronsuzluğu  (bulundu 2026-07-21)
 Faz 3 ön kontrolü sırasında ortaya çıktı: Postgres servisinin `PGPASSWORD` (ve dolayısıyla
 `DATABASE_PUBLIC_URL`) değeri, çalışan veritabanının gerçek şifresiyle **uyuşmuyor**. Hem TCP proxy
