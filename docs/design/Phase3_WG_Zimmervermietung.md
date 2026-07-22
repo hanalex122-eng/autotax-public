@@ -6,6 +6,12 @@
 > `.claude/nk_architecture.md` (Principle A/B/C) · `docs/roadmap/Flexible_Mietmodelle_Phase1.md` (§7 Ürün Prensibi, §8 Veri Modeli, §9 Tasarım İlkeleri)
 > **Yöntem:** Bu belgedeki her teknik iddia mevcut kod okunarak doğrulandı; iddialar `dosya:satır` ile referanslıdır. Varsayım kullanılmadı.
 >
+> 🔁 **DURUM (2026-07-22): Faz 3.1/3.2/3.3 TRIGGER-BASED backlog'a alındı — iptal değil.** Sprint 3.0
+> canlı ve kapalı; kalan sprintler ilk gerçek ihtiyaç/müşteri talebi geldiğinde yeniden
+> önceliklendirilir. Tetikleyiciler ve gerekçe: `SPRINT.md` → BACKLOG → *Faz 3 — trigger-based*.
+> O zamana kadar sıra `VERMIETER_MASTERPLAN.md`'dedir (#13 Wohnung Akte → #9 Mietvertrag → …).
+> **Bu belge geçerliliğini korur** ve tetiklendiğinde referans belgedir.
+>
 > **Revizyon 3 (2026-07-21) — Guardrail = HARD VALIDATION.** §9.3-U3 ve §10/Sprint 3.0'daki
 > *"uyarı, engelleme değil"* ifadesi geçersizdir. Karar: aynı Unit'te tarih aralığı **örtüşen** ikinci
 > tenancy'nin oluşturulması **engellenir** — **override yok, sadece-uyarı yok.** Gerekçe: Sprint 3.0

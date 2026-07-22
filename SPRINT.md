@@ -517,6 +517,31 @@ NK-Vorauszahlung is finally tracked as owed.
 
 ## BACKLOG — parked, do NOT start before the active sprint closes
 
+### 🔁 Faz 3 — WG / Zimmervermietung (3.1 · 3.2 · 3.3) — TRIGGER-BASED (karar 2026-07-22)
+**İptal EDİLMEDİ.** Tarihe değil, **tetikleyiciye** bağlandı: ilk gerçek ihtiyaç veya müşteri talebi
+geldiğinde yeniden önceliklendirilir. O ana kadar sıra `VERMIETER_MASTERPLAN.md`'nin kendi sırasıdır
+(**#13 Wohnung Akte → #9 Mietvertrag → …**).
+
+**Tetikleyiciler (herhangi biri yeterli):**
+1. Bir ev sahibi oda-oda kiralama / WG talep eder.
+2. Bir kullanıcı guardrail'e takılır (aynı daireye ikinci sözleşme → 400) ve gerçekten WG kurmak ister.
+3. Bir kullanıcı odalar için **sahte Unit** açıp NK'da çift-sayım hatası yaşar (roadmap madde 10, 340↔228).
+
+**Neden şimdi değil:** prod'da 0 örtüşme (Gate T2, 2026-07-21) → bugün kimsenin ihtiyacı yok ·
+Sprint 3.0 güvenlik ağını zaten kurdu (doğru Soll toplamı + hard guardrail) → erteleme **sessiz yanlış
+rakam üretmiyor** · 3.1 NK motorunu, `CALCULATION_VERSION`'ı ve snapshot şemasını açıyor (hukuki sonuç
+doğuran tek alan) → gerçek talep olmadan bu riski üstlenmek "no speculative coding" kuralına aykırı.
+
+**Ertelemenin bilinen bedeli:** oda-oda kiralayan biri gelirse sahte Unit açar; `wohnflaeche`'yi elle
+bölmezse **binadaki DİĞER kiracıların** NK payı bozulur. Ucuz panzehir 3.1 değil, backlog'daki
+**Doppel-Wohnung Guardrail**'dir (aynı binaya aynı m²/daire ikinci kez eklenince uyar) — bağımsız
+olarak yapılabilir.
+
+**Tetiklendiğinde hazır olanlar:** ADD Rev.3 `docs/design/Phase3_WG_Zimmervermietung.md` (mimari
+kararlar) · `docs/design/Sprint_3_0_Technical_Design.md` §10 (3.1/3.2/3.3 devir listesi) ·
+Sprint 3.0 canlı ve doğrulanmış başlangıç noktası (`bee9043`). 3.1'in ilk işi: `anteil_flaeche` +
+`zimmer`, alan korunumu invariantı, NK ağırlıklarının normalize edilmesi, `CALCULATION_VERSION` 4→5.
+
 ### 🔒 POST-MVP BACKLOG — Dokumentvorlagen + Dokumentenarchiv (kullanıcı, 2026-07-22)
 **KURAL:** Aşağıdakilerin hiçbiri, kullanıcı **çekirdek ürünün bittiğini açıkça teyit etmeden**
 başlatılmaz. Sıra: ① kalan çekirdek ev-sahibi özellikleri bitir → ② test → ③ production doğrulama →

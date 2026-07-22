@@ -91,7 +91,12 @@ Tasarım: [`docs/design/Sprint_2_1_Untermieter.md`](../design/Sprint_2_1_Untermi
 > 3. **Untermieter mevcut mimarinin ÜZERİNE eklenir, onu DEĞİŞTİRMEZ** (additive/nullable, Sprint 1.1'deki gibi).
 > 4. **Ön koşul:** Faz 1 kapanışı + **kısa stabilizasyon** tamamlanmadan Faz 2'ye başlanmaz.
 
-### Faz 3 — WG / Zimmervermietung
+### Faz 3 — WG / Zimmervermietung 🔁 TRIGGER-BASED (2026-07-22 · iptal değil)
+Sprint 3.0 (doğruluk düzeltmeleri + hard guardrail) ✅ canlı. Kalan 3.1/3.2/3.3 **ilk gerçek
+ihtiyaç veya müşteri talebi** geldiğinde yeniden önceliklendirilir; o ana kadar sıra
+`VERMIETER_MASTERPLAN.md`'dedir. Tetikleyiciler: `SPRINT.md` → BACKLOG.
+Mimari kararlar: [`docs/design/Phase3_WG_Zimmervermietung.md`](../design/Phase3_WG_Zimmervermietung.md) (Rev. 3).
+
 - WG (Wohngemeinschaft)
 - Zimmervermietung
 - Aynı daire içinde birden fazla sözleşme (`anteil_flaeche`)
