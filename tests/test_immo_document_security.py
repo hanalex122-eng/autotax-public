@@ -101,9 +101,40 @@ def main():
     ok(r.status_code == 200 and r.content == PDF, "geçerli PDF indiriliyor (içerik aynı)")
     ok(r.headers.get("content-type", "").split(";")[0] == "application/pdf", "PDF → application/pdf (bytes'tan türedi)")
 
-    # ── SH-1b (upload) + regresyon: sonraki adımda eklenecek ──
+    print("\n== SH-1b — upload sertleştirme ==")
+    r = cl.post("/immo/documents", data={"property_id": 10, "typ": "contract"},
+                files={"file": ("v.pdf", PDF, "application/pdf")})
+    ok(r.status_code == 200, "geçerli PDF upload 200")
+    r = cl.post("/immo/documents", data={"property_id": 10, "typ": "other"},
+                files={"file": ("evil.pdf", HTML, "application/pdf")})
+    ok(r.status_code == 400, "sahte .pdf (HTML içerik) → 400 (magic bytes)")
+    r = cl.post("/immo/documents", data={"property_id": 10, "typ": "other"},
+                files={"file": ("x.svg", SVG, "image/svg+xml")})
+    ok(r.status_code == 400, "SVG+script → 400")
+    r = cl.post("/immo/documents", data={"property_id": 10, "typ": "other"},
+                files={"file": ("z.xml", XML, "application/xml")})
+    ok(r.status_code == 400, "XML → 400 (kapsam dışı)")
+    r = cl.post("/immo/documents", data={"property_id": 10, "typ": "other"},
+                files={"file": ("e.pdf", b"", "application/pdf")})
+    ok(r.status_code == 400, "boş dosya → 400")
+    big = b"%PDF" + b"0" * (11 * 1024 * 1024)
+    r = cl.post("/immo/documents", data={"property_id": 10, "typ": "other"},
+                files={"file": ("big.pdf", big, "application/pdf")})
+    ok(r.status_code == 400, "11MB PDF → 400 (boyut limiti)")
+    # server-derived MIME: yalancı content_type'a rağmen bytes'tan türetilir
+    r = cl.post("/immo/documents", data={"property_id": 10, "typ": "other"},
+                files={"file": ('a"b.pdf', PDF, "text/html")})
+    ok(r.status_code == 200, "geçerli PDF (yalancı content_type + bozuk ad) → 200")
+    did = r.json().get("id")
+    dd = S(); row = dd.query(ImmoDocument).get(did); ct = row.file_content_type; fn = row.filename; dd.close()
+    ok(ct == "application/pdf", "saklanan content_type bytes'tan TÜREDİ (yalancı text/html değil)")
+    ok('"' not in fn, "saklanan filename sanitize (tırnak yok)")
 
-    print("\n=== Security Hotfix SH-1a: %d passed, %d failed ===" % (PASS, FAIL))
+    print("\n== Regresyon — list/delete davranışı ==")
+    ok(cl.get("/immo/properties/10/documents").status_code == 200, "belge listesi çalışıyor")
+    ok(cl.delete("/immo/documents/2").status_code == 200, "belge silme çalışıyor")
+
+    print("\n=== Security Hotfix SH-1a+1b: %d passed, %d failed ===" % (PASS, FAIL))
     sys.exit(1 if FAIL else 0)
 
 

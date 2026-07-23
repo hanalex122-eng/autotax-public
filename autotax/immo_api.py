@@ -694,14 +694,22 @@ async def upload_document(property_id: int = Form(...), typ: str = Form("other")
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Datei leer")
+    # Security Hotfix SH-1b: size limit + magic validation + server-derived MIME.
+    # Same rule set as vault upload (validators.sniff_upload_mime): PDF/JPEG/PNG/WebP only,
+    # decided by magic bytes — the client Content-Type is never trusted or stored.
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Datei zu groß (max. 10 MB)")
+    safe_mime = _sniff_mime(content)
+    if not safe_mime:
+        raise HTTPException(status_code=400, detail="Nur PDF, JPEG, PNG oder WebP erlaubt")
     db = SessionLocal()
     try:
         _own_property(db, _uid(user), property_id)
         rel = storage.save_file(_uid(user), content, file.filename)
         d = ImmoDocument(property_id=property_id, user_id=_uid(user),
                          typ=(typ if typ in DOC_TYPEN else "other"),
-                         filename=file.filename or "dokument", file_path=rel,
-                         file_content_type=file.content_type or "application/octet-stream")
+                         filename=_san_fn(file.filename), file_path=rel,
+                         file_content_type=safe_mime)
         db.add(d); db.commit(); db.refresh(d)
         return {"success": True, **_doc_dict(d)}
     finally:
