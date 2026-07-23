@@ -35,7 +35,7 @@ yasaktır.** Aktif sprint takibi: `SPRINT.md`. Sprint disiplini: `CLAUDE.md`.
 | 10 | **Kurzzeitmiete** | Günlük/haftalık/aylık sözleşmeler | 🟡 | 🔴 yok |
 | 11 | **Kündigung Generator** | Hazır şablonlar | 🟡 | 🔴 yok |
 | 12 | **SEPA Lastschrift** | Mandat · PDF | 🟡 | 🔴 yok |
-| 13 | **Wohnung Akte** ⭐⭐⭐ | Her dairenin tek ekranı: 🏠 Stammdaten · 👤 Kiracı · 📄 Mietvertrag · 💰 Mietkonto · 📬 Mahnung · 📑 Nebenkosten · ⚡ Sayaçlar · 🛠 Tamiratlar · 📷 Fotoğraflar · 📁 Belgeler | 🔴 zorunlu | 🔴 yok (bugün 5 ayrı ekrana dağılmış) |
+| 13 | **Wohnung Akte** ⭐⭐⭐ | Her dairenin tek ekranı: 🏠 Stammdaten · 👤 Kiracı · 📄 Mietvertrag · 💰 Mietkonto · 📬 Mahnung · 📑 Nebenkosten · ⚡ Sayaçlar · 🛠 Tamiratlar · 📷 Fotoğraflar · 📁 Belgeler | 🔴 zorunlu | 🟢 **BÜYÜK ÖLÇÜDE TAMAM** (Sprint 13.0, canlı 2026-07-23): composition hub — Stammdaten · Kiracı (iletişim+Kaution) · Mietkonto+Mahnung · Nebenkosten · Sayaçlar (geçmiş+Verbrauch) · Protokolle+WGB · Belgeler, hepsi tek ekranda mevcut modüllerden bağlı (hesaplama/yeni endpoint YOK). Kalan bölümler kendi maddelerinde eklenecek: 📄 Mietvertrag (#9), 🛠 Schäden (#14), 📷 Fotoğraf, daire-bazlı 📁 Belgeler (13.1) |
 | 14 | **Schäden / Reparaturen** | Bakım geçmişi · fotoğraf · masraf · durum | 🟡 | 🔴 yok |
 | 15 | **Dokumente** | Daire başına Energieausweis · Grundriss · Versicherungen · Rechnungen · Protokolle | 🟡 | 🟡 belge yükleme var, daire bazlı tasnif zayıf |
 

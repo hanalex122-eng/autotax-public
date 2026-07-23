@@ -18,7 +18,64 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
-## NO ACTIVE SPRINT — Sprint 3.0 closed & production-verified 2026-07-21
+## NO ACTIVE SPRINT — Sprint 13.0 (Wohnung Akte) closed & production-verified 2026-07-23
+
+## ✅ SPRINT 13.0 — Wohnung Akte (#13) composition hub — CLOSED (canlı `9de18fb`, 2026-07-23)
+
+**Tek hedef:** Masterplan #13 Wohnung Akte'yi bir **composition hub** olarak tamamlamak — mevcut modülleri
+tek ekranda doğru bağlamak. Akte veri üretmez · hesaplama yapmaz · ikinci gerçek kaynak oluşturmaz ·
+aggregate endpoint yoktur. Tasarım: `docs/design/Sprint_13_0_Wohnung_Akte.md`.
+
+> Başlangıç gerçeği: Masterplan #13 "🔴 yok" diyordu ama Akte **Phase 1 canlıydı**. Bu sprint sıfırdan
+> ekran yazmadı; var olan hub'ın yalanlarını düzeltip bağlanmamış modülleri bağladı.
+
+**Yapılanlar:**
+- **Ölü kod:** ImmobilienView içindeki hiç render edilmeyen inline-NK bloğu silindi (`prompt()`'lu `newNk`
+  dahil — P0 yıl-seçici akışıyla çelişen legacy). NkEditor asıl bileşen, dokunulmadı.
+- **Hata ≠ boş:** fetch hatasında bölümler artık "0 Zähler" / "Offene Monate 0" / "Dieser Mieter ist nicht
+  in der Abrechnung" yalanı yerine hata kutusu + "Erneut versuchen" gösteriyor.
+- **Yıl senkronu:** Akte sabit `new Date().getFullYear()` yerine ekranın yıl seçicisini izliyor.
+- **Deep-link:** "Mietkonto/Mahnung öffnen" artık doğru kiracıyı açıyor (mevcut `sessionStorage` deseni).
+- **Bağlanan modüller (yeni endpoint YOK):** Protokolle (Übergabe/Rückgabe) + PDF · Wohnungsgeberbestätigung
+  Einzug/Auszug · kiracı iletişim + Kaution + Anmeldung · Zähler geçmişi + Verbrauch.
+- **Mobil + ESC.**
+
+**Commit'ler (5):**
+| Commit | İçerik |
+|---|---|
+| `4033a83` | Sprint 13.0 teknik tasarım |
+| `f7f5068` | 13.0a — ölü inline-NK kodu silindi (−38 satır) |
+| `60bbf71` | 13.0b–e — hata≠boş · yıl senkronu · deep-link · Protokolle/WGB · Zähler geçmişi · mobil+ESC |
+| `9de18fb` | 13.0f — yıl değişiminde kalıcı "lädt…" hatası (yerel doğrulamada bulundu ve düzeltildi) |
+| `1ff982a` | (boş) deploy retry — Railway orkestratör arızası sonrası tetikleyici |
+
+**Go/No-Go — kanıtlar:**
+1. **Commit:** HEAD == origin/main == `9de18fb` (kod); canlı build `1ff982a` üstünden.
+2. **Suite 47/47 PASS** · babel PARSE OK · JSX BALANCED.
+3. **Backend 0 satır** (`git diff --stat autotax/`): composition hub ilkesi — yeni hesaplama yok, yeni
+   endpoint yok, yeni tablo/kolon yok. Şema/migration yok.
+4. **Yerel doğrulama (gerçek app + sqlite, tarayıcı, 9 senaryo):** Protokolle · WGB PDF (200) · deep-link
+   doğru kiracı · hata kutusu + retry · yıl değişimi · **farklı daireye geçiş (veri sızmıyor)** ·
+   akordiyon aç/kapat · Zähler geçmişi+Verbrauch · console temiz. `13.0f` düzeltmesi burada bulundu.
+5. **Prod smoke (canlı, gerçek veri):** deploy SUCCESS (`8d3b2cac`) · `/health` ok · `/app` 200 ·
+   Akte 6 bölüm render · kiracıda telefon+Kaution €1.000+Anmeldung · WGB PDF 200 · **yıl 2026→2025
+   senkron, `lädt…` 0** (13.0f canlıda çalışıyor) · ESC kapatıyor · console error yok · auth guard 401.
+
+> ⚠️ **Deploy notu:** 22.07 22:43'teki ilk deploy Railway'in iç arızasıyla düştü
+> (`orchestrator.RegionService/ListRegions UNAVAILABLE`, ECONNREFUSED) — build hiç başlamadı, kodla
+> ilgisi yok (`Dockerfile`/`railway.json`/`requirements.txt` bu sprintte değişmedi). Disk 845 GB boş, DB
+> sağlıklı. 23.07'de boş commit ile tetikleyici yeniden çalıştırıldı, deploy başarılı.
+
+**Definition of Done: 11/11.** (Not: Akte'nin N>1 sözleşme dalı prod'da render olmuyor — guardrail
+örtüşmeyi engelliyor, mevcut örtüşme 0; Faz 3 için savunma kodu.)
+
+**Bilinçli kapsam dışı (kendi sprintlerinde Akte'ye bölüm ekleyecek):** #9 Mietvertrag · #14 Schäden ·
+fotoğraf modülü · daire bazlı belgeler (`ImmoDocument.unit_id`, 13.1) · belge yükleme güvenliği (ayrı
+**Security Hotfix**: boyut limiti + MIME whitelist + `Content-Disposition: attachment`).
+
+**Bu sprint gerçekten bitti mi? EVET.** Kapsamın tamamı canlı ve kanıtlı; kullanıcı gözünden kritik boşluk yok.
+
+---
 
 ## ✅ SPRINT 3.0 — Faz 3 doğruluk sprinti + örtüşme guardrail'i — CLOSED (canlı `bee9043`, 2026-07-21)
 
