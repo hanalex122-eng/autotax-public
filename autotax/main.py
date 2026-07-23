@@ -776,6 +776,7 @@ from autotax.validators import (
     _extract_first_iban, _extract_first_phone, _extract_first_address,
     _safe_json_list,
     _MAGIC_BYTES, _validate_file_magic,
+    sniff_upload_mime as _sniff_upload_mime, sanitize_filename as _sanitize_filename,
 )
 
 
@@ -12441,16 +12442,23 @@ async def upload_vault_file(invoice_id: int, file: UploadFile = File(...), user:
         if not inv:
             err(404, "Invoice not found")
         content = await file.read()
+        if not content:
+            err(400, "Datei leer")
         if len(content) > MAX_FILE_SIZE:
             err(400, "Datei zu groß")
+        # Security Hotfix SH-1c: same rule set as /immo/documents (SH-1b) — magic validation,
+        # server-derived MIME (client Content-Type not trusted/stored), sanitised filename.
+        _safe_mime = _sniff_upload_mime(content)
+        if not _safe_mime:
+            err(400, "Nur PDF, JPEG, PNG oder WebP erlaubt")
         # Write to disk (replaces previous file if any)
         from autotax import storage
         old_path = inv.file_path
         new_path = storage.save_file(int(user["sub"]), content, file.filename)
         inv.file_path = new_path
         inv.file_size = len(content)
-        inv.file_content_type = file.content_type or "application/octet-stream"
-        inv.filename = file.filename or inv.filename
+        inv.file_content_type = _safe_mime
+        inv.filename = _sanitize_filename(file.filename) or inv.filename
         # Drop legacy BLOB if present so the row stops occupying DB space
         inv.file_data = None
         db.commit()
