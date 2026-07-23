@@ -18,6 +18,57 @@ features proposed, until the active sprint passes the Definition of Done below.
 
 ---
 
+## NO ACTIVE SPRINT — Sprint 9 (Mietvertrag) technisch fertig 2026-07-23; Production wartet auf Mietrecht-Freigabe
+
+## 🟡 SPRINT 9 — Mietvertrag Generator (#9) — TEKNİK TAMAM · PRODUCTION HUKUKİ ONAY BEKLİYOR (2026-07-23)
+
+**Durum ayrımı (bağlayıcı):** Sprint 9 **teknik olarak tamamlandı** ve `main`'e push edildi (`ab559d7`).
+**Production release ayrı bir kapıdır** ve **Mietrecht (hukuk) metin onayına** bağlıdır — teknik smoke'un
+yeşil olması yayın için yeterli değildir. **Deploy YAPILMADI.** Tasarım: `docs/design/Sprint_9_0_Mietvertrag_Architecture.md`
++ `Sprint_9_0_Mietvertrag_Technical_Design.md` · source of truth: `.claude/mietvertrag_architecture.md`.
+
+**Tek hedef:** küçük ev sahibi Akte'den birkaç dakikada bir Wohnraummietvertrag (unbefristet/Staffel, tek
+kiracı) üretir; taraflar/obje/mali koşullar auto-fill, guided kloz seçimleri, hukuki railler. Belge üreticisi
+— **ikinci defter değil** (write-back tek yönlü, Mietkonto tek doğruluk kaynağı).
+
+**Ürün kararları (2026-07-23):** ① standart Wohnraummietvertrag · kloz metinleri parametrik · **canlı öncesi
+Mietrecht onayı** · kod içinde hukuki yorum yok. ② write-back **ON** + immutable snapshot + Revision. ③
+Gesamtschuldner **v1 dışı** (tek kiracı).
+
+**Commit'ler (a→b→c, hepsi canlıda `ab559d7` altında):**
+| Commit | İçerik |
+|---|---|
+| `07410a1` | 9.0a — saf şablon motoru (registry dispatch, parametrik kloz kataloğu, TEMPLATE_VERSION) + Unicode font (`pdf_fonts.py`, reportlab-bundled Vera; Türkçe+Almanca+€) |
+| `904dc79` | 9.0b — `ImmoMietvertrag` tablosu (boot-time create_all) + endpoint'ler + PDF + write-back (tek yönlü, snapshot, Revision) |
+| `ab559d7` | 9.0c — Akte'de "📄 Mietvertrag" accordion + 5 adımlı sihirbaz (lazy; Sprint 13 hub korundu) |
+
+**Kanıtlar:**
+1. **Suite 49/49 PASS** · babel PARSE OK · JSX BALANCED. Testler: `test_mietvertrag_template.py` (19 —
+   registry, cap per-type, geçersiz-kloz-üretilemez, Staffel, font-Türkçe), `test_immo_mietvertrag.py` (28 —
+   write-back tek yönlü, snapshot immutable, ikinci-defter-yok, create_all izolasyonu, regresyon).
+2. **Yerel gerçek-app E2E (tarayıcı, 2026-07-23):** lazy load (kapalıyken 0 çağrı, açılınca tam 1) · draft
+   auto-fill · 5 adım + her adımda PATCH · Mietpreisbremse nötr uyarı · ack yokken finalize kilitli · PDF
+   önizleme · finalize → 🔒 Final v1 + write-back (Kaution 5000→cap 2250) · final Bearbeiten YOK · Neue
+   Revision → v2 taslak, v1 dokunulmadı · ESC · console temiz.
+3. **Muhasebe izolasyonu:** `immo_rules` · `immo_payments` · `immo_nebenkosten` · `immo_ledger` · `db.py`
+   → **0 satır** (`git diff --stat`). Composition hub / tek defter korundu.
+
+**Definition of Done — TEKNİK 12/12 ✅.** İlk Akte render'ı değişmedi (Mietvertrag lazy); N=1 görünüm korundu.
+
+> ⚖️ **RELEASE DECISION (teknik değil — ürün/hukuk kararı):** Kloz metinleri (`mietvertrag_template.py`)
+> **TASLAK**, henüz Mietrecht incelemesinden geçmedi (H9). **Production deploy hukuki onaya bağlıdır.**
+> Deploy edilecekse tercihen **feature flag arkasında** veya **"Beta / Muster ohne Gewähr"** uyarısıyla.
+> Onaysız/uyarısız tam yayın önerilmez. Karar ürün sahibindedir.
+
+**Kalan (release öncesi):** Mietrecht kloz onayı (H9) → kontrollü yayın (flag/beta) → deploy → prod smoke
+(`docs/design/` altındaki Production Smoke Planı). **Deferred (source of truth §7):** Indexmiete · befristet ·
+Gewerbe · Gesamtschuldner/WG · dijital imza · Anlagen-bundle · Mietspiegel · daire-bazlı belgeler (13.1) ·
+belge yükleme güvenliği (ayrı Security Hotfix).
+
+**Bu sprint teknik olarak bitti mi? EVET.** Production'a çıkış ayrı, hukuki karar; teknik kalite kapısı geçildi.
+
+---
+
 ## NO ACTIVE SPRINT — Sprint 13.0 (Wohnung Akte) closed & production-verified 2026-07-23
 
 ## ✅ SPRINT 13.0 — Wohnung Akte (#13) composition hub — CLOSED (canlı `9de18fb`, 2026-07-23)
