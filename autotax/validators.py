@@ -116,9 +116,48 @@ def _validate_file_magic(content: bytes, claimed_type: str) -> bool:
     return False
 
 
+# ----------------------------------------------------------------------
+# Document upload hardening (Security Hotfix 2026-07-23)
+# One rule set shared by /immo/documents AND vault upload, so both paths
+# behave identically. Allowed types are decided by magic bytes (server-derived),
+# never by the client-supplied Content-Type.
+# ----------------------------------------------------------------------
+
+# Product decision (2026-07-23): PDF + JPEG + PNG + WebP only. No XML.
+ALLOWED_UPLOAD_MIME = ("application/pdf", "image/jpeg", "image/png", "image/webp")
+
+
+def sniff_upload_mime(content: bytes):
+    """Return the canonical MIME for `content` IFF it is one of the allowed types,
+    based on magic bytes only. Returns None for anything else (reject at upload;
+    serve as octet-stream at download). Never trusts a client Content-Type."""
+    if not content or len(content) < 4:
+        return None
+    if content[:4] == b"%PDF":
+        return "application/pdf"
+    if content[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if content[:4] == b"\x89PNG":
+        return "image/png"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def sanitize_filename(name):
+    """Strip path components and header-breaking chars from a user filename
+    (prevents Content-Disposition header injection). Falls back to 'dokument'."""
+    name = (name or "").replace("\\", "/").split("/")[-1]
+    for ch in ('"', "\r", "\n", "\x00"):
+        name = name.replace(ch, "")
+    name = name.strip()[:120]
+    return name or "dokument"
+
+
 __all__ = [
     "_fuzzy_match",
     "_extract_first_iban", "_extract_first_phone", "_extract_first_address",
     "_safe_json_list",
     "_MAGIC_BYTES", "_validate_file_magic",
+    "ALLOWED_UPLOAD_MIME", "sniff_upload_mime", "sanitize_filename",
 ]

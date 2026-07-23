@@ -36,6 +36,7 @@ from autotax.models import (ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, Imm
                             ImmoUnit, ImmoTenancy, ImmoMahnung, ImmoEvent, ImmoLedgerEntry, UserCompany,
                             ImmoMietvertrag)
 from autotax import mietvertrag_template as _mvt
+from autotax.validators import sniff_upload_mime as _sniff_mime, sanitize_filename as _san_fn
 
 router = APIRouter(prefix="/immo", tags=["immobilien"])
 
@@ -718,8 +719,13 @@ def download_document(did: int, user: dict = Depends(get_current_user)):
             data = storage.read_file(d.file_path)
         except Exception:
             raise HTTPException(status_code=404, detail="Datei nicht gefunden")
-        return StreamingResponse(io.BytesIO(data), media_type=d.file_content_type or "application/octet-stream",
-                                 headers={"Content-Disposition": f'inline; filename="{d.filename or "dok"}"'})
+        # Security Hotfix SH-1a: never trust the stored (user-supplied) content_type; derive a safe
+        # MIME from the actual bytes, force ATTACHMENT + nosniff, sanitise the filename. This closes
+        # stored-XSS retroactively for old rows too — a HTML/SVG upload can't render at our origin.
+        safe_mime = _sniff_mime(data) or "application/octet-stream"
+        return StreamingResponse(io.BytesIO(data), media_type=safe_mime,
+                                 headers={"Content-Disposition": 'attachment; filename="%s"' % _san_fn(d.filename),
+                                          "X-Content-Type-Options": "nosniff"})
     finally:
         db.close()
 
