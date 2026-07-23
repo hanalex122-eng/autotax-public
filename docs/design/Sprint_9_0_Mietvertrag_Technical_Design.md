@@ -185,18 +185,18 @@ GET /immo/mietvertrag/{id}/pdf
 **Sorun:** mevcut tüm PDF'ler Helvetica/Latin-1 → Türkçe ş/ğ/İ/ı/ç `.notdef` (kutu) basar. Mieter/Vermieter
 adı sözleşmeye ham girer.
 
-**Strateji:**
-1. **Font dosyaları repoya eklenir:** `DejaVuSans.ttf` + `DejaVuSans-Bold.ttf` (+ opsiyonel `-Oblique`)
-   — `autotax/assets/fonts/` altında. Her biri <1 MB (`CLAUDE.md` binary sınırı içinde). DejaVu lisansı
-   (permissive) uygun.
-2. **Uygulama başlangıcında bir kez kayıt** (idempotent): `pdfmetrics.registerFont(TTFont("DejaVuSans", …))`
-   + Bold + `registerFontFamily`. Modül-düzeyi guard ile çift kayıt engellenir.
-3. **Mietvertrag stilleri bu fonta bağlanır:** `getSampleStyleSheet()` klonlarında `fontName="DejaVuSans"`.
-4. **Kapsam:** yalnız Mietvertrag PDF'i (diğer PDF'ler bu sprintte değişmez — dar kapsam, regresyon yok).
-   Not olarak: WGB/Mahnung/Protokoll de aynı Türkçe riskini taşıyor ama onlar **bu sprintin kapsamı dışı**
-   (ayrı bir iyileştirme; burada sadece Mietvertrag çözülür).
-5. **Test:** birim testi — Türkçe adlı (`Çağrı Şİğüö`) bir sözleşme render edilir, üretilen PDF'te font
-   `DejaVuSans` ve `.notdef` glyph yok (pdf byte içinde font adı doğrulanır).
+**Strateji (güncel — 9.0a'da uygulandı, product owner onayı 2026-07-23):** İlla DejaVu olmak zorunda değil;
+**"DejaVu veya eşdeğer bir Unicode TTF"** yeterli. Seçilen çözüm **reportlab-bundled Vera (Bitstream Vera
+Sans)** — repoya ekstra font binary'si eklenmez, prod'da garanti (reportlab requirements ile geliyor), ve
+Türkçe (ş/ğ/İ/ı/ç) + Almanca (ä/ö/ü/ß) + € tamamını **eksiksiz** basıyor (test doğrulandı).
+
+1. **`autotax/pdf_fonts.py`** — idempotent kayıt: **repo-bundled DejaVuSans** (`autotax/assets/fonts/`)
+   varsa onu, yoksa **reportlab-bundled Vera**'yı `"AtxUnicode"` ailesi (regular+bold) olarak kaydeder.
+   Böylece ileride DejaVu eklenirse otomatik ona geçer; bugün binary gerekmez.
+2. **Mietvertrag stilleri bu aileye bağlanır** (`fontName=FONT_NAME`), diğer PDF'lerin default'una dokunulmaz.
+3. **Kapsam:** yalnız Mietvertrag PDF'i. WGB/Mahnung/Protokoll aynı Türkçe riskini taşımaya devam eder ama
+   **bu sprintin kapsamı dışı** (ayrı iyileştirme).
+4. **Test (9.0a'da yeşil):** kayıtlı font'un face'inde tüm Türkçe+€³ glyph'leri var, `.notdef` yok.
 
 ---
 
