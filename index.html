@@ -3946,6 +3946,11 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const [akteProtO,setAkteProtO]=React.useState(false);
   const [akteProt,setAkteProt]=React.useState(null);   // GET /immo/protokolle?tenancy_id= (aktif sözleşmeler)
   const [akteZH,setAkteZH]=React.useState(null);       // GET /immo/units/{uid}/zaehler (geçmiş + Verbrauch)
+  // Sprint 9.0c — Mietvertrag (Akte-içi, lazy; Sprint 13 Protokolle/Zähler deseni). Yeni ekran/route YOK.
+  const [akteMvO,setAkteMvO]=React.useState(false);
+  const [akteMv,setAkteMv]=React.useState(null);       // GET /immo/mietvertraege?tenancy_id= (liste)
+  const [mvWiz,setMvWiz]=React.useState(null);         // {mid, vj, step, tid} veya null (kapalı)
+  const [mvBusy,setMvBusy]=React.useState(false);
   // Sprint 3.0: bir dairede birden fazla aktif sözleşme olabilir (Faz 3). Liste asıl kaynak;
   // akteActiveTen listenin ilkidir → N=1'de görünüm ve eager yüklemeler BİREBİR eskisi gibi kalır.
   const akteActiveTens=(uid)=>{const u=tncs.filter(t=>t.unit_id===uid);const a=u.filter(t=>!t.bis).sort((x,y)=>String(y.von||"").localeCompare(String(x.von||"")));return a.length?a:u.slice().sort((x,y)=>String(y.von||"").localeCompare(String(x.von||""))).slice(0,1);};
@@ -3967,8 +3972,8 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       api("/immo/tenancies/"+at.tenancy_id+"/mahnungen").then(setAkteMh).catch(()=>setAkteMh(false));}
     else{setAkteMk(null);setAkteMh(null);}
   };
-  const openAkte=(u)=>{setAkteU(u);setAkteMkOpen(false);setAkteNkO(false);setAkteZO(false);setAkteProtO(false);
-    setAkteProt(null);setAkteZH(null);   // daire değişti → daireye/sözleşmeye bağlı lazy veriler sıfırlanır
+  const openAkte=(u)=>{setAkteU(u);setAkteMkOpen(false);setAkteNkO(false);setAkteZO(false);setAkteProtO(false);setAkteMvO(false);
+    setAkteProt(null);setAkteZH(null);setAkteMv(null);setMvWiz(null);   // daire değişti → daireye/sözleşmeye bağlı lazy veriler sıfırlanır
     loadAkte(u,year);};
   const toggleAkteMk=()=>setAkteMkOpen(o=>!o);
   // Akte açıkken yıl değişirse veriyi tazele (yıl senkronizasyonu)
@@ -3985,6 +3990,22 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
   const toggleAkteZ=(uid)=>{if(akteZO){setAkteZO(false);return;}setAkteZO(true);
     if(akteZH===null)api("/immo/units/"+uid+"/zaehler").then(setAkteZH).catch(()=>setAkteZH(false));};
   const dlProtokoll=async(pid)=>{try{const r=await fetch(API+"/immo/protokolle/"+pid+"/pdf",{headers:{Authorization:"Bearer "+_tk()}});if(!r.ok){alert("PDF "+r.status);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Protokoll_"+pid+".pdf";a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(u);},1500);}catch(e){alert(e.message);}};
+  // Sprint 9.0c — Mietvertrag: lazy toggle (accordion kapalıyken API çağrısı YOK; ilk açılışta yükle,
+  // sonra cache). Sözleşme tenancy'ye bağlı → tid = aktif sözleşme.
+  const toggleAkteMv=(tid)=>{if(akteMvO){setAkteMvO(false);return;}setAkteMvO(true);
+    if(akteMv===null&&tid)api("/immo/mietvertraege?tenancy_id="+tid).then(d=>setAkteMv(d.mietvertraege||[])).catch(()=>setAkteMv(false));
+    else if(akteMv===null)setAkteMv([]);};
+  const mvReload=(tid)=>api("/immo/mietvertraege?tenancy_id="+tid).then(d=>setAkteMv(d.mietvertraege||[])).catch(()=>setAkteMv(false));
+  const dlMietvertrag=async(m)=>{try{const r=await fetch(API+"/immo/mietvertrag/"+m.id+"/pdf",{headers:{Authorization:"Bearer "+_tk()}});if(!r.ok){alert("PDF "+r.status);return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="Mietvertrag_"+m.tenancy_id+(m.revision?"_v"+m.revision:"")+".pdf";a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(u);},1500);}catch(e){alert(e.message);}};
+  const mvNew=async(tid)=>{setMvBusy(true);try{const r=await api("/immo/tenancies/"+tid+"/mietvertrag",{method:"POST",body:JSON.stringify({})});setMvWiz({mid:r.id,vj:r.vertrag_json||{},step:1,tid});}catch(e){alert(e.message);}finally{setMvBusy(false);}};
+  const mvEdit=(m,tid)=>setMvWiz({mid:m.id,vj:m.vertrag_json||{},step:1,tid});
+  const mvRevision=async(m,tid)=>{setMvBusy(true);try{const r=await api("/immo/mietvertrag/"+m.id+"/revision",{method:"POST"});await mvReload(tid);setMvWiz({mid:r.id,vj:r.vertrag_json||{},step:1,tid});}catch(e){alert(e.message);}finally{setMvBusy(false);}};
+  const mvDelete=async(m,tid)=>{if(!confirm(_L("Vertragsentwurf löschen?","Sözleşme taslağını sil?","Delete draft?")))return;try{await api("/immo/mietvertrag/"+m.id,{method:"DELETE"});await mvReload(tid);}catch(e){alert(e.message);}};
+  const mvPatch=(w)=>api("/immo/mietvertrag/"+w.mid,{method:"PATCH",body:JSON.stringify({vertrag_json:w.vj})});
+  const mvPreview=async(w)=>{setMvBusy(true);try{await mvPatch(w);await dlMietvertrag({id:w.mid,tenancy_id:w.tid,revision:0});}catch(e){alert(e.message);}finally{setMvBusy(false);}};
+  const mvFinalize=async(w)=>{if(!(w.vj&&w.vj.disclaimer_ack)){alert(_L("Bitte den Hinweis bestätigen.","Lütfen uyarıyı onaylayın.","Please confirm the notice."));return;}
+    if(!confirm(_L("Vertrag abschließen? Danach nicht mehr änderbar (nur neue Revision).","Sözleşme tamamlansın mı? Sonrasında değiştirilemez (sadece yeni revizyon).","Finalise? Not editable afterwards (only a new revision).")))return;
+    setMvBusy(true);try{await mvPatch(w);await api("/immo/mietvertrag/"+w.mid+"/finalisieren",{method:"POST"});setMvWiz(null);await mvReload(w.tid);if(showToast)showToast(_L("Mietvertrag abgeschlossen ✓","Sözleşme tamamlandı ✓","Contract finalised ✓"),"success");}catch(e){alert(e.message);}finally{setMvBusy(false);}};
   // Deep-link: hedef kiracıyı taşı (mevcut desen — bkz. atx_invoices_status), Akte'yi kapat.
   const gotoMieter=(tid)=>{try{if(tid)sessionStorage.setItem("atx_mieter_focus",String(tid));}catch(e){}setAkteU(null);if(onNav)onNav("mieter");};
   const [addTenFor,setAddTenFor]=React.useState(null);  // unit_id to add a tenancy
@@ -4260,6 +4281,77 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
       </div>;
       const _stateOf=(v)=>v===null?"loading":(v===false?"error":"ok");
       const retryAkte=()=>loadAkte(akteU,year);
+      // ── Sprint 9.0c — Mietvertrag Wizard (5 adım, Akte içi; finalize yalnız Vorschau'da açık onayla) ──
+      const mvUpd=(fn)=>setMvWiz(w=>{const vj=JSON.parse(JSON.stringify(w.vj||{}));fn(vj);return {...w,vj};});
+      const mvStep=(n)=>setMvWiz(w=>({...w,step:n}));
+      const _mi={width:"100%",boxSizing:"border-box",padding:"8px 10px",background:theme.surfaceAlt,border:"1px solid "+theme.border,borderRadius:8,color:theme.text,fontSize:13};
+      const _ml={fontSize:11,color:theme.textDim,display:"block",marginBottom:3};
+      const _UMLAGE=[["wasser","Wasser"],["abwasser","Abwasser"],["muell","Müll"],["grundsteuer","Grundsteuer"],["gebaeudeversicherung","Versicherung"],["hausmeister","Hausmeister"],["allgemeinstrom","Allgemeinstrom"],["gartenpflege","Garten"]];
+      const _mvWizard=(w)=>{const vj=w.vj||{};const kalt=parseFloat((vj.miete||{}).kaltmiete)||0;const cap=(kalt*3).toFixed(2);
+        const STEPS=[_L("Vertragstyp","Sözleşme tipi","Type"),_L("Miete / Kaution","Kira / Depozito","Rent / Deposit"),_L("Nebenkosten","Yan gider","Utilities"),_L("Zusatzoptionen","Ek seçenekler","Options"),_L("Vorschau","Önizleme","Preview")];
+        const nav=<div style={{display:"flex",justifyContent:"space-between",marginTop:12,gap:8}}>
+          <button style={{...css.btnOutline,padding:"7px 14px",fontSize:13}} onClick={()=>w.step>1?mvStep(w.step-1):setMvWiz(null)}>{w.step>1?"← "+_L("Zurück","Geri","Back"):_L("Abbrechen","İptal","Cancel")}</button>
+          {w.step<5?<button style={{...css.btn(theme.accent),padding:"7px 14px",fontSize:13}} disabled={mvBusy} onClick={async()=>{try{await mvPatch(w);}catch(e){}mvStep(w.step+1);}}>{_L("Weiter","Devam","Next")+" →"}</button>:null}
+        </div>;
+        return <div>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>{STEPS.map((s,i)=><span key={i} style={{fontSize:11,fontWeight:700,padding:"3px 8px",borderRadius:12,background:w.step===i+1?theme.accent:theme.surfaceAlt,color:w.step===i+1?"#fff":theme.textMuted}}>{i+1}. {s}</span>)}</div>
+          {w.step===1&&<div>
+            <label style={_ml}>{_L("Vertragstyp","Sözleşme tipi","Contract type")}</label>
+            {[["wohnraum_unbefristet",_L("Wohnraum — unbefristet","Konut — süresiz","Residential — open-ended")],["wohnraum_staffel",_L("Wohnraum — Staffelmiete (§557a)","Konut — kademeli kira","Residential — step rent")]].map(([v,l])=><label key={v} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",cursor:"pointer"}}><input type="radio" checked={(vj.vertrag_typ||"wohnraum_unbefristet")===v} onChange={()=>mvUpd(j=>j.vertrag_typ=v)}/><span style={{fontSize:13,color:theme.text}}>{l}</span></label>)}
+            {vj.vertrag_typ==="wohnraum_staffel"&&<div style={{marginTop:8,padding:"8px 10px",background:theme.surfaceAlt,borderRadius:8}}>
+              <div style={{fontSize:12,color:theme.textDim,marginBottom:6}}>{_L("Staffeln (ab-Datum · Kaltmiete)","Kademeler (tarih · kira)","Steps (from-date · rent)")}</div>
+              {((vj.mietzeit||{}).staffel_schritte||[]).map((s,i)=><div key={i} style={{display:"flex",gap:6,marginBottom:5}}>
+                <input type="date" style={{..._mi,flex:1}} value={s.ab||""} onChange={e=>mvUpd(j=>j.mietzeit.staffel_schritte[i].ab=e.target.value)}/>
+                <input type="number" style={{..._mi,width:110}} value={s.kaltmiete||""} onChange={e=>mvUpd(j=>j.mietzeit.staffel_schritte[i].kaltmiete=parseFloat(e.target.value)||0)}/>
+                <button style={{...css.btnOutline,padding:"4px 8px",fontSize:12,color:theme.danger}} onClick={()=>mvUpd(j=>j.mietzeit.staffel_schritte.splice(i,1))}>✕</button>
+              </div>)}
+              <button style={{...css.btnOutline,padding:"4px 10px",fontSize:12}} onClick={()=>mvUpd(j=>{j.mietzeit=j.mietzeit||{};j.mietzeit.staffel_schritte=j.mietzeit.staffel_schritte||[];j.mietzeit.staffel_schritte.push({ab:"",kaltmiete:kalt});})}>➕ {_L("Staffel","Kademe","Step")}</button>
+            </div>}
+            <div style={{marginTop:8}}><label style={_ml}>{_L("Mietbeginn","Başlangıç","Start")}</label><input type="date" style={_mi} value={(vj.mietzeit||{}).beginn||""} onChange={e=>mvUpd(j=>{j.mietzeit=j.mietzeit||{};j.mietzeit.beginn=e.target.value;})}/></div>
+          </div>}
+          {w.step===2&&<div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {[["kaltmiete",_L("Kaltmiete €","Kira €","Cold rent €")],["nk_voraus",_L("Nebenkosten €","Yan gider €","NK €")],["heizkosten_voraus",_L("Heizkosten €","Isıtma €","Heating €")]].map(([k,l])=><div key={k}><label style={_ml}>{l}</label><input type="number" style={_mi} value={(vj.miete||{})[k]!=null?(vj.miete||{})[k]:""} onChange={e=>mvUpd(j=>{j.miete=j.miete||{};j.miete[k]=e.target.value===""?null:parseFloat(e.target.value);})}/></div>)}
+            <div><label style={_ml}>{_L("Zahlungstermin (Werktag)","Ödeme günü","Payment day")}</label><input style={_mi} value={(vj.miete||{}).zahlungstermin||"3."} onChange={e=>mvUpd(j=>{j.miete=j.miete||{};j.miete.zahlungstermin=e.target.value;})}/></div>
+            <div><label style={_ml}>{_L("Bankverbindung (IBAN)","Banka (IBAN)","Bank (IBAN)")}</label><input style={_mi} value={(vj.miete||{}).bankverbindung||""} onChange={e=>mvUpd(j=>{j.miete=j.miete||{};j.miete.bankverbindung=e.target.value;})}/></div>
+            <div><label style={_ml}>{_L("Kaution €","Depozito €","Deposit €")}</label><input type="number" style={_mi} value={(vj.kaution||{}).betrag!=null?(vj.kaution||{}).betrag:""} onChange={e=>mvUpd(j=>{j.kaution=j.kaution||{};j.kaution.betrag=e.target.value===""?null:parseFloat(e.target.value);})}/>
+              {kalt>0&&(parseFloat((vj.kaution||{}).betrag)||0)>kalt*3&&<div style={{fontSize:11,color:"#f59e0b",marginTop:3}}>⚠ {_L("Höchstens 3 Kaltmieten","En fazla 3 kira","Max 3 rents")} ({_e(cap)}) — {_L("wird beim Abschluss begrenzt.","tamamlanırken sınırlanır.","capped at finalise.")}</div>}
+            </div>
+          </div>}
+          {w.step===3&&<div>
+            <label style={_ml}>{_L("Umlagefähige Betriebskosten","Yansıtılan yan giderler","Chargeable operating costs")}</label>
+            <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"1fr 1fr 1fr",gap:"4px 10px",marginTop:4}}>
+              {_UMLAGE.map(([k,l])=><label key={k} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:theme.text,cursor:"pointer"}}><input type="checkbox" checked={(vj.betriebskosten_umlage||[]).indexOf(k)>=0} onChange={e=>mvUpd(j=>{j.betriebskosten_umlage=j.betriebskosten_umlage||[];const i=j.betriebskosten_umlage.indexOf(k);if(e.target.checked&&i<0)j.betriebskosten_umlage.push(k);else if(!e.target.checked&&i>=0)j.betriebskosten_umlage.splice(i,1);})}/>{l}</label>)}
+            </div>
+          </div>}
+          {w.step===4&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div><label style={_ml}>{_L("Schönheitsreparaturen","Güzelleştirme onarımları","Cosmetic repairs")}</label>
+              {[["keine",_L("keine Abwälzung (Vermieter trägt)","kiracıya yüklenmez","landlord bears")],["bgh_gueltig",_L("nach Bedarf (BGH-gültig, ohne Fristenplan)","ihtiyaç halinde","as needed")]].map(([v,l])=><label key={v} style={{display:"flex",alignItems:"center",gap:8,padding:"3px 0",cursor:"pointer"}}><input type="radio" checked={((vj.klauseln||{}).schoenheitsrep||"keine")===v} onChange={()=>mvUpd(j=>{j.klauseln=j.klauseln||{};j.klauseln.schoenheitsrep=v;})}/><span style={{fontSize:13,color:theme.text}}>{l}</span></label>)}
+            </div>
+            <div><label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}><input type="checkbox" checked={!!((vj.klauseln||{}).kleinrep||{}).aktiv} onChange={e=>mvUpd(j=>{j.klauseln=j.klauseln||{};j.klauseln.kleinrep=j.klauseln.kleinrep||{};j.klauseln.kleinrep.aktiv=e.target.checked;})}/><span style={{fontSize:13,color:theme.text}}>{_L("Kleinreparaturen (mit Höchstgrenzen)","Küçük onarımlar (üst sınırla)","Small repairs (with caps)")}</span></label>
+              {((vj.klauseln||{}).kleinrep||{}).aktiv&&<div style={{display:"flex",gap:8,marginTop:6}}>
+                <div style={{flex:1}}><label style={_ml}>{_L("je Fall €","olay başı €","per case €")}</label><input type="number" style={_mi} value={((vj.klauseln||{}).kleinrep||{}).einzel_cap||100} onChange={e=>mvUpd(j=>{j.klauseln.kleinrep.einzel_cap=parseFloat(e.target.value)||0;})}/></div>
+                <div style={{flex:1}}><label style={_ml}>{_L("pro Jahr €","yıl başı €","per year €")}</label><input type="number" style={_mi} value={((vj.klauseln||{}).kleinrep||{}).jahres_cap||""} onChange={e=>mvUpd(j=>{j.klauseln.kleinrep.jahres_cap=e.target.value===""?null:parseFloat(e.target.value);})}/></div>
+              </div>}
+            </div>
+            <div><label style={_ml}>{_L("Mieter-Anschrift (optional)","Kiracı adresi (opsiyonel)","Tenant address (optional)")}</label><input style={_mi} value={((vj.parteien||{}).mieter||{}).adresse||""} onChange={e=>mvUpd(j=>{j.parteien=j.parteien||{};j.parteien.mieter=j.parteien.mieter||{};j.parteien.mieter.adresse=e.target.value;})}/></div>
+          </div>}
+          {w.step===5&&<div>
+            <div style={{background:theme.surfaceAlt,borderRadius:8,padding:"10px 12px",fontSize:13}}>
+              <div style={{fontWeight:700,color:theme.text,marginBottom:6}}>{vj.vertrag_typ==="wohnraum_staffel"?_L("Wohnraum · Staffelmiete","Konut · kademeli","Residential · step"):_L("Wohnraum · unbefristet","Konut · süresiz","Residential · open-ended")}</div>
+              <div>{_L("Mieter","Kiracı","Tenant")}: <b style={{color:theme.text}}>{((vj.parteien||{}).mieter||{}).name||"—"}</b></div>
+              <div>{_L("Wohnung","Daire","Flat")}: {((vj.objekt||{}).wohnung||"")} · {(vj.objekt||{}).wohnflaeche!=null?(vj.objekt||{}).wohnflaeche+" m²":""}</div>
+              <div>{_L("Miete","Kira","Rent")}: {_e((vj.miete||{}).kaltmiete)} + NK {_e((vj.miete||{}).nk_voraus)} + {_L("Heiz","Isı","Heat")} {_e((vj.miete||{}).heizkosten_voraus)}</div>
+              <div>{_L("Kaution","Depozito","Deposit")}: {_e((vj.kaution||{}).betrag)}{kalt>0&&(parseFloat((vj.kaution||{}).betrag)||0)>kalt*3?<span style={{color:"#f59e0b"}}> → {_e(cap)} ({_L("begrenzt","sınırlanır","capped")})</span>:null}</div>
+            </div>
+            <div style={{fontSize:11.5,color:"#f59e0b",marginTop:8}}>ℹ️ {_L("In Gebieten mit Mietpreisbremse gilt eine Obergrenze — bitte prüfen. Dieses Muster trifft dazu keine Aussage.","Kira sınırı olan bölgelerde üst sınır geçerlidir — lütfen kontrol edin.","Rent-cap areas have an upper limit — please check.")}</div>
+            <label style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:10,cursor:"pointer",fontSize:12.5,color:theme.text}}><input type="checkbox" checked={!!vj.disclaimer_ack} onChange={e=>mvUpd(j=>j.disclaimer_ack=e.target.checked)}/><span>{_L("Ich habe die Angaben geprüft. Muster ohne Gewähr, keine Rechtsberatung — ich versende eigenverantwortlich.","Bilgileri kontrol ettim. Örnek garantisizdir, hukuki tavsiye değildir — kendi sorumluluğumda.","I have checked the data. Template without warranty, not legal advice — I send it on my own responsibility.")}</span></label>
+            <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+              <button style={{...css.btnOutline,padding:"7px 14px",fontSize:13}} disabled={mvBusy} onClick={()=>mvPreview(w)}>👁 {_L("PDF-Vorschau","PDF önizleme","PDF preview")}</button>
+              <button style={{...css.btn(theme.accent),padding:"7px 14px",fontSize:13,opacity:(!vj.disclaimer_ack||mvBusy)?0.5:1}} disabled={!vj.disclaimer_ack||mvBusy} onClick={()=>mvFinalize(w)}>🔒 {_L("Fertigstellen","Tamamla","Finalise")}</button>
+            </div>
+          </div>}
+          {nav}
+        </div>;};
       const CP={green:{bg:"rgba(16,185,129,0.12)",bd:"rgba(16,185,129,0.4)",fg:theme.accent},red:{bg:"rgba(239,68,68,0.1)",bd:"rgba(239,68,68,0.4)",fg:theme.danger},amber:{bg:"rgba(245,158,11,0.12)",bd:"rgba(245,158,11,0.4)",fg:"#b45309"},grey:{bg:theme.surfaceAlt,bd:theme.border,fg:theme.textMuted}};
       const pill=(c)=>({display:"inline-flex",alignItems:"center",gap:4,padding:"5px 11px",borderRadius:20,fontSize:12.5,fontWeight:700,background:c.bg,border:"1px solid "+c.bd,color:c.fg});
       const _sec={...css.card,marginBottom:10,padding:"12px 14px"};
@@ -4380,6 +4472,31 @@ function ImmobilienView({refreshKey,triggerRefresh,onNav,showToast}){
               </div>
             </div>}
           </div>}
+          {/* Sprint 9.0c — Mietvertrag (Akte-içi, lazy; yeni ekran/route YOK). Wizard accordion içinde. */}
+          {at&&(()=>{const mvLatest=(akteMv&&akteMv.length)?akteMv[0]:null;return <div style={_sec}>
+            <div onClick={()=>toggleAkteMv(at.tenancy_id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
+              <div style={{..._h,marginBottom:0}}>📄 {_L("Mietvertrag","Kira sözleşmesi","Tenancy agreement")}</div>
+              <span style={{fontSize:13,color:theme.textMuted}}>{akteMv===null?(akteMvO?"…":""):akteMv===false?"⚠":mvLatest?(mvLatest.status==="final"?"🔒 "+_L("Final","Kesin","Final")+" v"+mvLatest.revision:_L("Entwurf","Taslak","Draft")):_L("Noch kein Vertrag","Henüz yok","None")} <span style={{color:theme.textDim}}>{akteMvO?"▾":"▸"}</span></span>
+            </div>
+            {akteMvO&&<div style={{marginTop:10,fontSize:13,color:theme.textMuted}}>
+              {akteMv===null?<div>{_L("lädt…","yükleniyor…","loading…")}</div>
+               :akteMv===false?_errBox(()=>{setAkteMv(null);setAkteMvO(false);setTimeout(()=>toggleAkteMv(at.tenancy_id),0);})
+               :mvWiz?_mvWizard(mvWiz):<div>
+                  {akteMv.length?<div>{akteMv.map(m=>(<div key={m.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid "+theme.border,flexWrap:"wrap"}}>
+                    <span>{m.status==="final"?<b style={{color:theme.accent}}>🔒 {_L("Final","Kesin","Final")}</b>:<span style={{color:"#f59e0b"}}>✎ {_L("Entwurf","Taslak","Draft")}</span>} <b>v{m.revision}</b> <span style={{color:theme.textDim,fontSize:12}}>{m.vertrag_typ==="wohnraum_staffel"?"· Staffel":""}{m.finalized_at?" · "+fmtD(m.finalized_at):""}</span></span>
+                    <span style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      <button style={{...css.btnOutline,padding:"4px 10px",fontSize:12}} onClick={()=>dlMietvertrag(m)}>📄 PDF</button>
+                      {m.status==="final"
+                        ? <button style={{...css.btnOutline,padding:"4px 10px",fontSize:12}} disabled={mvBusy} onClick={()=>mvRevision(m,at.tenancy_id)}>↻ {_L("Neue Revision","Yeni revizyon","New revision")}</button>
+                        : <React.Fragment><button style={{...css.btnOutline,padding:"4px 10px",fontSize:12,borderColor:theme.accent,color:theme.accent}} onClick={()=>mvEdit(m,at.tenancy_id)}>✎ {_L("Bearbeiten","Düzenle","Edit")}</button>
+                          <button style={{...css.btnOutline,padding:"4px 10px",fontSize:12,color:theme.danger,borderColor:theme.danger}} onClick={()=>mvDelete(m,at.tenancy_id)}>🗑</button></React.Fragment>}
+                    </span>
+                  </div>))}</div>:<div>{_L("Noch kein Mietvertrag für dieses Mietverhältnis.","Bu sözleşme için henüz kira sözleşmesi yok.","No tenancy agreement yet.")}</div>}
+                  <div style={{marginTop:10}}><button style={{...css.btn(theme.accent),padding:"7px 14px",fontSize:13}} disabled={mvBusy} onClick={()=>mvNew(at.tenancy_id)}>➕ {_L("Neuen Vertrag erstellen","Yeni sözleşme oluştur","Create new contract")}</button></div>
+                  <div style={{fontSize:11,color:theme.textDim,marginTop:8}}>ℹ️ {_L("Muster ohne Gewähr; keine Rechtsberatung.","Örnek, garanti verilmez; hukuki tavsiye değildir.","Template without warranty; not legal advice.")}</div>
+                </div>}
+            </div>}
+          </div>;})()}
           <div style={_sec}>
             <div onClick={()=>toggleAkteZ(akteU.unit_id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:8}}>
               <div style={{..._h,marginBottom:0}}>⚡ {_L("Zählerstände","Sayaçlar","Meter readings")}</div>
