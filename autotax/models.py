@@ -1188,3 +1188,29 @@ class ImmoLedgerEntry(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
+
+
+class ImmoMietvertrag(Base):
+    """One Wohnraummietvertrag (draft or finalised) for one tenancy (Sprint 9).
+
+    Document generator, NOT a second ledger — it never recomputes rent/debt. At finalise the
+    rendered document freezes into `vertrag_snapshot` (Principle A, same discipline as the NK
+    ergebnis_snapshot): a FINAL contract renders only from the snapshot, never from live master
+    data. A change means a NEW Revision (Principle B); the old row is kept as evidence. On finalise
+    the agreed Kaltmiete/NK/Kaution write back onto the tenancy through the normal update path
+    (one direction: contract → tenancy), so the Mietkonto stays one source of truth.
+    tenancy_id is a soft ref (no FK cascade), like immo_rent.tenancy_id."""
+    __tablename__ = "immo_mietvertrag"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    tenancy_id = Column(Integer, nullable=False, index=True)   # soft ref to immo_tenancy.id
+    status = Column(String(10), nullable=False, default="entwurf")   # entwurf | final
+    vertrag_json = Column(Text, nullable=True)        # structured choices (design §1); live while draft
+    vertrag_snapshot = Column(Text, nullable=True)    # frozen render() output at finalise (Principle A)
+    vertrag_version = Column(Integer, nullable=True)  # TEMPLATE_VERSION stamped at finalise
+    revision = Column(Integer, nullable=False, default=1)
+    supersedes_id = Column(Integer, nullable=True, index=True)   # which contract this revision replaced
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    finalized_at = Column(DateTime, nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)

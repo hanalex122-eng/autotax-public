@@ -33,7 +33,9 @@ from autotax.auth import get_current_user
 logger = logging.getLogger("autotax")
 from autotax.db import SessionLocal
 from autotax.models import (ImmoProperty, ImmoTenant, ImmoRent, ImmoExpense, ImmoDocument,
-                            ImmoUnit, ImmoTenancy, ImmoMahnung, ImmoEvent, ImmoLedgerEntry, UserCompany)
+                            ImmoUnit, ImmoTenancy, ImmoMahnung, ImmoEvent, ImmoLedgerEntry, UserCompany,
+                            ImmoMietvertrag)
+from autotax import mietvertrag_template as _mvt
 
 router = APIRouter(prefix="/immo", tags=["immobilien"])
 
@@ -3485,3 +3487,287 @@ def nk_pdf(aid: int, tenancy_id: Optional[int] = Query(None), user: dict = Depen
 def _fmt_eur(v) -> str:
     s = "{:,.2f}".format(float(v or 0))          # 1,234.56
     return "€ " + s.replace(",", "X").replace(".", ",").replace("X", ".")   # → 1.234,56
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Mietvertrag Generator (Sprint 9) — document generator, NOT a second ledger.
+# render/clauses live in autotax/mietvertrag_template.py (pure). Finalise freezes a
+# snapshot (Principle A) + write-back onto the tenancy (one direction: contract -> tenancy).
+# ══════════════════════════════════════════════════════════════════════
+class MietvertragIn(BaseModel):
+    vertrag_json: Optional[dict] = None      # bosSA auto-fill
+
+
+class MietvertragPatch(BaseModel):
+    vertrag_json: dict
+
+
+def _own_mietvertrag(db, uid: int, mid: int) -> ImmoMietvertrag:
+    m = db.query(ImmoMietvertrag).filter(ImmoMietvertrag.id == mid,
+                                         ImmoMietvertrag.user_id == uid, _notdel(ImmoMietvertrag)).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Mietvertrag nicht gefunden")
+    return m
+
+
+def _mv_editable(m: ImmoMietvertrag):
+    if m.status == "final":
+        raise HTTPException(status_code=409, detail="Vertrag ist abgeschlossen - Aenderung nur ueber eine neue Revision.")
+
+
+def _mv_autofill(db, uid: int, t: ImmoTenancy) -> dict:
+    u = db.query(ImmoUnit).filter(ImmoUnit.id == t.unit_id).first()
+    p = db.query(ImmoProperty).filter(ImmoProperty.id == (u.property_id if u else None)).first()
+    comp = (db.query(UserCompany).filter(UserCompany.user_id == uid, UserCompany.is_default == True).first()  # noqa: E712
+            or db.query(UserCompany).filter(UserCompany.user_id == uid).order_by(UserCompany.id.desc()).first())
+    return {
+        "vertrag_typ": "wohnraum_unbefristet",
+        "parteien": {
+            "vermieter": {"name": (comp.company_name if comp else ""), "adresse": (comp.address if comp else "")},
+            "mieter": {"name": t.mieter_name or "", "adresse": ""}},
+        "objekt": {"adresse": ((p.adresse if p and p.adresse else (p.name if p else "")) or ""),
+                   "wohnung": (u.name if u else ""), "wohnflaeche": (u.wohnflaeche if u else None)},
+        "mietzeit": {"beginn": str(t.von) if t.von else None},
+        "miete": {"kaltmiete": t.kaltmiete, "nk_voraus": t.nk_voraus,
+                  "heizkosten_voraus": getattr(t, "heizkosten_voraus", None),
+                  "zahlungstermin": "3.", "bankverbindung": (comp.iban if comp else "")},
+        "kaution": {"betrag": t.kaution, "art": "bar"},
+        "betriebskosten_umlage": [],
+        "klauseln": {"schoenheitsrep": "keine", "kleinrep": {"aktiv": False}},
+    }
+
+
+def _mv_writeback(t: ImmoTenancy, vj: dict):
+    """ONE DIRECTION: contract -> tenancy. Only sets tenancy columns; never recomputes Soll
+    (immo_rules derives it). No second ledger. Idempotent."""
+    m = vj.get("miete") or {}
+    k = vj.get("kaution") or {}
+    if m.get("kaltmiete") is not None:
+        t.kaltmiete = float(m["kaltmiete"])
+    if m.get("nk_voraus") is not None:
+        t.nk_voraus = float(m["nk_voraus"])
+    if m.get("heizkosten_voraus") is not None:
+        t.heizkosten_voraus = float(m["heizkosten_voraus"])
+    if k.get("betrag") is not None:
+        t.kaution = float(k["betrag"])
+    beginn = (vj.get("mietzeit") or {}).get("beginn")
+    if beginn:
+        d = _pdate(beginn)
+        if d:
+            t.von = d
+    if vj.get("vertrag_typ") == "wohnraum_staffel":
+        import json as _json
+        steps = (vj.get("mietzeit") or {}).get("staffel_schritte") or []
+        hist = [{"ab": str(s.get("ab"))[:10], "kalt": float(s.get("kaltmiete"))}
+                for s in steps if s.get("ab") and s.get("kaltmiete") is not None]
+        if hist:
+            t.miete_historie = _json.dumps(hist, ensure_ascii=False)
+
+
+def _mv_dict(m: ImmoMietvertrag) -> dict:
+    import json as _json
+    vj = _json.loads(m.vertrag_json) if m.vertrag_json else None
+    snap = _json.loads(m.vertrag_snapshot) if m.vertrag_snapshot else None
+    return {"id": m.id, "tenancy_id": m.tenancy_id, "status": m.status, "revision": m.revision,
+            "supersedes_id": m.supersedes_id, "vertrag_version": m.vertrag_version,
+            "vertrag_json": vj, "vertrag_typ": ((vj or {}).get("vertrag_typ") if vj else None),
+            "finalized_at": str(m.finalized_at) if m.finalized_at else None,
+            "created_at": str(m.created_at) if m.created_at else None,
+            "hat_snapshot": bool(snap)}
+
+
+@router.post("/tenancies/{tid}/mietvertrag")
+def create_mietvertrag(tid: int, body: MietvertragIn, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == tid, ImmoTenancy.user_id == uid,
+                                         _notdel(ImmoTenancy)).first()
+        if not t:
+            raise HTTPException(status_code=404, detail="Mietverhaeltnis nicht gefunden")
+        import json as _json
+        vj = body.vertrag_json or _mv_autofill(db, uid, t)
+        m = ImmoMietvertrag(user_id=uid, tenancy_id=tid, status="entwurf",
+                            vertrag_json=_json.dumps(vj, ensure_ascii=False), revision=1)
+        db.add(m); db.commit(); db.refresh(m)
+        return {"success": True, **_mv_dict(m)}
+    finally:
+        db.close()
+
+
+@router.patch("/mietvertrag/{mid}")
+def update_mietvertrag(mid: int, body: MietvertragPatch, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        m = _own_mietvertrag(db, uid, mid)
+        _mv_editable(m)
+        import json as _json
+        m.vertrag_json = _json.dumps(body.vertrag_json, ensure_ascii=False)
+        db.commit(); db.refresh(m)
+        return {"success": True, **_mv_dict(m)}
+    finally:
+        db.close()
+
+
+@router.get("/mietvertraege")
+def list_mietvertraege(tenancy_id: Optional[int] = Query(None), user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        q = db.query(ImmoMietvertrag).filter(ImmoMietvertrag.user_id == uid, _notdel(ImmoMietvertrag))
+        if tenancy_id:
+            q = q.filter(ImmoMietvertrag.tenancy_id == tenancy_id)
+        rows = q.order_by(ImmoMietvertrag.revision.desc(), ImmoMietvertrag.id.desc()).all()
+        return {"mietvertraege": [_mv_dict(m) for m in rows]}
+    finally:
+        db.close()
+
+
+@router.get("/mietvertrag/{mid}")
+def get_mietvertrag(mid: int, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        return {"success": True, **_mv_dict(_own_mietvertrag(db, uid, mid))}
+    finally:
+        db.close()
+
+
+@router.post("/mietvertrag/{mid}/finalisieren")
+def finalize_mietvertrag(mid: int, user: dict = Depends(get_current_user)):
+    """Freeze snapshot (Principle A) + lock (B) + write-back onto the tenancy (one direction)."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        m = _own_mietvertrag(db, uid, mid)
+        _mv_editable(m)
+        import json as _json
+        vj = _json.loads(m.vertrag_json) if m.vertrag_json else {}
+        if not vj.get("disclaimer_ack"):
+            raise HTTPException(status_code=400, detail="Bitte bestaetigen Sie den Hinweis (Muster ohne Gewaehr) vor dem Abschluss.")
+        rendered = _mvt.render(vj)
+        m.vertrag_snapshot = _json.dumps(rendered, ensure_ascii=False)
+        m.vertrag_version = rendered.get("template_version")
+        m.status = "final"
+        m.finalized_at = datetime.now(timezone.utc)
+        try:
+            vj_norm, _w = _mvt.apply_rails(vj)
+        except Exception:
+            vj_norm = vj
+        t = db.query(ImmoTenancy).filter(ImmoTenancy.id == m.tenancy_id, ImmoTenancy.user_id == uid).first()
+        if t:
+            _mv_writeback(t, vj_norm)
+        db.commit(); db.refresh(m)
+        return {"success": True, **_mv_dict(m)}
+    finally:
+        db.close()
+
+
+@router.post("/mietvertrag/{mid}/revision")
+def revise_mietvertrag(mid: int, user: dict = Depends(get_current_user)):
+    """Authorised correction (Principle B): a new draft revision. The old (final) row is untouched."""
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        old = _own_mietvertrag(db, uid, mid)
+        if old.status != "final":
+            raise HTTPException(status_code=400, detail="Nur ein abgeschlossener Vertrag kann revidiert werden.")
+        m = ImmoMietvertrag(user_id=uid, tenancy_id=old.tenancy_id, status="entwurf",
+                            vertrag_json=old.vertrag_json, revision=(old.revision or 1) + 1,
+                            supersedes_id=old.id)
+        db.add(m); db.commit(); db.refresh(m)
+        return {"success": True, **_mv_dict(m)}
+    finally:
+        db.close()
+
+
+@router.delete("/mietvertrag/{mid}")
+def delete_mietvertrag(mid: int, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        m = _own_mietvertrag(db, uid, mid)
+        if m.status == "final":
+            raise HTTPException(status_code=409, detail="Abgeschlossener Vertrag kann nicht geloescht werden (Nachweis).")
+        m.is_deleted = True
+        m.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"success": True, "deleted": mid}
+    finally:
+        db.close()
+
+
+def _mv_pdf_flowables(rendered: dict, ss, fn: str):
+    from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    title_st = ss["Title"].clone("mvTitle"); title_st.fontName = fn + "-Bold"
+    h_st = ss["Heading3"].clone("mvH"); h_st.fontName = fn + "-Bold"
+    body_st = ss["Normal"].clone("mvBody"); body_st.fontName = fn; body_st.leading = 14
+    small_st = ss["Normal"].clone("mvSmall"); small_st.fontName = fn; small_st.fontSize = 8
+    el = []
+    for b in rendered.get("blocks", []):
+        art = b.get("art")
+        if art == "titel":
+            el += [Paragraph(b["text"], title_st), Spacer(1, 6 * mm)]
+        elif art == "ueberschrift":
+            el += [Spacer(1, 3 * mm), Paragraph(b["text"], h_st)]
+        elif art == "absatz":
+            el += [Paragraph(b["text"], body_st), Spacer(1, 2 * mm)]
+        elif art == "tabelle":
+            rows = b.get("rows", [])
+            if rows:
+                tbl = Table([[Paragraph(str(c), body_st) for c in r] for r in rows],
+                            colWidths=[70 * mm, 60 * mm])
+                tbl.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+                                         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+                                         ("FONTNAME", (0, 0), (-1, -1), fn)]))
+                el += [tbl, Spacer(1, 2 * mm)]
+        elif art == "unterschrift":
+            line = "________________________"
+            sig = Table([[Paragraph("Ort, Datum: " + line, body_st), Paragraph("Ort, Datum: " + line, body_st)],
+                        [Paragraph("Vermieter", small_st), Paragraph("Mieter", small_st)]],
+                        colWidths=[85 * mm, 85 * mm])
+            el += [Spacer(1, 10 * mm), sig]
+        elif art == "disclaimer":
+            el += [Spacer(1, 6 * mm), Paragraph("<i>" + b["text"] + "</i>", small_st)]
+    return el
+
+
+@router.get("/mietvertrag/{mid}/pdf")
+def mietvertrag_pdf(mid: int, user: dict = Depends(get_current_user)):
+    uid = _uid(user)
+    db = SessionLocal()
+    try:
+        m = _own_mietvertrag(db, uid, mid)
+        import json as _json
+        if m.status == "final" and m.vertrag_snapshot:
+            rendered = _json.loads(m.vertrag_snapshot)
+        else:
+            rendered = _mvt.render(_json.loads(m.vertrag_json) if m.vertrag_json else {})
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate
+        from autotax.pdf_fonts import register_unicode_font
+        fn = register_unicode_font()
+        buf = io.BytesIO()
+        disc = _mvt.DISCLAIMER
+
+        def _footer(canvas, doc):
+            canvas.saveState()
+            canvas.setFont(fn, 7)
+            canvas.drawCentredString(A4[0] / 2, 10 * mm, disc[:120])
+            canvas.restoreState()
+
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=20 * mm,
+                                leftMargin=20 * mm, rightMargin=20 * mm, title="Mietvertrag")
+        doc.build(_mv_pdf_flowables(rendered, getSampleStyleSheet(), fn),
+                  onFirstPage=_footer, onLaterPages=_footer)
+        buf.seek(0)
+        fn_out = "Mietvertrag_%s%s.pdf" % (m.tenancy_id, ("_v%s" % m.revision) if m.revision else "")
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="%s"' % fn_out})
+    finally:
+        db.close()
