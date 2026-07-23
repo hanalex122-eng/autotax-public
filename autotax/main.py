@@ -12484,9 +12484,7 @@ def download_vault_file(invoice_id: int, mode: str = Query("inline"), user: dict
         inv = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.user_id == user["sub"]).first()
         if not inv:
             err(404, "Not found")
-        ct = inv.file_content_type or "application/octet-stream"
-        fname = inv.filename or "beleg"
-        disposition = "attachment" if mode == "attachment" else "inline"
+        fname = _sanitize_filename(inv.filename or "beleg")
         # Prefer disk; fall back to legacy BLOB for not-yet-migrated rows.
         if inv.file_path:
             from autotax import storage
@@ -12498,14 +12496,25 @@ def download_vault_file(invoice_id: int, mode: str = Query("inline"), user: dict
         else:
             err(404, "Kein Original gespeichert")
 
+        # Security Hotfix SH-1d: mirror SH-1a on the vault download. Derive the MIME from the actual
+        # bytes (never the stored/user content_type). Safe types (PDF/JPEG/PNG/WebP) may render inline;
+        # anything unsafe/unknown (e.g. a pre-hotfix HTML upload) is forced to octet-stream + attachment
+        # + nosniff, so it can never execute at our origin. Fully consistent with the new upload rules.
+        safe_mime = _sniff_upload_mime(data)
+        if not safe_mime:
+            return StreamingResponse(io.BytesIO(data), media_type="application/octet-stream",
+                                     headers={"Content-Disposition": 'attachment; filename="%s"' % fname,
+                                              "X-Content-Type-Options": "nosniff",
+                                              "Cache-Control": "private, max-age=86400"})
+        disposition = "attachment" if mode == "attachment" else "inline"
         _headers = {
-            "Content-Disposition": f"{disposition}; filename={fname}",
+            "Content-Disposition": '%s; filename="%s"' % (disposition, fname),
+            "X-Content-Type-Options": "nosniff",
             "Cache-Control": "private, max-age=86400",  # editor re-opens instantly
         }
-        # Inline PREVIEW of an image: downscale to <=1600px so the editor loads
-        # in ~1s instead of pulling a 5-10MB full-res phone photo (was minutes).
-        # Full resolution is still served for mode=attachment (download). Fail-soft.
-        if mode != "attachment" and ct.startswith("image/"):
+        # Inline PREVIEW of an image: downscale to <=1600px so the editor loads in ~1s instead of
+        # pulling a full-res phone photo. Gated on the DERIVED mime, not the stored one. Fail-soft.
+        if mode != "attachment" and safe_mime.startswith("image/"):
             try:
                 from PIL import Image, ImageOps
                 _im = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
@@ -12517,7 +12526,7 @@ def download_vault_file(invoice_id: int, mode: str = Query("inline"), user: dict
                 return StreamingResponse(_buf, media_type="image/jpeg", headers=_headers)
             except Exception as _pe:
                 logger.debug("preview resize failed, serving original: %s", _pe)
-        return StreamingResponse(io.BytesIO(data), media_type=ct, headers=_headers)
+        return StreamingResponse(io.BytesIO(data), media_type=safe_mime, headers=_headers)
     finally:
         db.close()
 

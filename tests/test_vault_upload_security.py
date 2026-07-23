@@ -71,8 +71,34 @@ def main():
     d = S(); inv = d.query(Invoice).get(1); ct = inv.file_content_type; fn = inv.filename; d.close()
     ok(ct == "application/pdf" and '"' not in (fn or ""), "content_type türedi + filename sanitize")
 
+    # ── SH-1d — Vault DOWNLOAD sertleştirme (SH-1a mirror) ──────────────
+    print("\n== SH-1d — Vault download ==")
+    from autotax.auth import get_acting_context
+    M.app.dependency_overrides[get_acting_context] = lambda: {"sub": 1, "email": "o@test.de"}
+    import autotax.storage as _st
+    # ESKİ kötü kayıt: HTML içerik, content_type text/html (SH öncesi)
+    rel_evil = _st.save_file(1, HTML, "evil.html")
+    de = S(); ev = Invoice(id=2, user_id=1, filename='ev"il.html', file_path=rel_evil,
+                           file_content_type="text/html", raw_text="", invoice_type="expense", status="pending")
+    de.add(ev); de.commit(); de.close()
+    r = cl.get("/vault/2/download?mode=inline")
+    ok(r.status_code == 200, "eski HTML kayıt indiriliyor (200)")
+    ok(r.headers.get("content-disposition", "").startswith("attachment"), "unsafe → attachment (inline talep edilse de)")
+    ok(r.headers.get("content-type", "").split(";")[0] == "application/octet-stream", "unsafe → octet-stream (text/html DEĞİL)")
+    ok(r.headers.get("x-content-type-options") == "nosniff", "nosniff header")
+    ok('"' not in r.headers.get("content-disposition", "").split("filename=")[-1].strip('"'), "filename sanitize")
+    # Güvenli PDF kaydı: inline serbest, ama MIME bytes'tan türer
+    rel_pdf = _st.save_file(1, PDF, "beleg.pdf")
+    dp = S(); pv = Invoice(id=3, user_id=1, filename="beleg.pdf", file_path=rel_pdf,
+                           file_content_type="application/pdf", raw_text="", invoice_type="expense", status="pending")
+    dp.add(pv); dp.commit(); dp.close()
+    r = cl.get("/vault/3/download?mode=inline")
+    ok(r.status_code == 200 and r.content == PDF, "güvenli PDF inline indiriliyor (içerik aynı)")
+    ok(r.headers.get("content-disposition", "").startswith("inline"), "güvenli tip → inline serbest")
+    ok(r.headers.get("content-type", "").split(";")[0] == "application/pdf", "PDF MIME bytes'tan türedi")
+
     M.app.dependency_overrides.clear()
-    print("\n=== SH-1c Vault: %d passed, %d failed ===" % (PASS, FAIL))
+    print("\n=== SH-1c+1d Vault: %d passed, %d failed ===" % (PASS, FAIL))
     sys.exit(1 if FAIL else 0)
 
 
